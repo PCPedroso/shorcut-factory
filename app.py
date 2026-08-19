@@ -367,6 +367,9 @@ if st.session_state.transcription_done:
         if not start_time or not end_time:
             st.warning("Preencha o tempo inicial e final.")
         else:
+            import importlib
+            import core.video_processor
+            importlib.reload(core.video_processor)
             from core.video_processor import download_full_video, cut_video, get_video_resolution
             
             video_id = get_video_id(video_url)

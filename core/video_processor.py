@@ -33,13 +33,21 @@ def download_full_video(url: str, output_path: str = "temp_video.mp4") -> dict:
         if os.path.exists(output_path):
             os.remove(output_path)
 
+        deno_exe = os.path.join(DENO_DIR, "deno.exe")
+        js_runtimes_cfg = {}
+        if os.path.exists(deno_exe):
+            js_runtimes_cfg['deno'] = {'path': deno_exe}
+        elif os.path.exists(r"C:\Program Files\nodejs\node.exe"):
+            js_runtimes_cfg['node'] = {'path': r"C:\Program Files\nodejs\node.exe"}
+
         ydl_opts = {
             'format': 'bestvideo[height<=1080]+bestaudio/best',
             'outtmpl': output_path,
             'merge_output_format': 'mp4',
             'ffmpeg_location': FFMPEG_DIR,
             'quiet': False,
-            'no_warnings': True
+            'no_warnings': True,
+            'js_runtimes': js_runtimes_cfg
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
