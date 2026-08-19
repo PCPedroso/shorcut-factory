@@ -140,14 +140,69 @@ if st.session_state.transcription_done:
         s = int(seconds % 60)
         return f"{h:02d}:{m:02d}:{s:02d}"
 
-    formatted_transcript = ""
-    for seg in st.session_state.segments:
-        formatted_transcript += f"[{format_time(seg['start'])} - {format_time(seg['end'])}] {seg['text']}\n"
+    from core.transcriber import build_youtube_transcript_blocks, format_badge_time
+    
+    yt_blocks = build_youtube_transcript_blocks(st.session_state.segments, target_duration=6.0)
 
-    src_badge = st.session_state.get("transcript_source", "Oficial / Whisper")
-    with st.expander(f"Ver Transcrição Completa ({src_badge})"):
-        st.caption(f"Fonte dos textos: **{src_badge}** | Total de trechos: **{len(st.session_state.segments)}**")
-        st.text_area("Texto:", value=formatted_transcript, height=300)
+    src_badge = st.session_state.get("transcript_source", "YouTube Oficial")
+    with st.expander(f"📜 Transcrição em Blocos (Estilo YouTube Oficial)", expanded=False):
+        col_search, col_cnt = st.columns([3, 1])
+        with col_search:
+            search_term = st.text_input("🔍 Pesquisar na transcrição:", placeholder="Ex: ministro, justiça, reforma, imposto...", key="yt_transcript_search")
+        
+        # Filtra blocos se houver termo de busca
+        displayed_blocks = yt_blocks
+        if search_term.strip():
+            displayed_blocks = [b for b in yt_blocks if search_term.lower() in b['text'].lower()]
+            with col_cnt:
+                st.caption(f"🎯 **{len(displayed_blocks)}** blocos encontrados")
+        else:
+            with col_cnt:
+                st.caption(f"Total: **{len(yt_blocks)}** blocos ({src_badge})")
+        
+        # Renderização visual com estilo idêntico ao dark mode do YouTube
+        blocks_html = """
+        <div style="
+            max-height: 420px;
+            overflow-y: auto;
+            background-color: #1a1a1a;
+            border-radius: 10px;
+            padding: 16px;
+            border: 1px solid #333333;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        ">
+        """
+        for b in displayed_blocks:
+            text_display = b['text']
+            if search_term.strip():
+                escaped = re.escape(search_term.strip())
+                text_display = re.sub(
+                    f"({escaped})",
+                    r"<mark style='background-color:#ffe082;color:#1a1a1a;font-weight:bold;padding:1px 4px;border-radius:3px;'>\1</mark>",
+                    text_display,
+                    flags=re.IGNORECASE
+                )
+            
+            blocks_html += f"""
+            <div style="display: flex; align-items: flex-start; margin-bottom: 12px; line-height: 1.5;">
+                <span style="
+                    display: inline-block;
+                    min-width: 50px;
+                    background-color: #2b2b2b;
+                    color: #58a6ff;
+                    font-size: 12px;
+                    font-weight: 700;
+                    padding: 3px 8px;
+                    border-radius: 12px;
+                    margin-right: 12px;
+                    text-align: center;
+                    letter-spacing: 0.5px;
+                ">{b['time_label']}</span>
+                <span style="color: #e6edf3; font-size: 14px; flex: 1;">{text_display}</span>
+            </div>
+            """
+        blocks_html += "</div>"
+        st.markdown(blocks_html, unsafe_allow_html=True)
     
     st.header("2. Inteligência Temática (Llama 3)")
     st.markdown("Use a Inteligência Artificial para extrair os tempos exatos para cortes.")
@@ -440,29 +495,56 @@ if st.session_state.transcription_done:
 
     # ── TAB 4: SELEÇÃO MANUAL ────────────────────────────────────────────────
     with tab_manual:
-        st.markdown("Navegue minuto a minuto pelos chunks de áudio e selecione início e fim:")
-        if chunks_list:
-            chunk_labels = [
-                f"[{format_time(c['start'])} - {format_time(c['end'])}]  {c['text'][:80]}..."
-                for c in chunks_list
+        st.markdown("Selecione os blocos exatos de início e fim da fala para definir o corte:")
+        
+        mode_manual = st.radio("Modo de Seleção:", ["📜 Blocos de Legenda (Estilo YouTube)", "⏱️ Intervalos de 1 Minuto"], horizontal=True)
+        
+        if mode_manual == "📜 Blocos de Legenda (Estilo YouTube)":
+            block_labels = [
+                f"[{b['time_label']}]  {b['text'][:90]}..."
+                for b in yt_blocks
             ]
             col_s, col_e = st.columns(2)
-            idx_start = col_s.selectbox("Chunk de Início:", range(len(chunks_list)),
-                                         format_func=lambda i: chunk_labels[i], key="manual_start")
-            idx_end = col_e.selectbox("Chunk de Fim:", range(len(chunks_list)),
-                                       format_func=lambda i: chunk_labels[i],
-                                       index=min(len(chunks_list)-1, 9), key="manual_end")
+            idx_start = col_s.selectbox("Fala de Início:", range(len(yt_blocks)),
+                                         format_func=lambda i: block_labels[i], key="yt_block_start")
+            idx_end = col_e.selectbox("Fala de Fim:", range(len(yt_blocks)),
+                                       format_func=lambda i: block_labels[i],
+                                       index=min(len(yt_blocks)-1, 50), key="yt_block_end")
             
             if idx_end >= idx_start:
-                start_s = chunks_list[idx_start]['start']
-                end_s = chunks_list[idx_end]['end']
-                st.success(f"Trecho: **{format_time(start_s)}** → **{format_time(end_s)}** ({(end_s - start_s)/60:.1f} min)")
-                if st.button("✂️ Usar este trecho na Fábrica de Cortes", key="btn_manual"):
+                start_s = yt_blocks[idx_start]['start']
+                end_s = yt_blocks[idx_end]['end']
+                st.success(f"Trecho Selecionado: **{format_time(start_s)}** → **{format_time(end_s)}** ({(end_s - start_s)/60:.1f} min)")
+                if st.button("✂️ Usar este trecho na Fábrica de Cortes", key="btn_manual_yt"):
                     st.session_state.final_start_time = format_time(start_s)
                     st.session_state.final_end_time = format_time(end_s)
-                    st.session_state.final_corte_title = "Corte Manual"
+                    st.session_state.final_corte_title = f"Corte Manual [{yt_blocks[idx_start]['time_label']} - {yt_blocks[idx_end]['time_label']}]"
                     st.session_state.cut_ready_banner = f"✅ Corte manual: [{format_time(start_s)} → {format_time(end_s)}]"
                     st.rerun()
+        else:
+            if chunks_list:
+                chunk_labels = [
+                    f"[{format_time(c['start'])} - {format_time(c['end'])}]  {c['text'][:80]}..."
+                    for c in chunks_list
+                ]
+                col_s, col_e = st.columns(2)
+                idx_start = col_s.selectbox("Chunk de Início:", range(len(chunks_list)),
+                                             format_func=lambda i: chunk_labels[i], key="manual_start")
+                idx_end = col_e.selectbox("Chunk de Fim:", range(len(chunks_list)),
+                                           format_func=lambda i: chunk_labels[i],
+                                           index=min(len(chunks_list)-1, 9), key="manual_end")
+                
+                if idx_end >= idx_start:
+                    start_s = chunks_list[idx_start]['start']
+                    end_s = chunks_list[idx_end]['end']
+                    st.success(f"Trecho: **{format_time(start_s)}** → **{format_time(end_s)}** ({(end_s - start_s)/60:.1f} min)")
+                    if st.button("✂️ Usar este trecho na Fábrica de Cortes", key="btn_manual"):
+                        st.session_state.final_start_time = format_time(start_s)
+                        st.session_state.final_end_time = format_time(end_s)
+                        st.session_state.final_corte_title = "Corte Manual"
+                        st.session_state.cut_ready_banner = f"✅ Corte manual: [{format_time(start_s)} → {format_time(end_s)}]"
+                        st.rerun()
+
 
     if 'ai_raw' in st.session_state and st.session_state.ai_raw:
         with st.expander("🔍 Detalhes do Log da IA (Debug)"):
