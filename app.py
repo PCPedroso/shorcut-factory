@@ -212,15 +212,22 @@ if st.session_state.transcription_done:
                 if checked:
                     selected_pauta_ids.append(p)
 
-            # Painel Dinâmico de Composição
+            # Painel Dinâmico de Composição (Sincronização em Tempo Real)
             if selected_pauta_ids:
                 total_composed_s = sum(x['duration_s'] for x in selected_pauta_ids)
                 total_min = total_composed_s / 60
                 earliest_start = min(selected_pauta_ids, key=lambda x: x['start_s'])['start']
                 latest_end = max(selected_pauta_ids, key=lambda x: x['end_s'])['end']
-                
+                composed_title = f"{selected_pauta_ids[0]['title']} (+ {len(selected_pauta_ids)-1} pautas)"
+
+                # Sincronização automática e instantânea com a Fábrica de Cortes (Seção 3)
+                st.session_state.final_start_time = earliest_start
+                st.session_state.final_end_time = latest_end
+                st.session_state.final_corte_title = composed_title
+                st.session_state.cut_ready_banner = f"✅ Composição ativa: [{earliest_start} → {latest_end}] ({composed_title})"
+
                 st.markdown("---")
-                st.markdown("#### ⏱️ Resumo da Composição Selecionada:")
+                st.markdown("#### ⏱️ Resumo da Composição Selecionada *(Sincronizado Automaticamente)*:")
                 
                 col_m1, col_m2, col_m3 = st.columns(3)
                 col_m1.metric("Pautas Selecionadas", f"{len(selected_pauta_ids)}")
@@ -228,18 +235,12 @@ if st.session_state.transcription_done:
                 col_m3.metric("Intervalo Contínuo", f"{earliest_start} → {latest_end}")
 
                 if total_min >= 10.0:
-                    st.success(f"✅ Meta de 10+ minutos atingida ({total_min:.1f} min)! Pronto para corte no YouTube.")
+                    st.success(f"✅ Meta de 10+ minutos atingida ({total_min:.1f} min)! Campos da Seção 3 preenchidos automaticamente.")
                 else:
                     st.info(f"⏳ Duração atual: {total_min:.1f} min. Faltam {(10.0 - total_min):.1f} min para atingir 10 minutos.")
-
-                composed_title = f"{selected_pauta_ids[0]['title']} (+ {len(selected_pauta_ids)-1} pautas)"
-                
-                if st.button("✂️ Usar Composição Selecionada na Fábrica de Cortes", key="btn_use_composed", type="primary"):
-                    st.session_state.final_start_time = earliest_start
-                    st.session_state.final_end_time = latest_end
-                    st.session_state.final_corte_title = composed_title
-                    st.session_state.cut_ready_banner = f"✅ Composição selecionada: [{earliest_start} → {latest_end}] ({composed_title})"
-                    st.rerun()
+            else:
+                if 'cut_ready_banner' in st.session_state:
+                    st.session_state.cut_ready_banner = ""
 
     # ── TAB 2: SÉRIES AUTOMÁTICAS ─────────────────────────────────────────────
     with tab_series:
