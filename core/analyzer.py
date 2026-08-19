@@ -1,66 +1,18 @@
 """
 analyzer.py — Inteligência Temática: Pautas, Compositor de Micro-Assuntos e Blocos
 
-Estratégia de Inteligência Robusta:
-1. Mapeamento Completo de Perguntas & Micro-Assuntos:
-   - Identifica cada pergunta feita pelos jornalistas ao longo de toda a entrevista.
-   - Suporta múltiplos formatos de resposta da IA (com timestamps, em markdown, ou lista pura).
-   - Sistema Híbrido: Se a IA omitir timestamps em algum item, o algoritmo localiza
-     automaticamente o minuto exato na transcrição através de casamento semântico de termos.
-
-2. Compositor Interativo de Cortes:
-   - Permite selecionar livremente múltiplos micro-assuntos e calcular o tempo total para 10+ min.
-
-3. Agrupador de Séries Automáticas:
-   - Monta séries encadeadas prontas de 10+ minutos para o YouTube.
+Estratégia Otimizada:
+1. Condensação Inteligente da Transcrição:
+   - Em vez de enviar milhares de palavras de ruído/pausa, envia os trechos de cada minuto
+     de forma concisa com timestamps claros [HH:MM:SS].
+2. Prompt Direto e Específico:
+   - Força Llama 3 / Qwen / Mistral a retornar estritamente a lista numerada de 8 a 15 pautas.
+3. Compositor de Pautas Interativo:
+   - Transforma as pautas em blocos temporais reais para composição e corte.
 """
 
 import ollama
 import re
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Prompts em Português Claro (Máxima Aderência p/ Llama 3, Mistral, Qwen 2.5)
-# ──────────────────────────────────────────────────────────────────────────────
-
-SYS_MSG = (
-    "Você é um especialista e produtor sênior de cortes de debates e entrevistas jornalísticas. "
-    "Sua função é mapear cada pergunta e mudança de assunto feita pelos jornalistas. "
-    "Responda apenas com a lista numerada de pautas."
-)
-
-PROMPT_MICRO_PAUTAS = """\
-Você é um produtor de conteúdo de vídeo analisando a transcrição de uma entrevista completa.
-Diferentes jornalistas fazem várias perguntas e mudam de assunto ao longo de todo o vídeo.
-
-SUA TAREFA:
-Identifique TODAS as perguntas individuais e trocas de pauta ao longo de todo o vídeo.
-Liste entre 6 a 15 pautas cobrindo do início ao fim da conversa.
-
-Para CADA pauta:
-- Indique o timestamp de início [HH:MM:SS] (ou [MM:SS]) em que o assunto/pergunta começou.
-- Forneça um título claro, jornalístico e conciso em português (ex: Pergunta sobre X, Discussão sobre Y).
-
-Formato estrito (uma linha por pauta):
-1. [00:00:00] Título da pauta
-2. [00:03:15] Título da pauta
-3. [00:06:40] Título da pauta
-
-Transcrição do vídeo:
-{transcricao}
-"""
-
-PROMPT_TEMAS_GANCHOS = """\
-Analise a transcrição abaixo e encontre de 3 a 6 momentos de alto impacto (máximo 60 segundos cada) para YouTube Shorts ou TikTok.
-Procure declarações polêmicas, frases fortes, revelações ou respostas marcantes.
-
-Formato:
-1. [00:02:15] "Declaração contundente sobre o assunto"
-2. [00:08:40] "Outra frase de alto impacto"
-
-Transcrição:
-{transcricao}
-"""
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -98,9 +50,7 @@ def format_duration_human(secs: float) -> str:
 def _clean_ai_title(title: str) -> str:
     """Remove ruídos, formatação markdown e introduções do título gerado pela IA."""
     title = title.strip()
-    # Remove aspas, dois pontos finais e markdown
     title = re.sub(r'[*_`"\'“”:]', '', title).strip()
-    # Remove números de lista no início (ex: '1.', '1 -', '01)')
     title = re.sub(r'^\s*\d+[\.\)\-:]\s*', '', title).strip()
     prefixes = [
         r'^Entendi[,\.\s]*',
@@ -117,38 +67,22 @@ def _clean_ai_title(title: str) -> str:
     return title
 
 
-def _find_best_chunk_start(topic_text: str, chunks_list: list) -> float:
+def _build_concise_transcript(chunks_list: list, chars_per_chunk: int = 140) -> str:
     """
-    Localiza o timestamp de início mais provável de um tópico na transcrição
-    através de correspondência de termos-chave (busca semântica local).
+    Condensa os chunks de 1 minuto em linhas objetivas com timestamp,
+    reduzindo o consumo de tokens e melhorando a atenção do LLM.
     """
-    if not chunks_list:
-        return 0.0
-
-    stop_words = {'para', 'sobre', 'com', 'que', 'dos', 'das', 'uma', 'como', 'mais', 'pelo', 'pela', 'qual', 'quando', 'pergunta', 'debate', 'discute', 'aborda'}
-    words = [w.lower() for w in re.findall(r'\b\w{4,}\b', topic_text) if w.lower() not in stop_words]
-    
-    if not words:
-        return 0.0
-
-    best_idx = 0
-    best_score = 0
-
-    for idx, c in enumerate(chunks_list):
-        c_text = c['text'].lower()
-        score = sum(1 for w in words if w in c_text)
-        if score > best_score:
-            best_score = score
-            best_idx = idx
-
-    return chunks_list[best_idx]['start']
+    lines = []
+    for c in chunks_list:
+        t_str = format_seconds_to_time(c['start'])
+        snippet = c['text'].strip()[:chars_per_chunk].replace('\n', ' ')
+        lines.append(f"[{t_str}] {snippet}...")
+    return "\n".join(lines)
 
 
 def _extract_topics_resilient(raw_text: str, chunks_list: list) -> list[dict]:
     """
-    Extrai lista de tópicos de forma resiliente a qualquer formato de resposta do LLM:
-    1. Procura linhas com timestamps em qualquer parte da linha.
-    2. Para linhas de lista sem timestamp, localiza o chunk pelo texto.
+    Extrai lista de tópicos no formato: 1. [00:05:00] Título do assunto.
     """
     topics = []
     time_regex = re.compile(r'(\d{1,2}:\d{2}(?::\d{2})?)')
@@ -158,8 +92,7 @@ def _extract_topics_resilient(raw_text: str, chunks_list: list) -> list[dict]:
         if not line or len(line) < 4:
             continue
 
-        # Ignora cabeçalhos, introduções e observações gerais
-        if any(h in line.lower() for h in ["example", "transcript", "aqui estão", "observações", "principais pontos", "sugestões"]):
+        if any(h in line.lower() for h in ["example", "transcript", "aqui estão", "observações", "principais pontos"]):
             continue
 
         is_numbered_main = bool(re.match(r'^\s*\d+[\.\)\-:]\s+', line))
@@ -175,7 +108,7 @@ def _extract_topics_resilient(raw_text: str, chunks_list: list) -> list[dict]:
                 start_s = parse_time_str_to_seconds(time_raw)
             else:
                 title_clean = _clean_ai_title(line)
-                start_s = _find_best_chunk_start(title_clean, chunks_list)
+                start_s = 0.0
                 time_raw = format_seconds_to_time(start_s)
 
             if len(title_clean) > 3:
@@ -185,10 +118,7 @@ def _extract_topics_resilient(raw_text: str, chunks_list: list) -> list[dict]:
                     "title": title_clean
                 })
 
-    # Ordena por timestamp
     topics = sorted(topics, key=lambda x: x["start_s"])
-
-    # Remove duplicidades de início
     unique_topics = []
     seen_starts = set()
     for t in topics:
@@ -198,10 +128,6 @@ def _extract_topics_resilient(raw_text: str, chunks_list: list) -> list[dict]:
 
     return unique_topics
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Estruturação de Micro-Pautas
-# ──────────────────────────────────────────────────────────────────────────────
 
 def build_micro_pautas(topics: list[dict], chunks_list: list) -> list[dict]:
     """
@@ -213,22 +139,8 @@ def build_micro_pautas(topics: list[dict], chunks_list: list) -> list[dict]:
     total_video_duration = chunks_list[-1]['end']
 
     if not topics:
-        # Fallback inteligente: se a IA não retornou nada, gera pautas a partir dos chunks de áudio
-        pautas = []
-        for i, c in enumerate(chunks_list):
-            pautas.append({
-                "id": i + 1,
-                "start": format_seconds_to_time(c['start']),
-                "end": format_seconds_to_time(c['end']),
-                "start_s": c['start'],
-                "end_s": c['end'],
-                "duration_s": c['end'] - c['start'],
-                "duration_label": format_duration_human(c['end'] - c['start']),
-                "title": f"Trecho {i + 1}: {c['text'][:60]}..."
-            })
-        return pautas
+        return []
 
-    # Garante cobertura desde o início se o primeiro tópico não começar em 0
     if topics[0]["start_s"] > 30.0:
         topics.insert(0, {
             "start_str": "00:00:00",
@@ -249,8 +161,7 @@ def build_micro_pautas(topics: list[dict], chunks_list: list) -> list[dict]:
 
         duration_s = max(0, end_s - start_s)
         
-        # Ignora pautas ultracurtas (< 15s) exceto se for a última
-        if duration_s < 15 and i + 1 < len(topics):
+        if duration_s < 10 and i + 1 < len(topics):
             continue
 
         pautas.append({
@@ -266,10 +177,6 @@ def build_micro_pautas(topics: list[dict], chunks_list: list) -> list[dict]:
 
     return pautas
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Agrupamento Automático em Séries (10+ min)
-# ──────────────────────────────────────────────────────────────────────────────
 
 def build_suggested_bundles(pautas: list[dict], min_minutes: int = 10) -> list[dict]:
     """
@@ -370,25 +277,55 @@ def analyze_transcript(chunked_transcript: str, mode: str = "pautas",
                        model: str = "llama3",
                        chunks_list: list = None) -> dict:
     """
-    Executa a identificação de pautas ou ganchos no Ollama com parsing resiliente.
+    Executa a identificação de pautas ou ganchos no Ollama com prompting otimizado.
     """
     log = []
 
     try:
-        prompt = PROMPT_MICRO_PAUTAS if mode in ("pautas", "blocos") else PROMPT_TEMAS_GANCHOS
+        # Usa representação concisa dos chunks para máxima atenção da IA
+        if chunks_list:
+            concise_text = _build_concise_transcript(chunks_list)
+        else:
+            concise_text = chunked_transcript
+
+        if mode in ("pautas", "blocos"):
+            prompt = f"""Analise a lista de trechos da entrevista abaixo.
+Extraia uma lista numerada contendo apenas as perguntas ou assuntos novos abordados.
+
+Regras:
+- Responda OBRIGATORIAMENTE em português.
+- Use estritamente o formato: 1. [HH:MM:SS] Título do assunto
+- Não escreva introduções, resumos ou conclusões.
+
+Exemplo de formato:
+1. [00:00:00] Pergunta sobre reforma do Estado e nomes de ministros
+2. [00:01:00] Modelo da Justiça do Trabalho e contratações
+3. [00:06:00] Recursos do Banco Master e produção cinematográfica
+4. [00:14:00] Redução da maioridade penal e novos presídios
+
+Transcrição da entrevista:
+{concise_text}"""
+        else:
+            prompt = f"""Analise os trechos abaixo e encontre de 3 a 6 momentos de alto impacto (máximo 60 segundos cada) para YouTube Shorts ou TikTok.
+Formato estrito:
+1. [00:02:15] "Declaração contundente sobre o assunto"
+2. [00:08:40] "Outra frase de alto impacto"
+
+Transcrição:
+{concise_text}"""
 
         response = ollama.chat(
             model=model,
             messages=[
-                {'role': 'system', 'content': SYS_MSG},
-                {'role': 'user', 'content': prompt.format(transcricao=chunked_transcript)},
+                {'role': 'system', 'content': 'Responda estritamente no formato de lista solicitado. Não converse nem explique.'},
+                {'role': 'user', 'content': prompt},
             ]
         )
 
         raw_content = response['message']['content']
         log.append(f"=== RESPOSTA DO MODELO ({model}) ===\n{raw_content}")
 
-        # Extração resiliente de tópicos
+        # Extração de tópicos
         topics = _extract_topics_resilient(raw_content, chunks_list or [])
 
         log.append(f"\n=== TÓPICOS/PAUTAS PROCESSADOS ({len(topics)}) ===")
