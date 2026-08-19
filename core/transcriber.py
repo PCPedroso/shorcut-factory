@@ -94,11 +94,14 @@ def format_badge_time(seconds: float) -> str:
 
 
 
-def build_youtube_transcript_blocks(segments: list, min_duration: float = 5.8) -> list:
+def build_youtube_transcript_blocks(segments: list, min_duration: float = 5.8, target_duration: float = None, **kwargs) -> list:
     """
     Agrupa snippets de transcrição em blocos visuais de parágrafo no estilo exato do YouTube,
     respeitando as pausas e quebras de interlocutor [0:00, 0:06, 0:12, 0:19, 0:27...].
     """
+    if target_duration is not None:
+        min_duration = target_duration
+
     blocks = []
     if not segments:
         return blocks

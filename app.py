@@ -142,7 +142,7 @@ if st.session_state.transcription_done:
 
     from core.transcriber import build_youtube_transcript_blocks, format_badge_time
     
-    yt_blocks = build_youtube_transcript_blocks(st.session_state.segments, target_duration=6.0)
+    yt_blocks = build_youtube_transcript_blocks(st.session_state.segments)
 
     src_badge = st.session_state.get("transcript_source", "YouTube Oficial")
     with st.expander(f"📜 Transcrição em Blocos (Estilo YouTube Oficial)", expanded=False):
