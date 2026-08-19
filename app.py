@@ -235,7 +235,10 @@ if st.session_state.transcription_done:
                 composed_title = f"{selected_pauta_ids[0]['title']} (+ {len(selected_pauta_ids)-1} pautas)"
                 
                 if st.button("✂️ Usar Composição Selecionada na Fábrica de Cortes", key="btn_use_composed", type="primary"):
-                    st.session_state.selected_cut = (earliest_start, latest_end, composed_title)
+                    st.session_state.final_start_time = earliest_start
+                    st.session_state.final_end_time = latest_end
+                    st.session_state.final_corte_title = composed_title
+                    st.session_state.cut_ready_banner = f"✅ Composição selecionada: [{earliest_start} → {latest_end}] ({composed_title})"
                     st.rerun()
 
     # ── TAB 2: SÉRIES AUTOMÁTICAS ─────────────────────────────────────────────
@@ -272,7 +275,10 @@ if st.session_state.transcription_done:
                                     st.write(f"• {pt}")
                     with col_btn:
                         if st.button("✂️ Usar", key=f"btn_use_bundle_{idx}"):
-                            st.session_state.selected_cut = (b['start'], b['end'], b['title'])
+                            st.session_state.final_start_time = b['start']
+                            st.session_state.final_end_time = b['end']
+                            st.session_state.final_corte_title = b['title']
+                            st.session_state.cut_ready_banner = f"✅ Série selecionada: [{b['start']} → {b['end']}] ({b['title']})"
                             st.rerun()
                     st.divider()
 
@@ -303,7 +309,10 @@ if st.session_state.transcription_done:
                         st.caption(s.get('notes', ''))
                     with col_btn:
                         if st.button("✂️ Usar", key=f"btn_use_short_{idx}"):
-                            st.session_state.selected_cut = (s['start'], s['end'], s['title'])
+                            st.session_state.final_start_time = s['start']
+                            st.session_state.final_end_time = s['end']
+                            st.session_state.final_corte_title = s['title']
+                            st.session_state.cut_ready_banner = f"✅ Short selecionado: [{s['start']} → {s['end']}] ({s['title']})"
                             st.rerun()
                     st.divider()
 
@@ -327,7 +336,10 @@ if st.session_state.transcription_done:
                 end_s = chunks_list[idx_end]['end']
                 st.success(f"Trecho: **{format_time(start_s)}** → **{format_time(end_s)}** ({(end_s - start_s)/60:.1f} min)")
                 if st.button("✂️ Usar este trecho na Fábrica de Cortes", key="btn_manual"):
-                    st.session_state.selected_cut = (format_time(start_s), format_time(end_s), "Corte Manual")
+                    st.session_state.final_start_time = format_time(start_s)
+                    st.session_state.final_end_time = format_time(end_s)
+                    st.session_state.final_corte_title = "Corte Manual"
+                    st.session_state.cut_ready_banner = f"✅ Corte manual: [{format_time(start_s)} → {format_time(end_s)}]"
                     st.rerun()
 
     if 'ai_raw' in st.session_state and st.session_state.ai_raw:
@@ -338,16 +350,18 @@ if st.session_state.transcription_done:
     st.header("3. Fábrica de Cortes (Recorte Final)")
     st.markdown("Baixe o vídeo real usando o trecho selecionado.")
     
-    # Preenchimento automático se um corte foi selecionado
-    default_start = ""
-    default_end = ""
-    if 'selected_cut' in st.session_state and st.session_state.selected_cut:
-        default_start = st.session_state.selected_cut[0]
-        default_end = st.session_state.selected_cut[1]
+    if 'cut_ready_banner' in st.session_state and st.session_state.cut_ready_banner:
+        st.success(st.session_state.cut_ready_banner)
     
+    if 'final_start_time' not in st.session_state:
+        st.session_state.final_start_time = ""
+    if 'final_end_time' not in st.session_state:
+        st.session_state.final_end_time = ""
+
     col_start, col_end = st.columns(2)
-    start_time = col_start.text_input("Tempo Inicial", value=default_start, placeholder="00:01:25")
-    end_time = col_end.text_input("Tempo Final", value=default_end, placeholder="00:02:30")
+    start_time = col_start.text_input("Tempo Inicial (HH:MM:SS)", key="final_start_time", placeholder="00:00:00")
+    end_time = col_end.text_input("Tempo Final (HH:MM:SS)", key="final_end_time", placeholder="00:10:00")
+
     
     if st.button("✂️ Gerar Corte Viral"):
         if not start_time or not end_time:
