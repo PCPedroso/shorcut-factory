@@ -160,49 +160,27 @@ if st.session_state.transcription_done:
             with col_cnt:
                 st.caption(f"Total: **{len(yt_blocks)}** blocos ({src_badge})")
         
-        # Renderização visual com estilo idêntico ao dark mode do YouTube
-        blocks_html = """
-        <div style="
-            max-height: 420px;
-            overflow-y: auto;
-            background-color: #1a1a1a;
-            border-radius: 10px;
-            padding: 16px;
-            border: 1px solid #333333;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        ">
-        """
-        for b in displayed_blocks:
-            text_display = b['text']
-            if search_term.strip():
-                escaped = re.escape(search_term.strip())
-                text_display = re.sub(
-                    f"({escaped})",
-                    r"<mark style='background-color:#ffe082;color:#1a1a1a;font-weight:bold;padding:1px 4px;border-radius:3px;'>\1</mark>",
-                    text_display,
-                    flags=re.IGNORECASE
+        # Container nativo do Streamlit com rolagem e renderização visual limpa
+        with st.container(height=420):
+            for b in displayed_blocks:
+                text_display = b['text']
+                if search_term.strip():
+                    escaped = re.escape(search_term.strip())
+                    text_display = re.sub(
+                        f"({escaped})",
+                        r"<mark style='background-color:#ffe082;color:#111;font-weight:bold;padding:1px 4px;border-radius:3px;'>\1</mark>",
+                        text_display,
+                        flags=re.IGNORECASE
+                    )
+                
+                # HTML em linha única sem recuo de espaços para não ser interpretado como código
+                line_html = (
+                    f"<div style='display:flex;align-items:flex-start;margin-bottom:10px;line-height:1.5;'>"
+                    f"<span style='display:inline-block;min-width:48px;background-color:#2b2b2b;color:#58a6ff;font-size:12px;font-weight:700;padding:2px 8px;border-radius:12px;margin-right:12px;text-align:center;letter-spacing:0.5px;'>{b['time_label']}</span>"
+                    f"<span style='color:#e6edf3;font-size:14px;flex:1;'>{text_display}</span>"
+                    f"</div>"
                 )
-            
-            blocks_html += f"""
-            <div style="display: flex; align-items: flex-start; margin-bottom: 12px; line-height: 1.5;">
-                <span style="
-                    display: inline-block;
-                    min-width: 50px;
-                    background-color: #2b2b2b;
-                    color: #58a6ff;
-                    font-size: 12px;
-                    font-weight: 700;
-                    padding: 3px 8px;
-                    border-radius: 12px;
-                    margin-right: 12px;
-                    text-align: center;
-                    letter-spacing: 0.5px;
-                ">{b['time_label']}</span>
-                <span style="color: #e6edf3; font-size: 14px; flex: 1;">{text_display}</span>
-            </div>
-            """
-        blocks_html += "</div>"
-        st.markdown(blocks_html, unsafe_allow_html=True)
+                st.markdown(line_html, unsafe_allow_html=True)
     
     st.header("2. Inteligência Temática (Llama 3)")
     st.markdown("Use a Inteligência Artificial para extrair os tempos exatos para cortes.")
