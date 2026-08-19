@@ -201,14 +201,51 @@ if st.session_state.transcription_done:
 
         if 'pautas' in st.session_state and st.session_state.pautas:
             pautas = st.session_state.pautas
-            st.markdown(f"### 📋 Pautas Detectadas ({len(pautas)} encontradas):")
-            st.caption("Marque as caixas das pautas que deseja juntar no corte final:")
+            
+            # Carrega passos salvos do disco se existirem
+            video_id = get_video_id(video_url)
+            steps_file = os.path.join("data", video_id, "saved_steps.json") if video_id else "data/saved_steps.json"
+            if 'saved_steps' not in st.session_state:
+                if os.path.exists(steps_file):
+                    try:
+                        with open(steps_file, "r", encoding="utf-8") as f:
+                            st.session_state.saved_steps = json.load(f)
+                    except Exception:
+                        st.session_state.saved_steps = []
+                else:
+                    st.session_state.saved_steps = []
+
+            def _save_steps_to_disk():
+                os.makedirs(os.path.dirname(steps_file), exist_ok=True)
+                with open(steps_file, "w", encoding="utf-8") as f:
+                    json.dump(st.session_state.saved_steps, f, indent=2, ensure_ascii=False)
+
+            col_head1, col_head2 = st.columns([3, 2])
+            with col_head1:
+                st.markdown(f"### 📋 Pautas Detectadas ({len(pautas)} encontradas):")
+                st.caption("Marque as caixas das pautas que deseja juntar no corte final:")
+            with col_head2:
+                col_btn_uncheck, col_btn_reanalyze = st.columns(2)
+                with col_btn_uncheck:
+                    if st.button("🧹 Desmarcar Tudo", key="btn_uncheck_all", help="Limpa as seleções para iniciar um novo corte"):
+                        for p in pautas:
+                            st.session_state[f"chk_pauta_{p['id']}"] = False
+                        st.rerun()
+                with col_btn_reanalyze:
+                    if st.button("🔄 Refazer Mapeamento", key="btn_reanalyze_ai", help="Limpa o mapeamento atual e permite re-executar a IA"):
+                        st.session_state.pautas = []
+                        st.session_state.bundles = []
+                        st.session_state.ai_raw = ""
+                        st.rerun()
 
             selected_pauta_ids = []
             
             for p in pautas:
                 label = f"**[{p['start']} - {p['end']}]** `({p['duration_label']})` — {p['title']}"
-                checked = st.checkbox(label, key=f"chk_pauta_{p['id']}")
+                chk_key = f"chk_pauta_{p['id']}"
+                if chk_key not in st.session_state:
+                    st.session_state[chk_key] = False
+                checked = st.checkbox(label, key=chk_key)
                 if checked:
                     selected_pauta_ids.append(p)
 
@@ -238,9 +275,72 @@ if st.session_state.transcription_done:
                     st.success(f"✅ Meta de 10+ minutos atingida ({total_min:.1f} min)! Campos da Seção 3 preenchidos automaticamente.")
                 else:
                     st.info(f"⏳ Duração atual: {total_min:.1f} min. Faltam {(10.0 - total_min):.1f} min para atingir 10 minutos.")
+
+                # Botão para guardar o passo atual
+                if st.button("💾 Guardar esta Seleção como Passo/Corte", key="btn_save_current_step", type="secondary"):
+                    step_num = len(st.session_state.saved_steps) + 1
+                    new_step = {
+                        "id": f"step_{step_num}_{int(total_composed_s)}",
+                        "title": f"Corte #{step_num}: {composed_title}",
+                        "start": earliest_start,
+                        "end": latest_end,
+                        "duration_label": f"{int(total_min)}m {int(total_composed_s%60):02d}s",
+                        "pauta_ids": [p['id'] for p in selected_pauta_ids],
+                        "pautas_titles": [p['title'] for p in selected_pauta_ids]
+                    }
+                    st.session_state.saved_steps.append(new_step)
+                    _save_steps_to_disk()
+                    st.success(f"🎉 Passo #{step_num} guardado com sucesso!")
+                    st.rerun()
+
             else:
                 if 'cut_ready_banner' in st.session_state:
                     st.session_state.cut_ready_banner = ""
+
+            # ── PAINEL DE PASSOS GUARDADOS ────────────────────────────────────────
+            st.markdown("---")
+            st.markdown("### 🗂️ Histórico de Passos / Cortes Salvos:")
+            if 'saved_steps' in st.session_state and st.session_state.saved_steps:
+                st.caption(f"Você possui **{len(st.session_state.saved_steps)} passos/cortes** guardados. Você pode refazer/carregar a seleção, gerar o corte ou excluir cada passo individualmente:")
+                
+                for idx, step in enumerate(st.session_state.saved_steps):
+                    with st.container():
+                        col_s_info, col_s_redo, col_s_del = st.columns([4, 1.2, 1])
+                        with col_s_info:
+                            st.markdown(f"**Passo #{idx+1}**: `[{step['start']} → {step['end']}]` **{step['title']}**")
+                            st.caption(f"⏱️ Duração: **{step['duration_label']}** | {len(step.get('pauta_ids', []))} pautas inclusas")
+                            if step.get('pautas_titles'):
+                                with st.expander(f"Ver pautas do Passo #{idx+1}"):
+                                    for pt in step['pautas_titles']:
+                                        st.write(f"• {pt}")
+                        
+                        with col_s_redo:
+                            if st.button("🔁 Refazer / Carregar", key=f"btn_redo_step_{idx}", help="Restaura esta seleção nos checkboxes e nos campos de corte"):
+                                # Restaura os checkboxes
+                                target_ids = set(step.get('pauta_ids', []))
+                                for p in pautas:
+                                    st.session_state[f"chk_pauta_{p['id']}"] = (p['id'] in target_ids)
+                                st.session_state.final_start_time = step['start']
+                                st.session_state.final_end_time = step['end']
+                                st.session_state.final_corte_title = step['title']
+                                st.session_state.cut_ready_banner = f"✅ Passo #{idx+1} carregado: [{step['start']} → {step['end']}] ({step['title']})"
+                                st.rerun()
+
+                        with col_s_del:
+                            if st.button("🗑️ Excluir", key=f"btn_del_step_{idx}", help="Remove este passo da lista"):
+                                st.session_state.saved_steps.pop(idx)
+                                _save_steps_to_disk()
+                                st.rerun()
+                        st.divider()
+
+                if st.button("🗑️ Excluir Todos os Passos", key="btn_clear_all_steps"):
+                    st.session_state.saved_steps = []
+                    _save_steps_to_disk()
+                    st.success("Todos os passos foram excluídos.")
+                    st.rerun()
+            else:
+                st.info("Nenhum passo guardado ainda. Selecione pautas acima e clique em **'💾 Guardar esta Seleção como Passo/Corte'** para montar sua fila de cortes!")
+
 
     # ── TAB 2: SÉRIES AUTOMÁTICAS ─────────────────────────────────────────────
     with tab_series:
