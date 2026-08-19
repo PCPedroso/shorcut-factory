@@ -165,101 +165,174 @@ if st.session_state.transcription_done:
         for c in chunks_list
     )
 
-    # --- Seção 2A: Seletor Manual ---
-    st.header("2. Seleção de Cortes")
+    # --- Seção 2: Seleção de Cortes e Compositor ---
+    st.header("2. Seleção e Composição de Cortes")
     
-    tab_manual, tab_ai = st.tabs(["🖱️ Seleção Manual", "🧠 Sugestão por IA (Llama 3)"])
+    tab_composer, tab_series, tab_shorts, tab_manual = st.tabs([
+        "🧩 Compositor de Pautas (Micro-Assuntos)",
+        "💡 Séries Sugeridas (10+ min)",
+        "🔥 Ganchos Virais (Shorts)",
+        "🖱️ Seleção Manual (Chunks)"
+    ])
     
-    with tab_manual:
-        st.markdown("Selecione o chunk de **início** e o chunk de **fim** do trecho que deseja cortar.")
+    # ── TAB 1: COMPOSITOR DE PAUTAS ───────────────────────────────────────────
+    with tab_composer:
+        st.markdown(
+            "Em entrevistas e podcasts dinâmicos, repórteres mudam de assunto a cada 1-4 minutos. "
+            "Use a IA para mapear todas as pautas e selecione múltiplas para compor cortes de **10+ minutos**."
+        )
         
+        col_act1, col_act2 = st.columns([1, 2])
+        with col_act1:
+            if st.button("🔍 Mapear Todas as Pautas (IA)", key="btn_map_pautas"):
+                with st.spinner("Mapeando perguntas e mudanças de pauta com IA..."):
+                    res = analyze_transcript(
+                        chunked_transcript, "pautas",
+                        model=ollama_model,
+                        chunks_list=chunks_list
+                    )
+                    if res.get("error"):
+                        st.error(f"Erro no Ollama: {res['error']}")
+                    else:
+                        st.session_state.pautas = res.get("pautas", [])
+                        st.session_state.bundles = res.get("bundles", [])
+                        st.session_state.ai_raw = res.get("raw", "")
+                        st.rerun()
+
+        if 'pautas' in st.session_state and st.session_state.pautas:
+            pautas = st.session_state.pautas
+            st.markdown(f"### 📋 Pautas Detectadas ({len(pautas)} encontradas):")
+            st.caption("Marque as caixas das pautas que deseja juntar no corte final:")
+
+            selected_pauta_ids = []
+            
+            for p in pautas:
+                label = f"**[{p['start']} - {p['end']}]** `({p['duration_label']})` — {p['title']}"
+                checked = st.checkbox(label, key=f"chk_pauta_{p['id']}")
+                if checked:
+                    selected_pauta_ids.append(p)
+
+            # Painel Dinâmico de Composição
+            if selected_pauta_ids:
+                total_composed_s = sum(x['duration_s'] for x in selected_pauta_ids)
+                total_min = total_composed_s / 60
+                earliest_start = min(selected_pauta_ids, key=lambda x: x['start_s'])['start']
+                latest_end = max(selected_pauta_ids, key=lambda x: x['end_s'])['end']
+                
+                st.markdown("---")
+                st.markdown("#### ⏱️ Resumo da Composição Selecionada:")
+                
+                col_m1, col_m2, col_m3 = st.columns(3)
+                col_m1.metric("Pautas Selecionadas", f"{len(selected_pauta_ids)}")
+                col_m2.metric("Duração Total Composta", f"{int(total_min)}m {int(total_composed_s%60):02d}s")
+                col_m3.metric("Intervalo Contínuo", f"{earliest_start} → {latest_end}")
+
+                if total_min >= 10.0:
+                    st.success(f"✅ Meta de 10+ minutos atingida ({total_min:.1f} min)! Pronto para corte no YouTube.")
+                else:
+                    st.info(f"⏳ Duração atual: {total_min:.1f} min. Faltam {(10.0 - total_min):.1f} min para atingir 10 minutos.")
+
+                composed_title = f"{selected_pauta_ids[0]['title']} (+ {len(selected_pauta_ids)-1} pautas)"
+                
+                if st.button("✂️ Usar Composição Selecionada na Fábrica de Cortes", key="btn_use_composed", type="primary"):
+                    st.session_state.selected_cut = (earliest_start, latest_end, composed_title)
+                    st.rerun()
+
+    # ── TAB 2: SÉRIES AUTOMÁTICAS ─────────────────────────────────────────────
+    with tab_series:
+        st.markdown("Cortes automáticos de **10+ minutos** sugeridos agrupando sequências de pautas.")
+        
+        if st.button("🧠 Gerar Séries Automáticas (10 min)", key="btn_series"):
+            with st.spinner("Agrupando pautas em séries de 10+ min..."):
+                res = analyze_transcript(
+                    chunked_transcript, "blocos",
+                    model=ollama_model,
+                    chunks_list=chunks_list
+                )
+                if res.get("error"):
+                    st.error(f"Erro no Ollama: {res['error']}")
+                else:
+                    st.session_state.pautas = res.get("pautas", [])
+                    st.session_state.bundles = res.get("bundles", [])
+                    st.session_state.ai_raw = res.get("raw", "")
+                    st.rerun()
+
+        if 'bundles' in st.session_state and st.session_state.bundles:
+            for idx, b in enumerate(st.session_state.bundles):
+                with st.container():
+                    col_info, col_btn = st.columns([4, 1])
+                    with col_info:
+                        badge = f"**{b.get('series_label', f'Vídeo {idx+1}')}**"
+                        hook_tag = " 🔗 *(Com Gancho)*" if b.get('has_hook') else ""
+                        st.markdown(f"{badge}: `[{b['start']} - {b['end']}]` **{b['title']}** {hook_tag}")
+                        st.caption(f"⏱️ Duração: {b.get('duration_label', '')} | {b.get('notes', '')}")
+                        if b.get('pautas_incluidas'):
+                            with st.expander("Ver pautas inclusas neste vídeo"):
+                                for pt in b['pautas_incluidas']:
+                                    st.write(f"• {pt}")
+                    with col_btn:
+                        if st.button("✂️ Usar", key=f"btn_use_bundle_{idx}"):
+                            st.session_state.selected_cut = (b['start'], b['end'], b['title'])
+                            st.rerun()
+                    st.divider()
+
+    # ── TAB 3: GANCHOS VIRAIS (SHORTS) ────────────────────────────────────────
+    with tab_shorts:
+        st.markdown("Momentos curtos de alto impacto (45 a 60 segundos) para **YouTube Shorts / TikTok**.")
+        
+        if st.button("🔥 Extrair Ganchos Virais (< 60s)", key="btn_shorts"):
+            with st.spinner("Identificando declarações polêmicas e momentos de impacto..."):
+                res = analyze_transcript(
+                    chunked_transcript, "ganchos",
+                    model=ollama_model,
+                    chunks_list=chunks_list
+                )
+                if res.get("error"):
+                    st.error(f"Erro no Ollama: {res['error']}")
+                else:
+                    st.session_state.shorts = res.get("cortes", [])
+                    st.session_state.ai_raw = res.get("raw", "")
+                    st.rerun()
+
+        if 'shorts' in st.session_state and st.session_state.shorts:
+            for idx, s in enumerate(st.session_state.shorts):
+                with st.container():
+                    col_info, col_btn = st.columns([4, 1])
+                    with col_info:
+                        st.markdown(f"**{s.get('series_label', f'Short {idx+1}')}**: `[{s['start']} - {s['end']}]` **{s['title']}**")
+                        st.caption(s.get('notes', ''))
+                    with col_btn:
+                        if st.button("✂️ Usar", key=f"btn_use_short_{idx}"):
+                            st.session_state.selected_cut = (s['start'], s['end'], s['title'])
+                            st.rerun()
+                    st.divider()
+
+    # ── TAB 4: SELEÇÃO MANUAL ────────────────────────────────────────────────
+    with tab_manual:
+        st.markdown("Navegue minuto a minuto pelos chunks de áudio e selecione início e fim:")
         if chunks_list:
             chunk_labels = [
                 f"[{format_time(c['start'])} - {format_time(c['end'])}]  {c['text'][:80]}..."
                 for c in chunks_list
             ]
-            
             col_s, col_e = st.columns(2)
             idx_start = col_s.selectbox("Chunk de Início:", range(len(chunks_list)),
                                          format_func=lambda i: chunk_labels[i], key="manual_start")
-            idx_end   = col_e.selectbox("Chunk de Fim:",   range(len(chunks_list)),
-                                         format_func=lambda i: chunk_labels[i],
-                                         index=min(len(chunks_list)-1, 9), key="manual_end")
+            idx_end = col_e.selectbox("Chunk de Fim:", range(len(chunks_list)),
+                                       format_func=lambda i: chunk_labels[i],
+                                       index=min(len(chunks_list)-1, 9), key="manual_end")
             
             if idx_end >= idx_start:
                 start_s = chunks_list[idx_start]['start']
-                end_s   = chunks_list[idx_end]['end']
-                st.success(f"Trecho selecionado: **{format_time(start_s)}** → **{format_time(end_s)}** "
-                           f"({(end_s - start_s)/60:.1f} min)")
+                end_s = chunks_list[idx_end]['end']
+                st.success(f"Trecho: **{format_time(start_s)}** → **{format_time(end_s)}** ({(end_s - start_s)/60:.1f} min)")
                 if st.button("✂️ Usar este trecho na Fábrica de Cortes", key="btn_manual"):
                     st.session_state.selected_cut = (format_time(start_s), format_time(end_s), "Corte Manual")
                     st.rerun()
-            else:
-                st.warning("O chunk de fim deve ser igual ou posterior ao de início.")
 
-    with tab_ai:
-        st.markdown("Use a IA para sugerir blocos temáticos ou ganchos virais.")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("🧠 Extrair Blocos (10 min)", key="btn_blocos"):
-                with st.spinner("Fase 1: identificando temas... (aguarde, pode demorar 1-2 min)"):
-                    res = analyze_transcript(
-                        chunked_transcript, "blocos",
-                        model=ollama_model,
-                        chunks_list=chunks_list
-                    )
-                    if res.get("error"):
-                        st.error(f"Erro ao contatar o Ollama: {res['error']}")
-                    else:
-                        st.session_state.ai_cortes = res.get("cortes", [])
-                        st.session_state.ai_raw = res.get("raw", "")
-                        
-        with col2:
-            if st.button("🔥 Extrair Ganchos Virais", key="btn_ganchos"):
-                with st.spinner("Fase 1: identificando ganchos... (aguarde, pode demorar 1-2 min)"):
-                    res = analyze_transcript(
-                        chunked_transcript, "ganchos",
-                        model=ollama_model,
-                        chunks_list=chunks_list
-                    )
-                    if res.get("error"):
-                        st.error(f"Erro ao contatar o Ollama: {res['error']}")
-                    else:
-                        st.session_state.ai_cortes = res.get("cortes", [])
-                        st.session_state.ai_raw = res.get("raw", "")
-                        
-        if 'ai_cortes' in st.session_state and st.session_state.ai_cortes:
-            st.markdown("### 🎬 Cortes Identificados pela IA:")
-            
-            for idx, c in enumerate(st.session_state.ai_cortes):
-                with st.container():
-                    col_info, col_btn = st.columns([4, 1])
-                    with col_info:
-                        badge = f"**{c.get('series_label', f'Corte {idx+1}')}**"
-                        hook_badge = " 🔗 *(Com Gancho para Próximo Vídeo)*" if c.get('has_hook') else ""
-                        st.markdown(f"{badge}: `[{c['start']} - {c['end']}]` **{c['title']}**{hook_badge}")
-                        if c.get('notes'):
-                            st.caption(c['notes'])
-                    with col_btn:
-                        if st.button("✂️ Usar", key=f"btn_use_ai_{idx}"):
-                            st.session_state.selected_cut = (c['start'], c['end'], c['title'])
-                            st.rerun()
-                    st.divider()
-
-            options = [(c['start'], c['end'], c['title']) for c in st.session_state.ai_cortes]
-            st.session_state.selected_cut = st.selectbox(
-                "Ou escolha no menu suspenso:",
-                options=options,
-                format_func=lambda x: f"[{x[0]} - {x[1]}] {x[2]}"
-            )
-        
-        if 'ai_raw' in st.session_state and st.session_state.ai_raw:
-            with st.expander("🔍 Detalhes da Análise Semântica (Log da IA)"):
-                st.code(st.session_state.ai_raw)
-                
-        if 'ai_cortes' in st.session_state and not st.session_state.ai_cortes:
-            st.warning("A IA não identificou cortes. Use a aba de Seleção Manual ou tente novamente.")
+    if 'ai_raw' in st.session_state and st.session_state.ai_raw:
+        with st.expander("🔍 Detalhes do Log da IA (Debug)"):
+            st.code(st.session_state.ai_raw)
 
     st.markdown("---")
     st.header("3. Fábrica de Cortes (Recorte Final)")

@@ -1,19 +1,18 @@
 """
-analyzer.py — Inteligência Temática Semântica & Encadeamento de Blocos
+analyzer.py — Inteligência Temática: Pautas, Compositor de Micro-Assuntos e Blocos
 
 Estratégia de Inteligência:
-1. Extração Semântica Ancorada:
-   A IA local (Llama 3 / Mistral / Qwen) analisa a transcrição e identifica
-   os momentos reais onde cada assunto/pergunta começa no vídeo.
+1. Detecção de Micro-Assuntos / Pautas:
+   Em entrevistas e podcasts dinâmicos, repórteres mudam de assunto a cada 1-4 minutos.
+   O modelo identifica o início exato de cada pergunta/pauta.
 
-2. Regra de Negócio de Blocos para YouTube (>= 10 min) + Encadeamento com Gancho:
-   - Se um assunto durar >= 10 min, o corte conclui no fechamento natural do assunto.
-   - Se um assunto durar < 10 min (ex: 6 min), o corte "invade" o início do próximo
-     assunto até completar no mínimo 10 minutos. O trecho final serve como GANCHO/CLIFFHANGER
-     para o próximo vídeo, criando uma esteira de múltiplos vídeos interligados (Parte 1, Parte 2, etc.).
+2. Compositor de Cortes:
+   Permite calcular a duração de cada pauta individualmente e somar micro-assuntos
+   selecionados para compor cortes customizados de 10+ minutos para o YouTube.
 
-3. Ganchos Virais (< 60s) para Shorts/TikTok:
-   - Extrai declarações de alto impacto ancoradas no timestamp real da fala.
+3. Agrupador Inteligente de Séries (10+ min):
+   Agrupa automaticamente sequências de pautas atingindo a meta de 10+ minutos
+   com ganchos de continuidade.
 """
 
 import ollama
@@ -21,34 +20,35 @@ import re
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Prompts Otimizados (Instruções em Inglês para Alta Obediência do Llama 3)
+# Prompts
 # ──────────────────────────────────────────────────────────────────────────────
 
 SYS_MSG = (
-    "You are an expert video editor and producer for YouTube podcasts. "
-    "You identify semantic topic transitions accurately. "
-    "Respond with NO intro, NO outro, ONLY the numbered list."
+    "You are an expert video editor and podcast producer. "
+    "You identify individual interview questions, topics, and debate segments accurately. "
+    "Respond ONLY with the numbered list. No intros, no conversational text."
 )
 
-PROMPT_TEMAS_BLOCOS = """\
-Analyze the Portuguese transcript chunks below.
-Each line has a timestamp prefix like [00:00:00 - 00:01:00].
+PROMPT_MICRO_PAUTAS = """\
+Analyze the Portuguese interview/debate transcript chunks below.
+Identify EVERY individual question, topic shift, or distinct point raised in the conversation.
 
-TASK:
-Identify the main topics/themes discussed in the conversation in chronological order.
-For EACH topic:
-1. Find the starting timestamp [HH:MM:SS] from the transcript where the discussion of that topic begins.
+For EACH question/topic:
+1. Find the exact timestamp [HH:MM:SS] where this question or new topic begins.
 2. Provide a clear, descriptive title in Brazilian Portuguese.
 
 FORMAT RULES:
 - One topic per line.
-- Strict format: 1. [HH:MM:SS] Topic title in Portuguese
-- Do NOT include markdown code blocks, intros, or conversational text.
+- Strict format: 1. [HH:MM:SS] Topic or Question Title in Portuguese
+- Do NOT include markdown code blocks, intros, or extra explanations.
 
 Example output:
-1. [00:00:00] Debate sobre Justiça do Trabalho e Reforma do Estado
-2. [00:06:12] Caso Banco Master e verbas para cinema
-3. [00:14:05] Crise no Supremo Tribunal Federal e Maioridade Penal
+1. [00:00:00] Pergunta sobre extinção da Justiça do Trabalho
+2. [00:03:45] Escolha do superministro da reforma do Estado
+3. [00:06:12] Denúncia sobre Banco Master e recursos cinematográficos
+4. [00:09:20] Propostas para reforma tributária e split payment
+5. [00:14:05] Discussão sobre Supremo Tribunal Federal e maioridade penal
+6. [00:17:45] Análise da política externa e relação com governo Trump
 
 Transcript:
 {transcricao}
@@ -56,16 +56,12 @@ Transcript:
 
 PROMPT_TEMAS_GANCHOS = """\
 Analyze the Portuguese transcript chunks below.
-Each line has a timestamp prefix like [00:00:00 - 00:01:00].
-
-TASK:
 Find 3 to 6 high-impact moments (max 60 seconds each) suitable for YouTube Shorts or TikTok.
 Look for controversial statements, strong quotes, heated exchanges, or punchlines.
 
 FORMAT RULES:
 - One hook per line.
 - Strict format: 1. [HH:MM:SS] "Punchy quote or viral hook title in Portuguese"
-- Do NOT include intros or conversational text.
 
 Example output:
 1. [00:02:15] Declaração contundente sobre o custo da Justiça
@@ -78,7 +74,7 @@ Transcript:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Utilitários de Tempo e Parsing
+# Utilitários
 # ──────────────────────────────────────────────────────────────────────────────
 
 def parse_time_str_to_seconds(t_str: str) -> float:
@@ -100,19 +96,27 @@ def format_seconds_to_time(secs: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
+def format_duration_human(secs: float) -> str:
+    """Retorna duração amigável como '3m 45s' ou '12m 10s'."""
+    m = int(secs // 60)
+    s = int(secs % 60)
+    if m > 0:
+        return f"{m}m {s:02d}s"
+    return f"{s}s"
+
+
 def _clean_ai_title(title: str) -> str:
     """Remove ruídos e introduções do título gerado pela IA."""
     title = title.strip()
-    # Remove aspas extras
     title = re.sub(r'^["\'“]+|["\'”]+$', '', title).strip()
-    # Remove prefixos conversacionais caso a IA tenha incluído
     prefixes = [
         r'^Entendi[,\.\s]*',
         r'^Aqui vai[,\.\s]*',
         r'^Aqui est[aã]o?[,\.\s]*',
         r'^T[íi]tulo:\s*',
         r'^Assunto:\s*',
-        r'^Tema:\s*'
+        r'^Tema:\s*',
+        r'^Pauta:\s*'
     ]
     for p in prefixes:
         title = re.sub(p, '', title, flags=re.IGNORECASE).strip()
@@ -120,17 +124,13 @@ def _clean_ai_title(title: str) -> str:
 
 
 def _parse_topics_from_text(text: str) -> list[dict]:
-    """
-    Extrai lista de tópicos no formato:
-      1. [00:05:00] Título do assunto
-    """
+    """Extrai lista de tópicos no formato: 1. [00:05:00] Título do assunto."""
     topics = []
-    # Regex flexível para capturar [HH:MM:SS] ou HH:MM:SS seguido do título
     pattern = re.compile(
-        r'(?:^\s*\d+[\.\)]\s*)?'                    # '1.' opcional
-        r'[\[\(]?(\d{1,2}:\d{2}(?::\d{2})?)[\]\)]?' # Timestamp [00:00:00] ou 00:00:00
-        r'[\s:-]+'                                  # Separador
-        r'(.+)',                                    # Título
+        r'(?:^\s*\d+[\.\)]\s*)?'
+        r'[\[\(]?(\d{1,2}:\d{2}(?::\d{2})?)[\]\)]?'
+        r'[\s:-]+'
+        r'(.+)',
         re.MULTILINE
     )
 
@@ -138,15 +138,13 @@ def _parse_topics_from_text(text: str) -> list[dict]:
         time_raw = match.group(1).strip()
         title_raw = match.group(2).strip()
 
-        # Garante HH:MM:SS
         parts = time_raw.split(':')
         if len(parts) == 2:
             time_raw = f"00:{time_raw}"
 
         title_cleaned = _clean_ai_title(title_raw)
         if title_cleaned and len(title_cleaned) > 2:
-            # Ignora linhas que são claramente instrução do prompt
-            if "Example format" in title_cleaned or "Transcript" in title_cleaned:
+            if "Example output" in title_cleaned or "Transcript" in title_cleaned:
                 continue
             topics.append({
                 "start_str": time_raw,
@@ -158,106 +156,133 @@ def _parse_topics_from_text(text: str) -> list[dict]:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Lógica de Encadeamento Semântico e Multi-Vídeos (>= 10 min)
+# Extração e Estruturação de Micro-Pautas
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _build_semantic_blocks(topics: list[dict], chunks_list: list,
-                           min_minutes: int = 10) -> list[dict]:
+def build_micro_pautas(topics: list[dict], chunks_list: list) -> list[dict]:
     """
-    Constrói blocos de no mínimo `min_minutes` (10 min).
-    Se o tópico por si só durar menos que 10 min, invade o próximo tópico,
-    criando um gancho temático e gerando uma série de vídeos interligados.
+    Estrutura a lista de micro-assuntos com start, end e duração calculada.
     """
     if not chunks_list:
         return []
 
     total_video_duration = chunks_list[-1]['end']
-    min_duration_s = min_minutes * 60  # 600 segundos
 
-    # Se a IA não achou tópicos específicos, usamos o início como tópico base
     if not topics:
-        topics = [{"start_str": "00:00:00", "start_s": 0.0, "title": "Debate Principal"}]
+        topics = [{"start_str": "00:00:00", "start_s": 0.0, "title": "Início da conversa"}]
 
-    # Ordena tópicos por timestamp
+    # Ordena por timestamp
     topics = sorted(topics, key=lambda x: x["start_s"])
 
-    blocks = []
-    num_topics = len(topics)
+    # Se o primeiro tópico não começar em 0, adiciona introdução
+    if topics[0]["start_s"] > 30.0:
+        topics.insert(0, {
+            "start_str": "00:00:00",
+            "start_s": 0.0,
+            "title": "Abertura / Apresentação Inicial"
+        })
 
-    for i, topic in enumerate(topics):
-        start_s = topic["start_s"]
-        
-        # Garante que o start não seja além do vídeo
+    pautas = []
+    for i, t in enumerate(topics):
+        start_s = t["start_s"]
         if start_s >= total_video_duration:
             break
 
-        # O próximo tópico teoricamente começa em:
-        if i + 1 < num_topics:
-            next_topic_start = topics[i + 1]["start_s"]
-            next_topic_title = topics[i + 1]["title"]
+        if i + 1 < len(topics):
+            end_s = min(topics[i + 1]["start_s"], total_video_duration)
         else:
-            next_topic_start = total_video_duration
-            next_topic_title = None
+            end_s = total_video_duration
 
-        topic_natural_duration = next_topic_start - start_s
+        duration_s = max(0, end_s - start_s)
+        
+        # Ignora pautas com menos de 10s (ruído)
+        if duration_s < 10 and i + 1 < len(topics):
+            continue
 
-        # Regra de 10 min:
-        if topic_natural_duration >= min_duration_s:
-            # Assunto longo: termina naturalmente no final do assunto
-            end_s = min(next_topic_start, total_video_duration)
-            title = f"{topic['title']}"
-            has_hook = False
-            notes = f"Duração: {(end_s - start_s)/60:.1f} min. Cobre integralmente o tema '{topic['title']}'."
-        else:
-            # Assunto curto (< 10 min): "Invade" o próximo assunto para alcançar >= 10 min
-            target_end_s = start_s + min_duration_s
-            end_s = min(target_end_s, total_video_duration)
-            
-            # Se invadiu o próximo assunto, adicionamos a indicação de gancho
-            if next_topic_title and end_s > next_topic_start:
-                has_hook = True
-                title = f"{topic['title']} (com Gancho p/ {next_topic_title})"
-                notes = (
-                    f"Duração: {(end_s - start_s)/60:.1f} min. "
-                    f"Cobre o tema '{topic['title']}' e introduz o início de '{next_topic_title}' como Gancho."
-                )
-            else:
-                has_hook = False
-                title = f"{topic['title']}"
-                notes = f"Duração: {(end_s - start_s)/60:.1f} min."
-
-        # Garante que não crie blocos duplicados de tempo idêntico
-        start_fmt = format_seconds_to_time(start_s)
-        end_fmt = format_seconds_to_time(end_s)
-
-        if not blocks or blocks[-1]["start"] != start_fmt:
-            blocks.append({
-                "start": start_fmt,
-                "end": end_fmt,
-                "title": title,
-                "has_hook": has_hook,
-                "notes": notes,
-                "series_label": f"Vídeo {len(blocks) + 1}"
-            })
-
-    # Caso especial: se o vídeo inteiro tiver menos que 10 min, gera um bloco único completo
-    if not blocks:
-        blocks.append({
-            "start": "00:00:00",
-            "end": format_seconds_to_time(total_video_duration),
-            "title": topics[0]["title"] if topics else "Corte Completo",
-            "has_hook": False,
-            "notes": f"Duração total: {total_video_duration/60:.1f} min.",
-            "series_label": "Vídeo 1"
+        pautas.append({
+            "id": len(pautas) + 1,
+            "start": format_seconds_to_time(start_s),
+            "end": format_seconds_to_time(end_s),
+            "start_s": start_s,
+            "end_s": end_s,
+            "duration_s": duration_s,
+            "duration_label": format_duration_human(duration_s),
+            "title": t["title"]
         })
 
-    return blocks
+    return pautas
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Agrupamento Automático em Séries (10+ min)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def build_suggested_bundles(pautas: list[dict], min_minutes: int = 10) -> list[dict]:
+    """
+    Agrupa automaticamente as pautas sequenciais para sugerir vídeos completos de 10+ min.
+    """
+    if not pautas:
+        return []
+
+    min_duration_s = min_minutes * 60
+    bundles = []
+    current_pautas = []
+    current_duration = 0.0
+    bundle_num = 1
+
+    for p in pautas:
+        current_pautas.append(p)
+        current_duration += p["duration_s"]
+
+        if current_duration >= min_duration_s:
+            start_fmt = current_pautas[0]["start"]
+            end_fmt = current_pautas[-1]["end"]
+            main_title = current_pautas[0]["title"]
+            topics_included = [x["title"] for x in current_pautas]
+
+            bundles.append({
+                "series_label": f"Vídeo {bundle_num}",
+                "start": start_fmt,
+                "end": end_fmt,
+                "start_s": current_pautas[0]["start_s"],
+                "end_s": current_pautas[-1]["end_s"],
+                "duration_s": current_duration,
+                "duration_label": format_duration_human(current_duration),
+                "title": f"{main_title} (+ {len(current_pautas)-1} pautas)",
+                "pautas_incluidas": topics_included,
+                "has_hook": len(current_pautas) > 1,
+                "notes": f"Reúne {len(current_pautas)} pautas totalizando {format_duration_human(current_duration)}."
+            })
+            bundle_num += 1
+            # O próximo vídeo pode recomeçar da última pauta como gancho ou da próxima
+            current_pautas = []
+            current_duration = 0.0
+
+    # Sobra final
+    if current_pautas:
+        start_fmt = current_pautas[0]["start"]
+        end_fmt = current_pautas[-1]["end"]
+        main_title = current_pautas[0]["title"]
+        topics_included = [x["title"] for x in current_pautas]
+        bundles.append({
+            "series_label": f"Vídeo {bundle_num} (Parte Final)",
+            "start": start_fmt,
+            "end": end_fmt,
+            "start_s": current_pautas[0]["start_s"],
+            "end_s": current_pautas[-1]["end_s"],
+            "duration_s": current_duration,
+            "duration_label": format_duration_human(current_duration),
+            "title": f"{main_title} (Final)",
+            "pautas_incluidas": topics_included,
+            "has_hook": False,
+            "notes": f"Pautas finais totalizando {format_duration_human(current_duration)}."
+        })
+
+    return bundles
 
 
 def _build_viral_hooks(topics: list[dict], chunks_list: list) -> list[dict]:
-    """
-    Constrói cortes virais curtos (30s a 60s) para Shorts/TikTok.
-    """
+    """Cortes virais curtos (30s a 60s) para Shorts/TikTok."""
     if not chunks_list:
         return []
 
@@ -269,7 +294,6 @@ def _build_viral_hooks(topics: list[dict], chunks_list: list) -> list[dict]:
         if start_s >= total_video_duration:
             continue
 
-        # Duração ideal para Shorts: 45 a 60 segundos
         end_s = min(start_s + 55, total_video_duration)
         start_fmt = format_seconds_to_time(start_s)
         end_fmt = format_seconds_to_time(end_s)
@@ -287,19 +311,19 @@ def _build_viral_hooks(topics: list[dict], chunks_list: list) -> list[dict]:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Função Principal (API da Inteligência Temática)
+# API Principal
 # ──────────────────────────────────────────────────────────────────────────────
 
-def analyze_transcript(chunked_transcript: str, mode: str = "blocos",
+def analyze_transcript(chunked_transcript: str, mode: str = "pautas",
                        model: str = "llama3",
                        chunks_list: list = None) -> dict:
     """
-    Executa a análise temática no Ollama e aplica a regra de encadeamento semântico.
+    Identifica pautas, sugere blocos ou extrai ganchos virais.
     """
     log = []
 
     try:
-        prompt = PROMPT_TEMAS_BLOCOS if mode == "blocos" else PROMPT_TEMAS_GANCHOS
+        prompt = PROMPT_MICRO_PAUTAS if mode in ("pautas", "blocos") else PROMPT_TEMAS_GANCHOS
 
         response = ollama.chat(
             model=model,
@@ -310,14 +334,12 @@ def analyze_transcript(chunked_transcript: str, mode: str = "blocos",
         )
 
         raw_content = response['message']['content']
-        log.append(f"=== RESPOSTA BRUTA DO MODELO ({model}) ===\n{raw_content}")
+        log.append(f"=== RESPOSTA DO MODELO ({model}) ===\n{raw_content}")
 
-        # Extrai tópicos ancorados nos timestamps
         topics = _parse_topics_from_text(raw_content)
 
         if not topics:
-            log.append("\n[Aviso] Nenhum formato numerado explícito encontrado. Aplicando extração flexível...")
-            # Tenta pegar qualquer timestamp no texto
+            log.append("\n[Aviso] Aplicando extração flexível...")
             for line in raw_content.splitlines():
                 t_match = re.search(r'(\d{1,2}:\d{2}(?::\d{2})?)', line)
                 if t_match:
@@ -330,28 +352,31 @@ def analyze_transcript(chunked_transcript: str, mode: str = "blocos",
                             "title": title_clean
                         })
 
-        log.append(f"\n=== TÓPICOS IDENTIFICADOS ({len(topics)}) ===")
+        log.append(f"\n=== PAUTAS IDENTIFICADAS ({len(topics)}) ===")
         for t in topics:
             log.append(f"  • [{t['start_str']}] {t['title']}")
 
-        # Aplica a inteligência de montagem dos cortes:
-        if mode == "blocos":
-            cortes = _build_semantic_blocks(topics, chunks_list or [], min_minutes=10)
-        else:
-            cortes = _build_viral_hooks(topics, chunks_list or [])
+        # Estrutura as pautas individuais
+        pautas = build_micro_pautas(topics, chunks_list or [])
 
-        log.append(f"\n=== CORTES SEMÂNTICOS GERADOS ({len(cortes)}) ===")
-        for c in cortes:
-            log.append(f"  • {c.get('series_label', '')}: [{c['start']} - {c['end']}] {c['title']}")
+        # Gera sugestões de blocos agrupados de 10+ min
+        bundles = build_suggested_bundles(pautas, min_minutes=10)
+
+        # Gera ganchos virais
+        hooks = _build_viral_hooks(topics, chunks_list or [])
 
         return {
-            "cortes": cortes,
+            "pautas": pautas,
+            "bundles": bundles,
+            "cortes": bundles if mode == "blocos" else (hooks if mode == "ganchos" else pautas),
             "raw": "\n".join(log),
             "error": None
         }
 
     except Exception as exc:
         return {
+            "pautas": [],
+            "bundles": [],
             "cortes": [],
             "raw": "\n".join(log) if log else str(exc),
             "error": str(exc)
