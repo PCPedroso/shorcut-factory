@@ -20,59 +20,45 @@ import re
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Prompts
+# Prompts em Português Claro (Máxima Aderência p/ Llama 3, Mistral, Qwen 2.5)
 # ──────────────────────────────────────────────────────────────────────────────
 
 SYS_MSG = (
-    "You are an expert video editor and podcast producer. "
-    "You identify every question and topic change in interviews and political debates. "
-    "Respond ONLY with the numbered list. No intros, no conversational text."
+    "Você é um especialista e produtor sênior de cortes de debates e entrevistas jornalísticas. "
+    "Sua função é mapear cada pergunta e mudança de assunto feita pelos jornalistas. "
+    "Responda apenas com a lista numerada de pautas."
 )
 
 PROMPT_MICRO_PAUTAS = """\
-Analyze the Portuguese interview/debate transcript chunks below.
-Different journalists ask multiple different questions throughout the video.
+Você é um produtor de conteúdo de vídeo analisando a transcrição de uma entrevista completa.
+Diferentes jornalistas fazem várias perguntas e mudam de assunto ao longo de todo o vídeo.
 
-TASK:
-Identify ALL distinct questions, topic changes, or debate points discussed in chronological order.
-Aim to list between 5 to 15 individual topics covering the ENTIRE duration of the video.
+SUA TAREFA:
+Identifique TODAS as perguntas individuais e trocas de pauta ao longo de todo o vídeo.
+Liste entre 6 a 15 pautas cobrindo do início ao fim da conversa.
 
-For EACH question/topic:
-1. Find the starting timestamp [HH:MM:SS] from the transcript chunk.
-2. Provide a clear and concise title in Brazilian Portuguese describing what is being asked or discussed.
+Para CADA pauta:
+- Indique o timestamp de início [HH:MM:SS] (ou [MM:SS]) em que o assunto/pergunta começou.
+- Forneça um título claro, jornalístico e conciso em português (ex: Pergunta sobre X, Discussão sobre Y).
 
-FORMAT RULES:
-- One topic per line.
-- Strict format: 1. [HH:MM:SS] Topic or Question Title in Portuguese
-- Do NOT include markdown code blocks, intros, or summaries.
+Formato estrito (uma linha por pauta):
+1. [00:00:00] Título da pauta
+2. [00:03:15] Título da pauta
+3. [00:06:40] Título da pauta
 
-Example output:
-1. [00:00:00] Pergunta sobre extinção da Justiça do Trabalho
-2. [00:03:15] Escolha do superministro da reforma do Estado
-3. [00:06:40] Denúncia sobre Banco Master e recursos cinematográficos
-4. [00:09:20] Propostas para reforma tributária e split payment
-5. [00:14:05] Discussão sobre Supremo Tribunal Federal e maioridade penal
-6. [00:17:45] Análise da política externa e relação com governo Trump
-
-Transcript:
+Transcrição do vídeo:
 {transcricao}
 """
 
 PROMPT_TEMAS_GANCHOS = """\
-Analyze the Portuguese transcript chunks below.
-Find 3 to 6 high-impact moments (max 60 seconds each) suitable for YouTube Shorts or TikTok.
-Look for controversial statements, strong quotes, heated exchanges, or punchlines.
+Analise a transcrição abaixo e encontre de 3 a 6 momentos de alto impacto (máximo 60 segundos cada) para YouTube Shorts ou TikTok.
+Procure declarações polêmicas, frases fortes, revelações ou respostas marcantes.
 
-FORMAT RULES:
-- One hook per line.
-- Strict format: 1. [HH:MM:SS] "Punchy quote or viral hook title in Portuguese"
+Formato:
+1. [00:02:15] "Declaração contundente sobre o assunto"
+2. [00:08:40] "Outra frase de alto impacto"
 
-Example output:
-1. [00:02:15] Declaração contundente sobre o custo da Justiça
-2. [00:08:40] "Não podemos tratar o Supremo como Deus ex-machina"
-3. [00:17:45] Denúncia sobre os gastos do Banco Master
-
-Transcript:
+Transcrição:
 {transcricao}
 """
 
@@ -112,8 +98,8 @@ def format_duration_human(secs: float) -> str:
 def _clean_ai_title(title: str) -> str:
     """Remove ruídos, formatação markdown e introduções do título gerado pela IA."""
     title = title.strip()
-    # Remove aspas e markdown
-    title = re.sub(r'[*_`"\'“”]', '', title).strip()
+    # Remove aspas, dois pontos finais e markdown
+    title = re.sub(r'[*_`"\'“”:]', '', title).strip()
     # Remove números de lista no início (ex: '1.', '1 -', '01)')
     title = re.sub(r'^\s*\d+[\.\)\-:]\s*', '', title).strip()
     prefixes = [
@@ -139,7 +125,7 @@ def _find_best_chunk_start(topic_text: str, chunks_list: list) -> float:
     if not chunks_list:
         return 0.0
 
-    stop_words = {'para', 'sobre', 'com', 'que', 'dos', 'das', 'uma', 'como', 'mais', 'pelo', 'pela', 'qual', 'quando', 'pergunta', 'debate'}
+    stop_words = {'para', 'sobre', 'com', 'que', 'dos', 'das', 'uma', 'como', 'mais', 'pelo', 'pela', 'qual', 'quando', 'pergunta', 'debate', 'discute', 'aborda'}
     words = [w.lower() for w in re.findall(r'\b\w{4,}\b', topic_text) if w.lower() not in stop_words]
     
     if not words:
@@ -172,46 +158,37 @@ def _extract_topics_resilient(raw_text: str, chunks_list: list) -> list[dict]:
         if not line or len(line) < 4:
             continue
 
-        # Ignora cabeçalhos óbvios
-        if "example output" in line.lower() or "transcript" in line.lower():
+        # Ignora cabeçalhos, introduções e observações gerais
+        if any(h in line.lower() for h in ["example", "transcript", "aqui estão", "observações", "principais pontos", "sugestões"]):
             continue
 
-        # Caso A: Linha possui timestamp explícito (ex: '1. [00:03:45] Título' ou '**00:03:45** Título')
+        is_numbered_main = bool(re.match(r'^\s*\d+[\.\)\-:]\s+', line))
         t_match = time_regex.search(line)
-        if t_match:
-            time_raw = t_match.group(1).strip()
-            # Garante formato HH:MM:SS
-            if len(time_raw.split(':')) == 2:
-                time_raw = f"00:{time_raw}"
 
-            # Remove o timestamp da linha para sobrar apenas o título
-            title_part = re.sub(r'\[?\d{1,2}:\d{2}(?::\d{2})?\]?', '', line)
-            title_clean = _clean_ai_title(title_part)
+        if is_numbered_main or t_match:
+            if t_match:
+                time_raw = t_match.group(1).strip()
+                if len(time_raw.split(':')) == 2:
+                    time_raw = f"00:{time_raw}"
+                title_part = re.sub(r'\[?\d{1,2}:\d{2}(?::\d{2})?\]?', '', line)
+                title_clean = _clean_ai_title(title_part)
+                start_s = parse_time_str_to_seconds(time_raw)
+            else:
+                title_clean = _clean_ai_title(line)
+                start_s = _find_best_chunk_start(title_clean, chunks_list)
+                time_raw = format_seconds_to_time(start_s)
 
             if len(title_clean) > 3:
                 topics.append({
                     "start_str": time_raw,
-                    "start_s": parse_time_str_to_seconds(time_raw),
+                    "start_s": start_s,
                     "title": title_clean
                 })
-        else:
-            # Caso B: Linha é um item numerado ou com marcador de lista (ex: '1. Debate sobre STF')
-            if re.match(r'^\s*(?:\d+[\.\)]|[\*\-\•])\s+', line):
-                title_clean = _clean_ai_title(line)
-                if len(title_clean) > 3:
-                    # Encontra o minuto na transcrição
-                    start_s = _find_best_chunk_start(title_clean, chunks_list)
-                    time_raw = format_seconds_to_time(start_s)
-                    topics.append({
-                        "start_str": time_raw,
-                        "start_s": start_s,
-                        "title": title_clean
-                    })
 
     # Ordena por timestamp
     topics = sorted(topics, key=lambda x: x["start_s"])
 
-    # Remove itens com mesmo timestamp ou títulos duplicados
+    # Remove duplicidades de início
     unique_topics = []
     seen_starts = set()
     for t in topics:
@@ -251,7 +228,7 @@ def build_micro_pautas(topics: list[dict], chunks_list: list) -> list[dict]:
             })
         return pautas
 
-    # Garante cobertura desde o início
+    # Garante cobertura desde o início se o primeiro tópico não começar em 0
     if topics[0]["start_s"] > 30.0:
         topics.insert(0, {
             "start_str": "00:00:00",
@@ -272,7 +249,7 @@ def build_micro_pautas(topics: list[dict], chunks_list: list) -> list[dict]:
 
         duration_s = max(0, end_s - start_s)
         
-        # Ignora pautas ultracurtas (< 15s) exceto se for a única
+        # Ignora pautas ultracurtas (< 15s) exceto se for a última
         if duration_s < 15 and i + 1 < len(topics):
             continue
 
