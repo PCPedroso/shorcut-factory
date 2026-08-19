@@ -230,16 +230,32 @@ if st.session_state.transcription_done:
                         st.session_state.ai_raw = res.get("raw", "")
                         
         if 'ai_cortes' in st.session_state and st.session_state.ai_cortes:
-            st.markdown("### ✅ Cortes Sugeridos pela IA:")
+            st.markdown("### 🎬 Cortes Identificados pela IA:")
+            
+            for idx, c in enumerate(st.session_state.ai_cortes):
+                with st.container():
+                    col_info, col_btn = st.columns([4, 1])
+                    with col_info:
+                        badge = f"**{c.get('series_label', f'Corte {idx+1}')}**"
+                        hook_badge = " 🔗 *(Com Gancho para Próximo Vídeo)*" if c.get('has_hook') else ""
+                        st.markdown(f"{badge}: `[{c['start']} - {c['end']}]` **{c['title']}**{hook_badge}")
+                        if c.get('notes'):
+                            st.caption(c['notes'])
+                    with col_btn:
+                        if st.button("✂️ Usar", key=f"btn_use_ai_{idx}"):
+                            st.session_state.selected_cut = (c['start'], c['end'], c['title'])
+                            st.rerun()
+                    st.divider()
+
             options = [(c['start'], c['end'], c['title']) for c in st.session_state.ai_cortes]
             st.session_state.selected_cut = st.selectbox(
-                "Selecione um corte:",
+                "Ou escolha no menu suspenso:",
                 options=options,
                 format_func=lambda x: f"[{x[0]} - {x[1]}] {x[2]}"
             )
         
         if 'ai_raw' in st.session_state and st.session_state.ai_raw:
-            with st.expander("🔍 Debug: Resposta bruta da IA"):
+            with st.expander("🔍 Detalhes da Análise Semântica (Log da IA)"):
                 st.code(st.session_state.ai_raw)
                 
         if 'ai_cortes' in st.session_state and not st.session_state.ai_cortes:
