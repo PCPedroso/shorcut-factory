@@ -1,18 +1,18 @@
 """
 analyzer.py — Inteligência Temática: Pautas, Compositor de Micro-Assuntos e Blocos
 
-Estratégia de Inteligência:
-1. Detecção de Micro-Assuntos / Pautas:
-   Em entrevistas e podcasts dinâmicos, repórteres mudam de assunto a cada 1-4 minutos.
-   O modelo identifica o início exato de cada pergunta/pauta.
+Estratégia de Inteligência Robusta:
+1. Mapeamento Completo de Perguntas & Micro-Assuntos:
+   - Identifica cada pergunta feita pelos jornalistas ao longo de toda a entrevista.
+   - Suporta múltiplos formatos de resposta da IA (com timestamps, em markdown, ou lista pura).
+   - Sistema Híbrido: Se a IA omitir timestamps em algum item, o algoritmo localiza
+     automaticamente o minuto exato na transcrição através de casamento semântico de termos.
 
-2. Compositor de Cortes:
-   Permite calcular a duração de cada pauta individualmente e somar micro-assuntos
-   selecionados para compor cortes customizados de 10+ minutos para o YouTube.
+2. Compositor Interativo de Cortes:
+   - Permite selecionar livremente múltiplos micro-assuntos e calcular o tempo total para 10+ min.
 
-3. Agrupador Inteligente de Séries (10+ min):
-   Agrupa automaticamente sequências de pautas atingindo a meta de 10+ minutos
-   com ganchos de continuidade.
+3. Agrupador de Séries Automáticas:
+   - Monta séries encadeadas prontas de 10+ minutos para o YouTube.
 """
 
 import ollama
@@ -25,27 +25,31 @@ import re
 
 SYS_MSG = (
     "You are an expert video editor and podcast producer. "
-    "You identify individual interview questions, topics, and debate segments accurately. "
+    "You identify every question and topic change in interviews and political debates. "
     "Respond ONLY with the numbered list. No intros, no conversational text."
 )
 
 PROMPT_MICRO_PAUTAS = """\
 Analyze the Portuguese interview/debate transcript chunks below.
-Identify EVERY individual question, topic shift, or distinct point raised in the conversation.
+Different journalists ask multiple different questions throughout the video.
+
+TASK:
+Identify ALL distinct questions, topic changes, or debate points discussed in chronological order.
+Aim to list between 5 to 15 individual topics covering the ENTIRE duration of the video.
 
 For EACH question/topic:
-1. Find the exact timestamp [HH:MM:SS] where this question or new topic begins.
-2. Provide a clear, descriptive title in Brazilian Portuguese.
+1. Find the starting timestamp [HH:MM:SS] from the transcript chunk.
+2. Provide a clear and concise title in Brazilian Portuguese describing what is being asked or discussed.
 
 FORMAT RULES:
 - One topic per line.
 - Strict format: 1. [HH:MM:SS] Topic or Question Title in Portuguese
-- Do NOT include markdown code blocks, intros, or extra explanations.
+- Do NOT include markdown code blocks, intros, or summaries.
 
 Example output:
 1. [00:00:00] Pergunta sobre extinção da Justiça do Trabalho
-2. [00:03:45] Escolha do superministro da reforma do Estado
-3. [00:06:12] Denúncia sobre Banco Master e recursos cinematográficos
+2. [00:03:15] Escolha do superministro da reforma do Estado
+3. [00:06:40] Denúncia sobre Banco Master e recursos cinematográficos
 4. [00:09:20] Propostas para reforma tributária e split payment
 5. [00:14:05] Discussão sobre Supremo Tribunal Federal e maioridade penal
 6. [00:17:45] Análise da política externa e relação com governo Trump
@@ -74,7 +78,7 @@ Transcript:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Utilitários
+# Utilitários de Tempo e Texto
 # ──────────────────────────────────────────────────────────────────────────────
 
 def parse_time_str_to_seconds(t_str: str) -> float:
@@ -106,9 +110,12 @@ def format_duration_human(secs: float) -> str:
 
 
 def _clean_ai_title(title: str) -> str:
-    """Remove ruídos e introduções do título gerado pela IA."""
+    """Remove ruídos, formatação markdown e introduções do título gerado pela IA."""
     title = title.strip()
-    title = re.sub(r'^["\'“]+|["\'”]+$', '', title).strip()
+    # Remove aspas e markdown
+    title = re.sub(r'[*_`"\'“”]', '', title).strip()
+    # Remove números de lista no início (ex: '1.', '1 -', '01)')
+    title = re.sub(r'^\s*\d+[\.\)\-:]\s*', '', title).strip()
     prefixes = [
         r'^Entendi[,\.\s]*',
         r'^Aqui vai[,\.\s]*',
@@ -116,52 +123,112 @@ def _clean_ai_title(title: str) -> str:
         r'^T[íi]tulo:\s*',
         r'^Assunto:\s*',
         r'^Tema:\s*',
-        r'^Pauta:\s*'
+        r'^Pauta:\s*',
+        r'^Pergunta:\s*'
     ]
     for p in prefixes:
         title = re.sub(p, '', title, flags=re.IGNORECASE).strip()
     return title
 
 
-def _parse_topics_from_text(text: str) -> list[dict]:
-    """Extrai lista de tópicos no formato: 1. [00:05:00] Título do assunto."""
+def _find_best_chunk_start(topic_text: str, chunks_list: list) -> float:
+    """
+    Localiza o timestamp de início mais provável de um tópico na transcrição
+    através de correspondência de termos-chave (busca semântica local).
+    """
+    if not chunks_list:
+        return 0.0
+
+    stop_words = {'para', 'sobre', 'com', 'que', 'dos', 'das', 'uma', 'como', 'mais', 'pelo', 'pela', 'qual', 'quando', 'pergunta', 'debate'}
+    words = [w.lower() for w in re.findall(r'\b\w{4,}\b', topic_text) if w.lower() not in stop_words]
+    
+    if not words:
+        return 0.0
+
+    best_idx = 0
+    best_score = 0
+
+    for idx, c in enumerate(chunks_list):
+        c_text = c['text'].lower()
+        score = sum(1 for w in words if w in c_text)
+        if score > best_score:
+            best_score = score
+            best_idx = idx
+
+    return chunks_list[best_idx]['start']
+
+
+def _extract_topics_resilient(raw_text: str, chunks_list: list) -> list[dict]:
+    """
+    Extrai lista de tópicos de forma resiliente a qualquer formato de resposta do LLM:
+    1. Procura linhas com timestamps em qualquer parte da linha.
+    2. Para linhas de lista sem timestamp, localiza o chunk pelo texto.
+    """
     topics = []
-    pattern = re.compile(
-        r'(?:^\s*\d+[\.\)]\s*)?'
-        r'[\[\(]?(\d{1,2}:\d{2}(?::\d{2})?)[\]\)]?'
-        r'[\s:-]+'
-        r'(.+)',
-        re.MULTILINE
-    )
+    time_regex = re.compile(r'(\d{1,2}:\d{2}(?::\d{2})?)')
 
-    for match in pattern.finditer(text):
-        time_raw = match.group(1).strip()
-        title_raw = match.group(2).strip()
+    for line in raw_text.splitlines():
+        line = line.strip()
+        if not line or len(line) < 4:
+            continue
 
-        parts = time_raw.split(':')
-        if len(parts) == 2:
-            time_raw = f"00:{time_raw}"
+        # Ignora cabeçalhos óbvios
+        if "example output" in line.lower() or "transcript" in line.lower():
+            continue
 
-        title_cleaned = _clean_ai_title(title_raw)
-        if title_cleaned and len(title_cleaned) > 2:
-            if "Example output" in title_cleaned or "Transcript" in title_cleaned:
-                continue
-            topics.append({
-                "start_str": time_raw,
-                "start_s": parse_time_str_to_seconds(time_raw),
-                "title": title_cleaned
-            })
+        # Caso A: Linha possui timestamp explícito (ex: '1. [00:03:45] Título' ou '**00:03:45** Título')
+        t_match = time_regex.search(line)
+        if t_match:
+            time_raw = t_match.group(1).strip()
+            # Garante formato HH:MM:SS
+            if len(time_raw.split(':')) == 2:
+                time_raw = f"00:{time_raw}"
 
-    return topics
+            # Remove o timestamp da linha para sobrar apenas o título
+            title_part = re.sub(r'\[?\d{1,2}:\d{2}(?::\d{2})?\]?', '', line)
+            title_clean = _clean_ai_title(title_part)
+
+            if len(title_clean) > 3:
+                topics.append({
+                    "start_str": time_raw,
+                    "start_s": parse_time_str_to_seconds(time_raw),
+                    "title": title_clean
+                })
+        else:
+            # Caso B: Linha é um item numerado ou com marcador de lista (ex: '1. Debate sobre STF')
+            if re.match(r'^\s*(?:\d+[\.\)]|[\*\-\•])\s+', line):
+                title_clean = _clean_ai_title(line)
+                if len(title_clean) > 3:
+                    # Encontra o minuto na transcrição
+                    start_s = _find_best_chunk_start(title_clean, chunks_list)
+                    time_raw = format_seconds_to_time(start_s)
+                    topics.append({
+                        "start_str": time_raw,
+                        "start_s": start_s,
+                        "title": title_clean
+                    })
+
+    # Ordena por timestamp
+    topics = sorted(topics, key=lambda x: x["start_s"])
+
+    # Remove itens com mesmo timestamp ou títulos duplicados
+    unique_topics = []
+    seen_starts = set()
+    for t in topics:
+        if t["start_str"] not in seen_starts:
+            seen_starts.add(t["start_str"])
+            unique_topics.append(t)
+
+    return unique_topics
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Extração e Estruturação de Micro-Pautas
+# Estruturação de Micro-Pautas
 # ──────────────────────────────────────────────────────────────────────────────
 
 def build_micro_pautas(topics: list[dict], chunks_list: list) -> list[dict]:
     """
-    Estrutura a lista de micro-assuntos com start, end e duração calculada.
+    Estrutura a lista de micro-assuntos com início, fim e duração exata de cada um.
     """
     if not chunks_list:
         return []
@@ -169,17 +236,27 @@ def build_micro_pautas(topics: list[dict], chunks_list: list) -> list[dict]:
     total_video_duration = chunks_list[-1]['end']
 
     if not topics:
-        topics = [{"start_str": "00:00:00", "start_s": 0.0, "title": "Início da conversa"}]
+        # Fallback inteligente: se a IA não retornou nada, gera pautas a partir dos chunks de áudio
+        pautas = []
+        for i, c in enumerate(chunks_list):
+            pautas.append({
+                "id": i + 1,
+                "start": format_seconds_to_time(c['start']),
+                "end": format_seconds_to_time(c['end']),
+                "start_s": c['start'],
+                "end_s": c['end'],
+                "duration_s": c['end'] - c['start'],
+                "duration_label": format_duration_human(c['end'] - c['start']),
+                "title": f"Trecho {i + 1}: {c['text'][:60]}..."
+            })
+        return pautas
 
-    # Ordena por timestamp
-    topics = sorted(topics, key=lambda x: x["start_s"])
-
-    # Se o primeiro tópico não começar em 0, adiciona introdução
+    # Garante cobertura desde o início
     if topics[0]["start_s"] > 30.0:
         topics.insert(0, {
             "start_str": "00:00:00",
             "start_s": 0.0,
-            "title": "Abertura / Apresentação Inicial"
+            "title": "Abertura e Apresentação Inicial"
         })
 
     pautas = []
@@ -195,8 +272,8 @@ def build_micro_pautas(topics: list[dict], chunks_list: list) -> list[dict]:
 
         duration_s = max(0, end_s - start_s)
         
-        # Ignora pautas com menos de 10s (ruído)
-        if duration_s < 10 and i + 1 < len(topics):
+        # Ignora pautas ultracurtas (< 15s) exceto se for a única
+        if duration_s < 15 and i + 1 < len(topics):
             continue
 
         pautas.append({
@@ -219,7 +296,7 @@ def build_micro_pautas(topics: list[dict], chunks_list: list) -> list[dict]:
 
 def build_suggested_bundles(pautas: list[dict], min_minutes: int = 10) -> list[dict]:
     """
-    Agrupa automaticamente as pautas sequenciais para sugerir vídeos completos de 10+ min.
+    Agrupa pautas sequenciais automaticamente formando vídeos de 10+ minutos.
     """
     if not pautas:
         return []
@@ -254,11 +331,9 @@ def build_suggested_bundles(pautas: list[dict], min_minutes: int = 10) -> list[d
                 "notes": f"Reúne {len(current_pautas)} pautas totalizando {format_duration_human(current_duration)}."
             })
             bundle_num += 1
-            # O próximo vídeo pode recomeçar da última pauta como gancho ou da próxima
             current_pautas = []
             current_duration = 0.0
 
-    # Sobra final
     if current_pautas:
         start_fmt = current_pautas[0]["start"]
         end_fmt = current_pautas[-1]["end"]
@@ -318,7 +393,7 @@ def analyze_transcript(chunked_transcript: str, mode: str = "pautas",
                        model: str = "llama3",
                        chunks_list: list = None) -> dict:
     """
-    Identifica pautas, sugere blocos ou extrai ganchos virais.
+    Executa a identificação de pautas ou ganchos no Ollama com parsing resiliente.
     """
     log = []
 
@@ -336,30 +411,17 @@ def analyze_transcript(chunked_transcript: str, mode: str = "pautas",
         raw_content = response['message']['content']
         log.append(f"=== RESPOSTA DO MODELO ({model}) ===\n{raw_content}")
 
-        topics = _parse_topics_from_text(raw_content)
+        # Extração resiliente de tópicos
+        topics = _extract_topics_resilient(raw_content, chunks_list or [])
 
-        if not topics:
-            log.append("\n[Aviso] Aplicando extração flexível...")
-            for line in raw_content.splitlines():
-                t_match = re.search(r'(\d{1,2}:\d{2}(?::\d{2})?)', line)
-                if t_match:
-                    time_raw = t_match.group(1)
-                    title_clean = _clean_ai_title(re.sub(r'[\d\.\:\-\[\]\(\)]', ' ', line).strip())
-                    if len(title_clean) > 3:
-                        topics.append({
-                            "start_str": time_raw,
-                            "start_s": parse_time_str_to_seconds(time_raw),
-                            "title": title_clean
-                        })
-
-        log.append(f"\n=== PAUTAS IDENTIFICADAS ({len(topics)}) ===")
+        log.append(f"\n=== TÓPICOS/PAUTAS PROCESSADOS ({len(topics)}) ===")
         for t in topics:
             log.append(f"  • [{t['start_str']}] {t['title']}")
 
         # Estrutura as pautas individuais
         pautas = build_micro_pautas(topics, chunks_list or [])
 
-        # Gera sugestões de blocos agrupados de 10+ min
+        # Gera sugestões de séries (10+ min)
         bundles = build_suggested_bundles(pautas, min_minutes=10)
 
         # Gera ganchos virais
