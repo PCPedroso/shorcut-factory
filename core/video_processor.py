@@ -5,18 +5,12 @@ import imageio_ffmpeg
 
 def download_full_video(url: str, output_path: str = "temp_video.mp4") -> dict:
     """
-    Baixa o vídeo completo usando yt-dlp na melhor resolução disponível.
-    Prefere 1080p, fallback para 720p, depois melhor disponível.
+    Baixa o vídeo completo na máxima resolução disponível (1080p, 2K, 4K ou 720p).
+    Usa FFmpeg para mesclar a melhor faixa de vídeo com a melhor faixa de áudio em MP4.
     """
     ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
     ydl_opts = {
-        # Tenta: 1080p mp4, depois 720p mp4, depois melhor qualquer formato
-        'format': (
-            'bestvideo[height>=1080][ext=mp4]+bestaudio[ext=m4a]'
-            '/bestvideo[height>=720][ext=mp4]+bestaudio[ext=m4a]'
-            '/bestvideo[ext=mp4]+bestaudio[ext=m4a]'
-            '/best[ext=mp4]/best'
-        ),
+        'format': 'bestvideo+bestaudio/best',
         'outtmpl': output_path,
         'merge_output_format': 'mp4',
         'quiet': True,
@@ -29,6 +23,17 @@ def download_full_video(url: str, output_path: str = "temp_video.mp4") -> dict:
             return {"path": output_path, "error": None}
         except Exception as e:
             return {"path": None, "error": str(e)}
+
+
+def get_video_resolution(video_path: str) -> str:
+    """Retorna a resolução do vídeo (ex: '1920x1080') usando FFprobe ou MoviePy."""
+    try:
+        with VideoFileClip(video_path) as clip:
+            w, h = clip.size
+            return f"{w}x{h}"
+    except Exception:
+        return "Desconhecida"
+
 
 
 def parse_time_to_seconds(time_str: str) -> int:

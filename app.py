@@ -363,11 +363,11 @@ if st.session_state.transcription_done:
     end_time = col_end.text_input("Tempo Final (HH:MM:SS)", key="final_end_time", placeholder="00:10:00")
 
     
-    if st.button("✂️ Gerar Corte Viral"):
+    if st.button("✂️ Gerar Corte Viral", type="primary"):
         if not start_time or not end_time:
             st.warning("Preencha o tempo inicial e final.")
         else:
-            from core.video_processor import download_full_video, cut_video
+            from core.video_processor import download_full_video, cut_video, get_video_resolution
             
             video_id = get_video_id(video_url)
             data_dir = os.path.join("data", video_id) if video_id else "data"
@@ -375,28 +375,42 @@ if st.session_state.transcription_done:
             video_full_path = os.path.join(data_dir, "video_full.mp4")
             corte_output_path = os.path.join(data_dir, "corte_viral.mp4")
             
-            # Cache do vídeo final
-            if not os.path.exists(video_full_path):
-                with st.spinner("Baixando vídeo completo em alta qualidade..."):
+            # Detecta se o vídeo no cache é de baixa resolução (< 720p) e força o download em 1080p
+            need_download = not os.path.exists(video_full_path)
+            if os.path.exists(video_full_path):
+                current_res = get_video_resolution(video_full_path)
+                try:
+                    h = int(current_res.split('x')[1])
+                    if h < 720:
+                        st.info(f"🔄 Cache antigo detectado em baixa resolução ({current_res}). Baixando automaticamente em 1080p Full HD...")
+                        if os.path.exists(video_full_path):
+                            os.remove(video_full_path)
+                        need_download = True
+                except Exception:
+                    pass
+
+            if need_download:
+                with st.spinner("Baixando vídeo original na máxima resolução disponível (1080p Full HD)..."):
                     video_res = download_full_video(video_url, video_full_path)
             else:
-                st.success("Vídeo completo encontrado no cache!")
+                current_res = get_video_resolution(video_full_path)
+                st.success(f"Vídeo em alta qualidade encontrado no cache ({current_res})!")
                 video_res = {"path": video_full_path, "error": None}
                 
             if video_res.get("error"):
                 st.error(f"Erro ao baixar vídeo: {video_res['error']}")
             else:
-                with st.spinner("Processando o corte (isso pode demorar dependendo da sua CPU)..."):
+                with st.spinner(f"Processando corte [{start_time} → {end_time}] em alta qualidade..."):
                     cut_res = cut_video(video_res["path"], start_time, end_time, corte_output_path)
                     if cut_res.get("error"):
                         st.error(f"Erro ao cortar: {cut_res['error']}")
                     else:
-                        st.success("Corte gerado com sucesso!")
+                        st.success(f"🎉 Corte gerado com sucesso em alta qualidade! ({get_video_resolution(corte_output_path)})")
                         st.video(corte_output_path)
                         
                         with open(corte_output_path, "rb") as file:
                             st.download_button(
-                                label="💾 Baixar Arquivo MP4",
+                                label="💾 Baixar Arquivo MP4 em Alta Qualidade",
                                 data=file,
                                 file_name="corte_viral.mp4",
                                 mime="video/mp4"
