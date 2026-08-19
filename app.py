@@ -77,42 +77,49 @@ if st.button("Iniciar Processamento"):
                         st.error(f"Erro ao extrair dados: {meta['error']}")
                     else:
                         st.success(f"Vídeo encontrado: {meta['title']}")
-                        
-                        # CACHE: Verifica se já baixou o áudio
-                        if os.path.exists(audio_path):
-                            st.success("Áudio já baixado anteriormente. Pulando download.")
-                            audio_res = {"path": audio_path, "error": None}
-                        else:
-                            with st.spinner("Baixando áudio..."):
-                                audio_res = download_audio(video_url, output_path=audio_path)
-                                
-                        if audio_res.get("error"):
-                            st.error(f"Erro no download: {audio_res['error']}")
-                        else:
-                            st.success("Áudio baixado/carregado com sucesso.")
+            # Passo 2: Transcrição (Tenta legendas oficiais do YouTube primeiro, fallback para Whisper)
+            with st.spinner("Buscando transcrição oficial do YouTube (alta precisão e fidelidade)..."):
+                from core.transcriber import fetch_youtube_transcript, transcribe_audio
+                
+                transcribe_res = fetch_youtube_transcript(video_id)
+                
+                if transcribe_res.get("transcript_segments"):
+                    st.success(f"⚡ Transcrição oficial do YouTube carregada ({len(transcribe_res['transcript_segments'])} segmentos)! Máxima precisão.")
+                else:
+                    st.info("Legendas oficiais não encontradas no YouTube. Processando áudio via Whisper local...")
+                    if os.path.exists(audio_path):
+                        audio_res = {"path": audio_path, "error": None}
+                    else:
+                        with st.spinner("Baixando áudio para transcrição local..."):
+                            audio_res = download_audio(video_url, output_path=audio_path)
                             
-                            # Passo 3: Transcrição
-                            with st.spinner(f"Transcrevendo áudio na {device_option.upper()}..."):
-                                transcribe_res = transcribe_audio(
-                                    audio_res["path"], 
-                                    model_size=model_size, 
-                                    device=device_option
-                                )
-                                
-                                if transcribe_res.get("error"):
-                                    st.error(f"Erro na transcrição: {transcribe_res['error']}")
-                                else:
-                                    st.success("Transcrição concluída!")
-                                    st.session_state.transcription_done = True
-                                    st.session_state.full_text = transcribe_res["full_text"]
-                                    st.session_state.segments = transcribe_res["transcript_segments"]
-                                    
-                                    # Salvar no cache
-                                    with open(transcript_file, "w", encoding="utf-8") as f:
-                                        json.dump({
-                                            "full_text": st.session_state.full_text,
-                                            "segments": st.session_state.segments
-                                        }, f, ensure_ascii=False, indent=4)
+                    if audio_res.get("error"):
+                        st.error(f"Erro no download: {audio_res['error']}")
+                        transcribe_res = {"error": audio_res["error"]}
+                    else:
+                        with st.spinner(f"Transcrevendo áudio com Whisper ({model_size}) na {device_option.upper()}..."):
+                            transcribe_res = transcribe_audio(
+                                audio_res["path"], 
+                                model_size=model_size, 
+                                device=device_option
+                            )
+                        
+            if transcribe_res.get("error"):
+                st.error(f"Erro na transcrição: {transcribe_res['error']}")
+            else:
+                st.success("Transcrição concluída com sucesso!")
+                st.session_state.transcription_done = True
+                st.session_state.full_text = transcribe_res["full_text"]
+                st.session_state.segments = transcribe_res["transcript_segments"]
+                st.session_state.transcript_source = transcribe_res.get("source", "YouTube Oficial")
+                
+                # Salvar no cache
+                with open(transcript_file, "w", encoding="utf-8") as f:
+                    json.dump({
+                        "full_text": st.session_state.full_text,
+                        "segments": st.session_state.segments,
+                        "source": st.session_state.transcript_source
+                    }, f, ensure_ascii=False, indent=4)
 
 if st.session_state.transcription_done:
     def format_time(seconds):
@@ -125,7 +132,9 @@ if st.session_state.transcription_done:
     for seg in st.session_state.segments:
         formatted_transcript += f"[{format_time(seg['start'])} - {format_time(seg['end'])}] {seg['text']}\n"
 
-    with st.expander("Ver Transcrição Completa"):
+    src_badge = st.session_state.get("transcript_source", "Oficial / Whisper")
+    with st.expander(f"Ver Transcrição Completa ({src_badge})"):
+        st.caption(f"Fonte dos textos: **{src_badge}** | Total de trechos: **{len(st.session_state.segments)}**")
         st.text_area("Texto:", value=formatted_transcript, height=300)
     
     st.header("2. Inteligência Temática (Llama 3)")

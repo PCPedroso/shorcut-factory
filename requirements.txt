@@ -4,3 +4,4 @@ torch
 streamlit
 moviepy
 ollama
+youtube-transcript-api
