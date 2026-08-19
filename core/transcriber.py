@@ -94,29 +94,34 @@ def format_badge_time(seconds: float) -> str:
 
 
 
-def build_youtube_transcript_blocks(segments: list, target_duration: float = 6.0) -> list:
+def build_youtube_transcript_blocks(segments: list, min_duration: float = 5.8) -> list:
     """
-    Agrupa snippets de transcrição em blocos visuais de parágrafo no estilo exato do YouTube (~6s por bloco),
-    com badges de tempo [0:00], [0:06], [0:12], [0:19] e texto fluido.
+    Agrupa snippets de transcrição em blocos visuais de parágrafo no estilo exato do YouTube,
+    respeitando as pausas e quebras de interlocutor [0:00, 0:06, 0:12, 0:19, 0:27...].
     """
     blocks = []
     if not segments:
         return blocks
 
     curr_start = segments[0]['start']
-    curr_end = segments[0]['end']
+    curr_end = segments[0].get('end', curr_start)
     curr_texts = []
 
     for seg in segments:
-        text = seg.get('text', '').strip()
+        text = seg.get('text', '').strip().replace('\n', ' ')
         if not text:
             continue
         cleaned = text.replace('>>', '').strip()
-        curr_texts.append(cleaned)
-        curr_end = seg.get('end', curr_start)
+        
+        delta = seg['start'] - curr_start
+        should_break = False
+        if curr_texts:
+            if delta >= 6.5:
+                should_break = True
+            elif delta >= min_duration and ('>>' in text or curr_texts[-1].endswith(('.', '?', '!'))):
+                should_break = True
 
-        # Fecha o bloco quando acumular ~target_duration segundos
-        if (curr_end - curr_start) >= target_duration:
+        if should_break:
             blocks.append({
                 'start': round(curr_start, 2),
                 'end': round(curr_end, 2),
@@ -124,8 +129,11 @@ def build_youtube_transcript_blocks(segments: list, target_duration: float = 6.0
                 'time_full': f"{int(curr_start//3600):02d}:{int((curr_start%3600)//60):02d}:{int(curr_start%60):02d}",
                 'text': ' '.join(curr_texts)
             })
-            curr_start = seg.get('end', curr_start)
+            curr_start = seg['start']
             curr_texts = []
+
+        curr_texts.append(cleaned)
+        curr_end = seg.get('end', seg['start'] + 2.0)
 
     if curr_texts:
         blocks.append({
@@ -136,5 +144,6 @@ def build_youtube_transcript_blocks(segments: list, target_duration: float = 6.0
             'text': ' '.join(curr_texts)
         })
     return blocks
+
 
 
