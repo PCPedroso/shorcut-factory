@@ -40,12 +40,15 @@ def crop_video_with_smart_face_tracking(
     start_time_str: str,
     end_time_str: str,
     output_video_path: str = "corte_smart_916.mp4",
-    smoothing_alpha: float = 0.12,
-    sample_detection_interval: int = 2  # Detecta a cada 2 frames para máxima velocidade
+    smoothing_alpha: float = 0.10,
+    sample_detection_interval: int = 2,  # Detecta a cada 2 frames para máxima performance
+    auto_zoom: bool = True,
+    margin_ratio: float = 1.55,          # Margem de segurança nas laterais do interlocutor
+    max_zoom_factor: float = 1.85        # Zoom máximo permitido
 ) -> dict:
     """
     Recorta o vídeo no formato 9:16 (1080x1920) acompanhando o orador principal.
-    Aplica interpolação suave (Cinematic Panning) para movimentos naturais de câmera.
+    Aplica Auto-Zoom inteligente com margem segura e interpolação suave (Cinematic Panning).
     """
     try:
         ensure_face_model()
@@ -72,11 +75,12 @@ def crop_video_with_smart_face_tracking(
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        # Calcula a janela de corte 9:16 com base na altura
-        crop_w = int(height * 9.0 / 16.0)
-        if crop_w % 2 != 0:
-            crop_w += 1
-        max_x = width - crop_w
+        # Dimensões base para 9:16
+        base_crop_w = int(height * 9.0 / 16.0)
+        if base_crop_w % 2 != 0:
+            base_crop_w += 1
+        
+        min_crop_w = int(base_crop_w / max_zoom_factor) if auto_zoom else base_crop_w
 
         # Inicializa detector BlazeFace
         base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
@@ -115,8 +119,13 @@ def crop_video_with_smart_face_tracking(
         # Posiciona no início
         cap.set(cv2.CAP_PROP_POS_MSEC, start_sec * 1000.0)
 
-        current_x = (width - crop_w) / 2.0
+        current_w = float(base_crop_w)
+        current_x = (width - base_crop_w) / 2.0
+        current_y = 0.0
+
         smoothed_x = current_x
+        smoothed_y = current_y
+        smoothed_w = current_w
         frame_idx = 0
 
         while cap.isOpened():
@@ -138,17 +147,40 @@ def crop_video_with_smart_face_tracking(
                     # Escolhe a face principal (maior área no quadro)
                     main_face = max(results.detections, key=lambda d: d.bounding_box.width * d.bounding_box.height)
                     bx = main_face.bounding_box
-                    face_center_x = bx.origin_x + bx.width / 2.0
-                    target_x = face_center_x - crop_w / 2.0
-                    current_x = max(0.0, min(float(max_x), float(target_x)))
+                    face_cx = bx.origin_x + bx.width / 2.0
+                    face_cy = bx.origin_y + bx.height * 0.45
 
-            # Aplica suavização exponencial (Cinematic Panning)
+                    if auto_zoom:
+                        # Estima a largura dos ombros/busto com a margem configurável
+                        body_width = bx.width * 2.0
+                        target_w = int(body_width * margin_ratio)
+                        target_w = max(min_crop_w, min(base_crop_w, target_w))
+                        target_h = int(target_w * 16.0 / 9.0)
+
+                        target_x = face_cx - (target_w / 2.0)
+                        target_y = face_cy - (target_h * 0.35)
+                    else:
+                        target_w = base_crop_w
+                        target_h = height
+                        target_x = face_cx - (base_crop_w / 2.0)
+                        target_y = 0.0
+
+                    current_x = max(0.0, min(float(width - target_w), float(target_x)))
+                    current_y = max(0.0, min(float(height - target_h), float(target_y)))
+                    current_w = float(target_w)
+
+            # Aplica suavização exponencial (Cinematic Panning & Smooth Zoom)
             smoothed_x = smoothing_alpha * current_x + (1.0 - smoothing_alpha) * smoothed_x
-            x_int = int(round(smoothed_x))
-            x_int = max(0, min(max_x, x_int))
+            smoothed_y = smoothing_alpha * current_y + (1.0 - smoothing_alpha) * smoothed_y
+            smoothed_w = smoothing_alpha * current_w + (1.0 - smoothing_alpha) * smoothed_w
 
-            # Recorta a janela 9:16 e redimensiona para 1080x1920
-            cropped_frame = frame[:, x_int : x_int + crop_w]
+            sh = int(round(smoothed_w * 16.0 / 9.0))
+            sw = int(round(smoothed_w))
+            sx = max(0, min(width - sw, int(round(smoothed_x))))
+            sy = max(0, min(height - sh, int(round(smoothed_y))))
+
+            # Recorta a janela dinâmica 9:16 e redimensiona para 1080x1920
+            cropped_frame = frame[sy : sy + sh, sx : sx + sw]
             resized_frame = cv2.resize(cropped_frame, (1080, 1920), interpolation=cv2.INTER_LINEAR)
 
             # Envia frame para o FFmpeg

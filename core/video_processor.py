@@ -90,7 +90,9 @@ def cut_video(
     aspect_ratio_mode: str = "16:9",
     blur_zoom: float = 1.0,
     blur_pan: float = 0.0,
-    blur_intensity: int = 25
+    blur_intensity: int = 25,
+    face_auto_zoom: bool = True,
+    face_margin_ratio: float = 1.55
 ) -> dict:
     """
     Corta e formata o vídeo com alta precisão e velocidade via FFmpeg.
@@ -104,6 +106,8 @@ def cut_video(
     - blur_zoom: Nível de aproximação do vídeo principal no modo blur (1.0x a 2.5x).
     - blur_pan: Posição horizontal do vídeo principal (-1.0 à esquerda até +1.0 à direita).
     - blur_intensity: Intensidade do desfoque de fundo (10 a 50).
+    - face_auto_zoom: Ativa o auto-zoom dinâmico no orador com corte de bordas vazias.
+    - face_margin_ratio: Margem de segurança lateral do interlocutor (1.2x a 2.0x).
     """
     try:
         if os.path.exists(output_path):
@@ -114,13 +118,15 @@ def cut_video(
             os.makedirs(out_dir, exist_ok=True)
 
         if aspect_ratio_mode == "9:16_smart_face":
-            # Pipeline 9:16 com Rastreamento Inteligente de Rosto (MediaPipe BlazeFace + Cinematic Panning)
+            # Pipeline 9:16 com Rastreamento Inteligente de Rosto (MediaPipe BlazeFace + Auto-Zoom + Cinematic Panning)
             from core.face_tracker import crop_video_with_smart_face_tracking
             return crop_video_with_smart_face_tracking(
                 input_video_path=input_path,
                 start_time_str=start_time_str,
                 end_time_str=end_time_str,
-                output_video_path=output_path
+                output_video_path=output_path,
+                auto_zoom=face_auto_zoom,
+                margin_ratio=face_margin_ratio
             )
 
         elif aspect_ratio_mode == "9:16_blur":

@@ -571,8 +571,32 @@ if st.session_state.transcription_done:
     blur_zoom_val = 1.0
     blur_pan_val = 0.0
     blur_int_val = 25
+    face_zoom_active = True
+    face_margin_val = 1.55
 
-    if selected_aspect == "9:16_blur":
+    if selected_aspect == "9:16_smart_face":
+        with st.expander("🎯 Ajustes de Auto-Zoom e Margens do Personagem", expanded=True):
+            col_fz1, col_fz2 = st.columns(2)
+            with col_fz1:
+                face_zoom_active = st.toggle(
+                    "🔍 Auto-Zoom Máximo no Personagem",
+                    value=True,
+                    help="Aproxima a câmera vertical no interlocutor principal detectado, eliminando espaços vazios com máxima nitidez."
+                )
+            with col_fz2:
+                margin_choice = st.select_slider(
+                    "📏 Margem Lateral de Segurança:",
+                    options=["Estreita (Close-up Máximo)", "Equilibrada (Busto & Rosto - Recomendado)", "Ampla (Plano Médio)"],
+                    value="Equilibrada (Busto & Rosto - Recomendado)"
+                )
+                if margin_choice == "Estreita (Close-up Máximo)":
+                    face_margin_val = 1.30
+                elif margin_choice == "Ampla (Plano Médio)":
+                    face_margin_val = 1.85
+                else:
+                    face_margin_val = 1.55
+
+    elif selected_aspect == "9:16_blur":
         with st.expander("🔍 Ajustes de Aproximação (Zoom) e Foco no Personagem", expanded=True):
             col_z1, col_z2 = st.columns(2)
             with col_z1:
@@ -651,7 +675,12 @@ if st.session_state.transcription_done:
             if video_res.get("error"):
                 st.error(f"Erro ao baixar vídeo: {video_res['error']}")
             else:
-                extra_info = f" (Zoom: {blur_zoom_val:.2f}x)" if selected_aspect == "9:16_blur" else ""
+                extra_info = ""
+                if selected_aspect == "9:16_blur":
+                    extra_info = f" (Zoom: {blur_zoom_val:.2f}x)"
+                elif selected_aspect == "9:16_smart_face" and face_zoom_active:
+                    extra_info = f" (Auto-Zoom Inteligente)"
+
                 with st.spinner(f"Renderizando corte [{start_time} → {end_time}] no formato {aspect_option}{extra_info}..."):
                     cut_res = cut_video(
                         video_res["path"],
@@ -661,7 +690,9 @@ if st.session_state.transcription_done:
                         aspect_ratio_mode=selected_aspect,
                         blur_zoom=blur_zoom_val,
                         blur_pan=blur_pan_val,
-                        blur_intensity=blur_int_val
+                        blur_intensity=blur_int_val,
+                        face_auto_zoom=face_zoom_active,
+                        face_margin_ratio=face_margin_val
                     )
                     if cut_res.get("error"):
                         st.error(f"Erro ao cortar: {cut_res['error']}")
