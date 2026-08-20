@@ -640,42 +640,106 @@ if st.session_state.transcription_done:
                             st.info("O vídeo precisa ser baixado para gerar a prévia.")
 
     elif selected_aspect == "9:16_blur":
-        with st.expander("🔍 Ajustes de Aproximação (Zoom) e Foco no Personagem", expanded=True):
-            col_z1, col_z2 = st.columns(2)
-            with col_z1:
-                blur_zoom_val = st.slider(
-                    "🔍 Nível de Aproximação (Zoom):",
-                    min_value=1.0,
-                    max_value=2.5,
-                    value=1.35,
-                    step=0.05,
-                    format="%.2fx",
-                    help="Aumente para o vídeo preencher mais a tela e diminuir as faixas superior/inferior de desfoque."
-                )
-            with col_z2:
-                pan_preset = st.selectbox(
-                    "↔️ Posição / Foco Horizontal do Personagem:",
-                    [
-                        "Centro (0%)",
-                        "Personagem à Esquerda (-60%)",
-                        "Personagem à Direita (+60%)",
-                        "Extrema Esquerda (-100%)",
-                        "Extrema Direita (+100%)",
-                        "Ajuste Fino Personalizado"
-                    ]
-                )
-                if pan_preset == "Personagem à Esquerda (-60%)":
-                    blur_pan_val = -0.6
-                elif pan_preset == "Personagem à Direita (+60%)":
-                    blur_pan_val = 0.6
-                elif pan_preset == "Extrema Esquerda (-100%)":
-                    blur_pan_val = -1.0
-                elif pan_preset == "Extrema Direita (+100%)":
-                    blur_pan_val = 1.0
-                elif pan_preset == "Ajuste Fino Personalizado":
-                    blur_pan_val = st.slider("Deslocamento Horizontal:", -1.0, 1.0, 0.0, 0.05)
+        with st.expander("🌫️ Ajustes do Fundo Desfocado (Auto-Zoom e Margens)", expanded=True):
+            mode_blur_ctrl = st.radio(
+                "Modo de Enquadramento:",
+                ["🤖 Auto-Zoom Inteligente no Personagem (Recomendado)", "🎛️ Manual (Sliders de Zoom e Posição)"],
+                horizontal=True,
+                key="mode_blur_ctrl_radio"
+            )
+
+            if mode_blur_ctrl == "🤖 Auto-Zoom Inteligente no Personagem (Recomendado)":
+                col_ab1, col_ab2 = st.columns(2)
+                with col_ab1:
+                    blur_target_choice = st.selectbox(
+                        "👤 Personagem Alvo:",
+                        [
+                            "👉 Personagem da Direita / Entrevistado",
+                            "👈 Personagem da Esquerda",
+                            "🔍 Personagem Mais Central",
+                            "🎯 Automático"
+                        ],
+                        key="blur_target_sel"
+                    )
+                    blur_target_map = {
+                        "👉 Personagem da Direita / Entrevistado": "right",
+                        "👈 Personagem da Esquerda": "left",
+                        "🔍 Personagem Mais Central": "center",
+                        "🎯 Automático": "auto"
+                    }
+                    blur_person_pref = blur_target_map[blur_target_choice]
+
+                with col_ab2:
+                    blur_margin_choice = st.select_slider(
+                        "📏 Margem Lateral de Segurança:",
+                        options=["Estreita (Close-up Máximo / Menor Desfoque)", "Equilibrada (Busto & Rosto)", "Ampla (Plano Médio)"],
+                        value="Equilibrada (Busto & Rosto)",
+                        key="blur_margin_sel"
+                    )
+                    if blur_margin_choice == "Estreita (Close-up Máximo / Menor Desfoque)":
+                        blur_margin_val = 1.30
+                    elif blur_margin_choice == "Ampla (Plano Médio)":
+                        blur_margin_val = 1.85
+                    else:
+                        blur_margin_val = 1.55
+
+                # Calcula automaticamente o Zoom e Pan
+                video_id = get_video_id(video_url)
+                v_full = os.path.join("data", video_id, "video_full.mp4") if video_id else ""
+                if os.path.exists(v_full) and start_time:
+                    from core.face_tracker import calculate_auto_blur_params, generate_blur_preview_image
+                    auto_p = calculate_auto_blur_params(v_full, start_time, blur_person_pref, blur_margin_val)
+                    blur_zoom_val = auto_p["zoom"]
+                    blur_pan_val = auto_p["pan"]
+                    st.caption(f"✨ Auto-Zoom Calculado: **{blur_zoom_val:.2f}x** | Foco Horizontal: **{blur_pan_val:+.2f}**")
+
+                    if st.button("👁️ Visualizar Prévia com Fundo Desfocado", key="btn_prev_blur"):
+                        prev_b_path = os.path.join("data", video_id, "preview_blur.jpg")
+                        p_res = generate_blur_preview_image(v_full, start_time, prev_b_path, blur_zoom_val, blur_pan_val, blur_int_val)
+                        if p_res.get("path") and os.path.exists(p_res["path"]):
+                            st.image(p_res["path"], caption=f"Prévia 9:16 com Fundo Desfocado em {start_time} (Zoom: {blur_zoom_val:.2f}x)", use_container_width=True)
+                        else:
+                            st.error(f"Erro na prévia: {p_res.get('error')}")
                 else:
-                    blur_pan_val = 0.0
+                    blur_zoom_val = 1.45
+                    blur_pan_val = 0.6 if blur_person_pref == "right" else (-0.6 if blur_person_pref == "left" else 0.0)
+
+            else:
+                col_z1, col_z2 = st.columns(2)
+                with col_z1:
+                    blur_zoom_val = st.slider(
+                        "🔍 Nível de Aproximação (Zoom Manual):",
+                        min_value=1.0,
+                        max_value=2.5,
+                        value=1.35,
+                        step=0.05,
+                        format="%.2fx",
+                        help="Aumente para o vídeo preencher mais a tela e diminuir as faixas superior/inferior de desfoque."
+                    )
+                with col_z2:
+                    pan_preset = st.selectbox(
+                        "↔️ Posição / Foco Horizontal:",
+                        [
+                            "Centro (0%)",
+                            "Personagem à Esquerda (-60%)",
+                            "Personagem à Direita (+60%)",
+                            "Extrema Esquerda (-100%)",
+                            "Extrema Direita (+100%)",
+                            "Ajuste Fino Personalizado"
+                        ]
+                    )
+                    if pan_preset == "Personagem à Esquerda (-60%)":
+                        blur_pan_val = -0.6
+                    elif pan_preset == "Personagem à Direita (+60%)":
+                        blur_pan_val = 0.6
+                    elif pan_preset == "Extrema Esquerda (-100%)":
+                        blur_pan_val = -1.0
+                    elif pan_preset == "Extrema Direita (+100%)":
+                        blur_pan_val = 1.0
+                    elif pan_preset == "Ajuste Fino Personalizado":
+                        blur_pan_val = st.slider("Deslocamento Horizontal:", -1.0, 1.0, 0.0, 0.05)
+                    else:
+                        blur_pan_val = 0.0
 
     st.markdown("")
     if st.button("✂️ Gerar Corte no Formato Escolhido", type="primary", use_container_width=True):

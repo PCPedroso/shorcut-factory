@@ -174,6 +174,130 @@ def generate_face_preview_image(
         return {"path": None, "error": str(exc)}
 
 
+def calculate_auto_blur_params(
+    input_video_path: str,
+    timestamp_str: str,
+    person_preference: str = "auto",
+    margin_ratio: float = 1.55
+) -> dict:
+    """
+    Calcula automaticamente o melhor nível de Zoom e Pan horizontal para o modo Fundo Desfocado,
+    enquadrando o orador com a margem de segurança configurada.
+    """
+    try:
+        ensure_face_model()
+        t_sec = parse_time_to_seconds(timestamp_str)
+
+        cap = cv2.VideoCapture(input_video_path)
+        if not cap.isOpened():
+            return {"zoom": 1.35, "pan": 0.0, "face_detected": False}
+
+        cap.set(cv2.CAP_PROP_POS_MSEC, t_sec * 1000.0)
+        ret, frame = cap.read()
+        cap.release()
+
+        if not ret or frame is None:
+            return {"zoom": 1.35, "pan": 0.0, "face_detected": False}
+
+        height, width, _ = frame.shape
+        base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
+        options = vision.FaceDetectorOptions(base_options=base_options)
+        detector = vision.FaceDetector.create_from_options(options)
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        results = detector.detect(mp_img)
+        detector.close()
+
+        detections = results.detections if results.detections else []
+        target_face, _ = select_target_face(detections, width, height, None, person_preference)
+
+        if target_face is None:
+            return {"zoom": 1.35, "pan": 0.0, "face_detected": False}
+
+        bx = target_face.bounding_box
+        face_cx = bx.origin_x + bx.width / 2.0
+
+        # Calcula a largura desejada com a margem de segurança
+        desired_w = bx.width * 2.0 * margin_ratio
+        calc_zoom = min(2.5, max(1.0, float(width) / desired_w))
+
+        face_norm = face_cx / float(width)
+        calc_pan = max(-1.0, min(1.0, (face_norm - 0.5) * 2.0))
+
+        return {
+            "zoom": round(calc_zoom, 2),
+            "pan": round(calc_pan, 2),
+            "face_detected": True
+        }
+    except Exception:
+        return {"zoom": 1.35, "pan": 0.0, "face_detected": False}
+
+
+def generate_blur_preview_image(
+    input_video_path: str,
+    timestamp_str: str,
+    output_preview_path: str = "temp_blur_preview.jpg",
+    zoom: float = 1.35,
+    pan: float = 0.0,
+    blur_intensity: int = 25
+) -> dict:
+    """
+    Gera uma imagem de prévia realista do modo Fundo Desfocado (Blur) com o zoom e enquadramento exatos.
+    """
+    try:
+        t_sec = parse_time_to_seconds(timestamp_str)
+        cap = cv2.VideoCapture(input_video_path)
+        if not cap.isOpened():
+            return {"path": None, "error": "Não foi possível abrir o vídeo para prévia."}
+
+        cap.set(cv2.CAP_PROP_POS_MSEC, t_sec * 1000.0)
+        ret, frame = cap.read()
+        cap.release()
+
+        if not ret or frame is None:
+            return {"path": None, "error": "Falha ao capturar o frame."}
+
+        h, w, _ = frame.shape
+        import numpy as np
+
+        # 1. Background (1080x1920 desfocado)
+        bg = cv2.resize(frame, (1080, 1920), interpolation=cv2.INTER_LINEAR)
+        ksize = int(blur_intensity * 2 + 1)
+        if ksize % 2 == 0:
+            ksize += 1
+        bg = cv2.GaussianBlur(bg, (ksize, ksize), blur_intensity)
+        bg = (bg * 0.88).astype(np.uint8)
+
+        # 2. Foreground (com zoom e pan)
+        w_fg = int(1080 * zoom)
+        if w_fg % 2 != 0:
+            w_fg += 1
+        h_fg = int(h * (w_fg / w))
+
+        scaled_fg = cv2.resize(frame, (w_fg, h_fg), interpolation=cv2.INTER_LINEAR)
+
+        if w_fg > 1080:
+            max_crop = w_fg - 1080
+            crop_x = int(max_crop * (pan + 1.0) / 2.0)
+            crop_x = max(0, min(max_crop, crop_x))
+            cropped_fg = scaled_fg[:, crop_x : crop_x + 1080]
+        else:
+            cropped_fg = scaled_fg
+
+        # Centraliza verticalmente
+        y_start = max(0, (1920 - h_fg) // 2)
+        y_end = min(1920, y_start + h_fg)
+
+        bg[y_start:y_end, 0:1080] = cropped_fg[: y_end - y_start, :1080]
+
+        cv2.imwrite(output_preview_path, bg)
+        return {"path": output_preview_path, "error": None}
+    except Exception as exc:
+        return {"path": None, "error": str(exc)}
+
+
+
 def crop_video_with_smart_face_tracking(
     input_video_path: str,
     start_time_str: str,
