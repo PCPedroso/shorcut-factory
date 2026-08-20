@@ -87,7 +87,10 @@ def cut_video(
     start_time_str: str,
     end_time_str: str,
     output_path: str = "corte_final.mp4",
-    aspect_ratio_mode: str = "16:9"
+    aspect_ratio_mode: str = "16:9",
+    blur_zoom: float = 1.0,
+    blur_pan: float = 0.0,
+    blur_intensity: int = 25
 ) -> dict:
     """
     Corta e formata o vídeo com alta precisão e velocidade via FFmpeg.
@@ -95,8 +98,12 @@ def cut_video(
     Parâmetros:
     - aspect_ratio_mode:
         - '16:9': Horizontal original (1080p Full HD)
-        - '9:16_blur': Vertical 1080x1920 com fundo ampliado e desfocado (padrão de podcasts/entrevistas)
+        - '9:16_blur': Vertical 1080x1920 com fundo ampliado e desfocado
         - '9:16_crop': Vertical 1080x1920 com corte central preenchendo 100% da tela
+        - '9:16_smart_face': Vertical 1080x1920 com rastreamento inteligente de rosto
+    - blur_zoom: Nível de aproximação do vídeo principal no modo blur (1.0x a 2.5x).
+    - blur_pan: Posição horizontal do vídeo principal (-1.0 à esquerda até +1.0 à direita).
+    - blur_intensity: Intensidade do desfoque de fundo (10 a 50).
     """
     try:
         if os.path.exists(output_path):
@@ -117,11 +124,24 @@ def cut_video(
             )
 
         elif aspect_ratio_mode == "9:16_blur":
-            # Pipeline 9:16 Fundo Desfocado (BoxBlur elegante + vídeo 16:9 nítido centralizado)
+            # Pipeline 9:16 Fundo Desfocado com Zoom e Pan configuráveis
+            w_fg = int(1080 * blur_zoom)
+            if w_fg % 2 != 0:
+                w_fg += 1
+
+            if w_fg > 1080:
+                max_crop_x = w_fg - 1080
+                crop_x = int(max_crop_x * (blur_pan + 1.0) / 2.0)
+                fg_filter = f"[0:v]scale={w_fg}:-2,crop=1080:ih:{crop_x}:0[fg]"
+                overlay_filter = "[bg][fg]overlay=0:(H-h)/2[v]"
+            else:
+                fg_filter = f"[0:v]scale={w_fg}:-2[fg]"
+                overlay_filter = "[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+
             filter_complex = (
-                "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:5,eq=brightness=-0.10[bg];"
-                "[0:v]scale=1080:-2[fg];"
-                "[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+                f"[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur={blur_intensity}:5,eq=brightness=-0.10[bg];"
+                f"{fg_filter};"
+                f"{overlay_filter}"
             )
             cmd = [
                 FFMPEG_EXE, "-y",

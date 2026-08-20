@@ -568,6 +568,48 @@ if st.session_state.transcription_done:
     }
     selected_aspect = aspect_map[aspect_option]
 
+    blur_zoom_val = 1.0
+    blur_pan_val = 0.0
+    blur_int_val = 25
+
+    if selected_aspect == "9:16_blur":
+        with st.expander("🔍 Ajustes de Aproximação (Zoom) e Foco no Personagem", expanded=True):
+            col_z1, col_z2 = st.columns(2)
+            with col_z1:
+                blur_zoom_val = st.slider(
+                    "🔍 Nível de Aproximação (Zoom):",
+                    min_value=1.0,
+                    max_value=2.5,
+                    value=1.35,
+                    step=0.05,
+                    format="%.2fx",
+                    help="Aumente para o vídeo preencher mais a tela e diminuir as faixas superior/inferior de desfoque."
+                )
+            with col_z2:
+                pan_preset = st.selectbox(
+                    "↔️ Posição / Foco Horizontal do Personagem:",
+                    [
+                        "Centro (0%)",
+                        "Personagem à Esquerda (-60%)",
+                        "Personagem à Direita (+60%)",
+                        "Extrema Esquerda (-100%)",
+                        "Extrema Direita (+100%)",
+                        "Ajuste Fino Personalizado"
+                    ]
+                )
+                if pan_preset == "Personagem à Esquerda (-60%)":
+                    blur_pan_val = -0.6
+                elif pan_preset == "Personagem à Direita (+60%)":
+                    blur_pan_val = 0.6
+                elif pan_preset == "Extrema Esquerda (-100%)":
+                    blur_pan_val = -1.0
+                elif pan_preset == "Extrema Direita (+100%)":
+                    blur_pan_val = 1.0
+                elif pan_preset == "Ajuste Fino Personalizado":
+                    blur_pan_val = st.slider("Deslocamento Horizontal:", -1.0, 1.0, 0.0, 0.05)
+                else:
+                    blur_pan_val = 0.0
+
     st.markdown("")
     if st.button("✂️ Gerar Corte no Formato Escolhido", type="primary", use_container_width=True):
         if not start_time or not end_time:
@@ -609,19 +651,23 @@ if st.session_state.transcription_done:
             if video_res.get("error"):
                 st.error(f"Erro ao baixar vídeo: {video_res['error']}")
             else:
-                with st.spinner(f"Renderizando corte [{start_time} → {end_time}] no formato {aspect_option}..."):
+                extra_info = f" (Zoom: {blur_zoom_val:.2f}x)" if selected_aspect == "9:16_blur" else ""
+                with st.spinner(f"Renderizando corte [{start_time} → {end_time}] no formato {aspect_option}{extra_info}..."):
                     cut_res = cut_video(
                         video_res["path"],
                         start_time,
                         end_time,
                         corte_output_path,
-                        aspect_ratio_mode=selected_aspect
+                        aspect_ratio_mode=selected_aspect,
+                        blur_zoom=blur_zoom_val,
+                        blur_pan=blur_pan_val,
+                        blur_intensity=blur_int_val
                     )
                     if cut_res.get("error"):
                         st.error(f"Erro ao cortar: {cut_res['error']}")
                     else:
                         out_res = get_video_resolution(corte_output_path)
-                        st.success(f"🎉 Corte gerado com sucesso! Resolução: **{out_res}** | Formato: **{aspect_option}**")
+                        st.success(f"🎉 Corte gerado com sucesso! Resolução: **{out_res}** | Formato: **{aspect_option}**{extra_info}")
                         
                         if "9:16" in selected_aspect:
                             col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
@@ -638,4 +684,5 @@ if st.session_state.transcription_done:
                                 mime="video/mp4",
                                 use_container_width=True
                             )
+
 
