@@ -1,5 +1,5 @@
 """
-face_tracker.py — Rastreamento Inteligente de Rosto e Auto-Reframing Vertical (9:16)
+face_tracker.py — Rastreamento Inteligente de Rosto, Trava de Alvo (Target Lock) e Auto-Reframing Vertical (9:16)
 Detecta o orador principal com Google MediaPipe BlazeFace e realiza movimento suave de câmera (Cinematic Panning).
 """
 
@@ -35,6 +35,145 @@ def parse_time_to_seconds(time_str: str) -> float:
     return float(time_str)
 
 
+def select_target_face(detections, frame_width: int, frame_height: int, last_tracked_center=None, person_preference: str = "auto"):
+    """
+    Seleciona o rosto alvo respeitando a preferência do usuário e mantendo a
+    Trava de Continuidade Espacial (Target Lock) para nunca pular para outra pessoa na cena.
+    """
+    if not detections:
+        return None, last_tracked_center
+
+    # Se já temos um alvo rastreado anteriormente, usamos a menor distância euclidiana (Target Lock)
+    if last_tracked_center is not None:
+        last_cx, last_cy = last_tracked_center
+        best_face = None
+        min_dist = float('inf')
+        for d in detections:
+            bx = d.bounding_box
+            cx = bx.origin_x + bx.width / 2.0
+            cy = bx.origin_y + bx.height / 2.0
+            dist = ((cx - last_cx) ** 2 + (cy - last_cy) ** 2) ** 0.5
+            if dist < min_dist:
+                min_dist = dist
+                best_face = d
+
+        if best_face is not None:
+            bx = best_face.bounding_box
+            return best_face, (bx.origin_x + bx.width / 2.0, bx.origin_y + bx.height / 2.0)
+
+    # Primeira seleção (baseada na preferência escolhida)
+    if person_preference == "right":
+        # Pessoa mais à direita da tela
+        best_face = max(detections, key=lambda d: d.bounding_box.origin_x + d.bounding_box.width / 2.0)
+    elif person_preference == "left":
+        # Pessoa mais à esquerda da tela
+        best_face = min(detections, key=lambda d: d.bounding_box.origin_x + d.bounding_box.width / 2.0)
+    elif person_preference == "center":
+        # Pessoa mais próxima do centro da tela
+        center_x = frame_width / 2.0
+        best_face = min(detections, key=lambda d: abs((d.bounding_box.origin_x + d.bounding_box.width / 2.0) - center_x))
+    else:
+        # Modo 'auto': maior área / dominância inicial
+        best_face = max(detections, key=lambda d: d.bounding_box.width * d.bounding_box.height)
+
+    bx = best_face.bounding_box
+    return best_face, (bx.origin_x + bx.width / 2.0, bx.origin_y + bx.height / 2.0)
+
+
+def generate_face_preview_image(
+    input_video_path: str,
+    timestamp_str: str,
+    output_preview_path: str = "temp_face_preview.jpg",
+    person_preference: str = "auto",
+    auto_zoom: bool = True,
+    margin_ratio: float = 1.55,
+    max_zoom_factor: float = 1.85
+) -> dict:
+    """
+    Gera uma imagem de prévia mostrando as pessoas detectadas, quem foi travado como alvo
+    e a moldura do enquadramento vertical 9:16.
+    """
+    try:
+        ensure_face_model()
+        t_sec = parse_time_to_seconds(timestamp_str)
+
+        cap = cv2.VideoCapture(input_video_path)
+        if not cap.isOpened():
+            return {"path": None, "error": "Não foi possível abrir o vídeo para prévia."}
+
+        cap.set(cv2.CAP_PROP_POS_MSEC, t_sec * 1000.0)
+        ret, frame = cap.read()
+        cap.release()
+
+        if not ret or frame is None:
+            return {"path": None, "error": "Falha ao capturar o frame de prévia."}
+
+        height, width, _ = frame.shape
+        base_crop_w = int(height * 9.0 / 16.0)
+        if base_crop_w % 2 != 0:
+            base_crop_w += 1
+        min_crop_w = int(base_crop_w / max_zoom_factor) if auto_zoom else base_crop_w
+
+        base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
+        options = vision.FaceDetectorOptions(base_options=base_options)
+        detector = vision.FaceDetector.create_from_options(options)
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        results = detector.detect(mp_img)
+        detector.close()
+
+        detections = results.detections if results.detections else []
+        target_face, _ = select_target_face(detections, width, height, None, person_preference)
+
+        preview_img = frame.copy()
+
+        # Desenha as caixas dos rostos
+        for d in detections:
+            is_target = (d == target_face)
+            bx = d.bounding_box
+            color = (0, 255, 0) if is_target else (220, 120, 50)  # Verde para alvo, Laranja para outros
+            cv2.rectangle(preview_img, (bx.origin_x, bx.origin_y), (bx.origin_x + bx.width, bx.origin_y + bx.height), color, 3)
+
+            label = "ALVO PRINCIPAL" if is_target else "OUTRO"
+            cv2.putText(preview_img, label, (bx.origin_x, max(24, bx.origin_y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+
+        # Desenha a janela do enquadramento vertical 9:16
+        if target_face is not None:
+            bx = target_face.bounding_box
+            face_cx = bx.origin_x + bx.width / 2.0
+            face_cy = bx.origin_y + bx.height * 0.45
+
+            if auto_zoom:
+                body_width = bx.width * 2.0
+                target_w = int(body_width * margin_ratio)
+                target_w = max(min_crop_w, min(base_crop_w, target_w))
+                target_h = int(target_w * 16.0 / 9.0)
+
+                target_x = face_cx - (target_w / 2.0)
+                target_y = face_cy - (target_h * 0.35)
+            else:
+                target_w = base_crop_w
+                target_h = height
+                target_x = face_cx - (base_crop_w / 2.0)
+                target_y = 0.0
+
+            x1 = max(0, min(width - target_w, int(target_x)))
+            y1 = max(0, min(height - target_h, int(target_y)))
+            x2 = x1 + target_w
+            y2 = y1 + target_h
+
+            # Desenha moldura de corte 9:16 em ciano
+            cv2.rectangle(preview_img, (x1, y1), (x2, y2), (255, 255, 0), 4)
+            cv2.putText(preview_img, "ENQUADRAMENTO 9:16", (x1 + 10, y1 + 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+
+        cv2.imwrite(output_preview_path, preview_img)
+        return {"path": output_preview_path, "detected_count": len(detections), "error": None}
+
+    except Exception as exc:
+        return {"path": None, "error": str(exc)}
+
+
 def crop_video_with_smart_face_tracking(
     input_video_path: str,
     start_time_str: str,
@@ -44,11 +183,12 @@ def crop_video_with_smart_face_tracking(
     sample_detection_interval: int = 2,  # Detecta a cada 2 frames para máxima performance
     auto_zoom: bool = True,
     margin_ratio: float = 1.55,          # Margem de segurança nas laterais do interlocutor
-    max_zoom_factor: float = 1.85        # Zoom máximo permitido
+    max_zoom_factor: float = 1.85,       # Zoom máximo permitido
+    person_preference: str = "auto"      # 'auto', 'right', 'left', 'center'
 ) -> dict:
     """
     Recorta o vídeo no formato 9:16 (1080x1920) acompanhando o orador principal.
-    Aplica Auto-Zoom inteligente com margem segura e interpolação suave (Cinematic Panning).
+    Aplica Trava de Consistência Espacial (Target Lock) e Auto-Zoom inteligente com Cinematic Panning.
     """
     try:
         ensure_face_model()
@@ -126,6 +266,7 @@ def crop_video_with_smart_face_tracking(
         smoothed_x = current_x
         smoothed_y = current_y
         smoothed_w = current_w
+        last_tracked_center = None
         frame_idx = 0
 
         while cap.isOpened():
@@ -142,11 +283,15 @@ def crop_video_with_smart_face_tracking(
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
                 results = detector.detect(mp_img)
+                detections = results.detections if results.detections else []
 
-                if results.detections:
-                    # Escolhe a face principal (maior área no quadro)
-                    main_face = max(results.detections, key=lambda d: d.bounding_box.width * d.bounding_box.height)
-                    bx = main_face.bounding_box
+                # Seleciona com Trava de Continuidade Espacial (Target Lock)
+                target_face, last_tracked_center = select_target_face(
+                    detections, width, height, last_tracked_center, person_preference
+                )
+
+                if target_face is not None:
+                    bx = target_face.bounding_box
                     face_cx = bx.origin_x + bx.width / 2.0
                     face_cy = bx.origin_y + bx.height * 0.45
 

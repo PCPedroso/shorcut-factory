@@ -573,16 +573,36 @@ if st.session_state.transcription_done:
     blur_int_val = 25
     face_zoom_active = True
     face_margin_val = 1.55
+    person_pref_val = "auto"
 
     if selected_aspect == "9:16_smart_face":
-        with st.expander("🎯 Ajustes de Auto-Zoom e Margens do Personagem", expanded=True):
+        with st.expander("🎯 Ajustes de Rastreamento, Foco e Margens do Personagem", expanded=True):
             col_fz1, col_fz2 = st.columns(2)
             with col_fz1:
+                target_choice = st.selectbox(
+                    "👤 Personagem Alvo (Trava de Continuidade):",
+                    [
+                        "👉 Personagem da Direita / Entrevistado",
+                        "👈 Personagem da Esquerda",
+                        "🔍 Personagem Mais Central",
+                        "🎯 Automático (Maior Dominância)"
+                    ],
+                    help="Trava o rastreamento 100% no interlocutor selecionado, impedindo que a câmera pule para outra pessoa na cena."
+                )
+                target_map = {
+                    "👉 Personagem da Direita / Entrevistado": "right",
+                    "👈 Personagem da Esquerda": "left",
+                    "🔍 Personagem Mais Central": "center",
+                    "🎯 Automático (Maior Dominância)": "auto"
+                }
+                person_pref_val = target_map[target_choice]
+
                 face_zoom_active = st.toggle(
                     "🔍 Auto-Zoom Máximo no Personagem",
                     value=True,
                     help="Aproxima a câmera vertical no interlocutor principal detectado, eliminando espaços vazios com máxima nitidez."
                 )
+
             with col_fz2:
                 margin_choice = st.select_slider(
                     "📏 Margem Lateral de Segurança:",
@@ -595,6 +615,29 @@ if st.session_state.transcription_done:
                     face_margin_val = 1.85
                 else:
                     face_margin_val = 1.55
+
+                # Botão de prévia instantânea de enquadramento
+                if start_time:
+                    if st.button("👁️ Visualizar Prévia do Enquadramento", key="btn_preview_face"):
+                        video_id = get_video_id(video_url)
+                        v_full = os.path.join("data", video_id, "video_full.mp4") if video_id else ""
+                        if os.path.exists(v_full):
+                            from core.face_tracker import generate_face_preview_image
+                            prev_path = os.path.join("data", video_id, "preview_face.jpg")
+                            p_res = generate_face_preview_image(
+                                v_full,
+                                start_time,
+                                prev_path,
+                                person_preference=person_pref_val,
+                                auto_zoom=face_zoom_active,
+                                margin_ratio=face_margin_val
+                            )
+                            if p_res.get("path") and os.path.exists(p_res["path"]):
+                                st.image(p_res["path"], caption=f"Prévia em {start_time} (Alvo em Verde, Moldura 9:16 em Ciano)", use_container_width=True)
+                            else:
+                                st.error(f"Erro na prévia: {p_res.get('error')}")
+                        else:
+                            st.info("O vídeo precisa ser baixado para gerar a prévia.")
 
     elif selected_aspect == "9:16_blur":
         with st.expander("🔍 Ajustes de Aproximação (Zoom) e Foco no Personagem", expanded=True):
@@ -692,7 +735,8 @@ if st.session_state.transcription_done:
                         blur_pan=blur_pan_val,
                         blur_intensity=blur_int_val,
                         face_auto_zoom=face_zoom_active,
-                        face_margin_ratio=face_margin_val
+                        face_margin_ratio=face_margin_val,
+                        person_preference=person_pref_val
                     )
                     if cut_res.get("error"):
                         st.error(f"Erro ao cortar: {cut_res['error']}")
