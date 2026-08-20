@@ -106,7 +106,17 @@ def cut_video(
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
 
-        if aspect_ratio_mode == "9:16_blur":
+        if aspect_ratio_mode == "9:16_smart_face":
+            # Pipeline 9:16 com Rastreamento Inteligente de Rosto (MediaPipe BlazeFace + Cinematic Panning)
+            from core.face_tracker import crop_video_with_smart_face_tracking
+            return crop_video_with_smart_face_tracking(
+                input_video_path=input_path,
+                start_time_str=start_time_str,
+                end_time_str=end_time_str,
+                output_video_path=output_path
+            )
+
+        elif aspect_ratio_mode == "9:16_blur":
             # Pipeline 9:16 Fundo Desfocado (BoxBlur elegante + vídeo 16:9 nítido centralizado)
             filter_complex = (
                 "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:5,eq=brightness=-0.10[bg];"

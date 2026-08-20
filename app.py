@@ -9,11 +9,14 @@ import core.extractor
 import core.transcriber
 import core.analyzer
 import core.video_processor
+import core.face_tracker
 
 importlib.reload(core.extractor)
 importlib.reload(core.transcriber)
 importlib.reload(core.analyzer)
 importlib.reload(core.video_processor)
+importlib.reload(core.face_tracker)
+
 
 from core.extractor import download_audio, get_video_metadata
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
@@ -548,6 +551,7 @@ if st.session_state.transcription_done:
     aspect_option = st.radio(
         "Escolha o enquadramento:",
         [
+            "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)",
             "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)",
             "📱 Vertical 9:16 (Corte Central 100% Tela)",
             "💻 Horizontal 16:9 (Original 1080p Full HD)"
@@ -557,6 +561,7 @@ if st.session_state.transcription_done:
     )
     
     aspect_map = {
+        "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)": "9:16_smart_face",
         "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)": "9:16_blur",
         "📱 Vertical 9:16 (Corte Central 100% Tela)": "9:16_crop",
         "💻 Horizontal 16:9 (Original 1080p Full HD)": "16:9"

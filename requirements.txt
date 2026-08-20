@@ -5,3 +5,6 @@ streamlit
 moviepy
 ollama
 youtube-transcript-api
+opencv-python
+mediapipe
+
