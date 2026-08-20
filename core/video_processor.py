@@ -82,31 +82,94 @@ def parse_time_to_seconds(time_str: str) -> int:
     return int(time_str)
 
 
-def cut_video(input_path: str, start_time_str: str, end_time_str: str, output_path: str = "corte_final.mp4") -> dict:
+def cut_video(
+    input_path: str,
+    start_time_str: str,
+    end_time_str: str,
+    output_path: str = "corte_final.mp4",
+    aspect_ratio_mode: str = "16:9"
+) -> dict:
     """
-    Corta o vídeo na resolução original. Tenta FFmpeg direto primeiro (cópia sem recodificar),
-    com fallback para MoviePy se necessário.
+    Corta e formata o vídeo com alta precisão e velocidade via FFmpeg.
+    
+    Parâmetros:
+    - aspect_ratio_mode:
+        - '16:9': Horizontal original (1080p Full HD)
+        - '9:16_blur': Vertical 1080x1920 com fundo ampliado e desfocado (padrão de podcasts/entrevistas)
+        - '9:16_crop': Vertical 1080x1920 com corte central preenchendo 100% da tela
     """
     try:
         if os.path.exists(output_path):
             os.remove(output_path)
 
-        # FFmpeg direto com -ss e -to: cópia de stream ultrarrápida
-        cmd = [
-            FFMPEG_EXE,
-            "-y",
-            "-ss", start_time_str,
-            "-i", input_path,
-            "-to", end_time_str,
-            "-c", "copy",
-            output_path
-        ]
+        out_dir = os.path.dirname(output_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
+        if aspect_ratio_mode == "9:16_blur":
+            # Pipeline 9:16 Fundo Desfocado (BoxBlur elegante + vídeo 16:9 nítido centralizado)
+            filter_complex = (
+                "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:5,eq=brightness=-0.10[bg];"
+                "[0:v]scale=1080:-2[fg];"
+                "[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+            )
+            cmd = [
+                FFMPEG_EXE, "-y",
+                "-ss", start_time_str,
+                "-to", end_time_str,
+                "-i", input_path,
+                "-filter_complex", filter_complex,
+                "-map", "[v]",
+                "-map", "0:a?",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "20",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-pix_fmt", "yuv420p",
+                output_path
+            ]
+        elif aspect_ratio_mode == "9:16_crop":
+            # Pipeline 9:16 Corte Central (1080x1920 preenchendo 100% da tela)
+            filter_complex = "[0:v]crop=ih*(9/16):ih:(iw-ow)/2:0,scale=1080:1920[v]"
+            cmd = [
+                FFMPEG_EXE, "-y",
+                "-ss", start_time_str,
+                "-to", end_time_str,
+                "-i", input_path,
+                "-filter_complex", filter_complex,
+                "-map", "[v]",
+                "-map", "0:a?",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "20",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-pix_fmt", "yuv420p",
+                output_path
+            ]
+        else:
+            # Padrão 16:9 Horizontal (Cópia rápida com recodificação precisa)
+            cmd = [
+                FFMPEG_EXE, "-y",
+                "-ss", start_time_str,
+                "-to", end_time_str,
+                "-i", input_path,
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "20",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-pix_fmt", "yuv420p",
+                output_path
+            ]
+
         result = subprocess.run(cmd, capture_output=True, text=True)
 
         if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             return {"path": output_path, "error": None}
 
-        # Fallback MoviePy
+        # Fallback MoviePy se FFmpeg direto retornar erro
         start_s = parse_time_to_seconds(start_time_str)
         end_s = parse_time_to_seconds(end_time_str)
 
@@ -126,3 +189,4 @@ def cut_video(input_path: str, start_time_str: str, end_time_str: str, output_pa
         return {"path": output_path, "error": None}
     except Exception as e:
         return {"path": None, "error": str(e)}
+

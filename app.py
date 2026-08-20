@@ -544,8 +544,27 @@ if st.session_state.transcription_done:
     start_time = col_start.text_input("Tempo Inicial (HH:MM:SS)", key="final_start_time", placeholder="00:00:00")
     end_time = col_end.text_input("Tempo Final (HH:MM:SS)", key="final_end_time", placeholder="00:10:00")
 
+    st.markdown("#### 📐 Formato de Exportação do Vídeo")
+    aspect_option = st.radio(
+        "Escolha o enquadramento:",
+        [
+            "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)",
+            "📱 Vertical 9:16 (Corte Central 100% Tela)",
+            "💻 Horizontal 16:9 (Original 1080p Full HD)"
+        ],
+        horizontal=False,
+        key="aspect_ratio_choice"
+    )
     
-    if st.button("✂️ Gerar Corte Viral", type="primary"):
+    aspect_map = {
+        "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)": "9:16_blur",
+        "📱 Vertical 9:16 (Corte Central 100% Tela)": "9:16_crop",
+        "💻 Horizontal 16:9 (Original 1080p Full HD)": "16:9"
+    }
+    selected_aspect = aspect_map[aspect_option]
+
+    st.markdown("")
+    if st.button("✂️ Gerar Corte no Formato Escolhido", type="primary", use_container_width=True):
         if not start_time or not end_time:
             st.warning("Preencha o tempo inicial e final.")
         else:
@@ -558,7 +577,7 @@ if st.session_state.transcription_done:
             data_dir = os.path.join("data", video_id) if video_id else "data"
             os.makedirs(data_dir, exist_ok=True)
             video_full_path = os.path.join(data_dir, "video_full.mp4")
-            corte_output_path = os.path.join(data_dir, "corte_viral.mp4")
+            corte_output_path = os.path.join(data_dir, f"corte_{selected_aspect}.mp4")
             
             # Detecta se o vídeo no cache é de baixa resolução (< 720p) e força o download em 1080p
             need_download = not os.path.exists(video_full_path)
@@ -585,18 +604,33 @@ if st.session_state.transcription_done:
             if video_res.get("error"):
                 st.error(f"Erro ao baixar vídeo: {video_res['error']}")
             else:
-                with st.spinner(f"Processando corte [{start_time} → {end_time}] em alta qualidade..."):
-                    cut_res = cut_video(video_res["path"], start_time, end_time, corte_output_path)
+                with st.spinner(f"Renderizando corte [{start_time} → {end_time}] no formato {aspect_option}..."):
+                    cut_res = cut_video(
+                        video_res["path"],
+                        start_time,
+                        end_time,
+                        corte_output_path,
+                        aspect_ratio_mode=selected_aspect
+                    )
                     if cut_res.get("error"):
                         st.error(f"Erro ao cortar: {cut_res['error']}")
                     else:
-                        st.success(f"🎉 Corte gerado com sucesso em alta qualidade! ({get_video_resolution(corte_output_path)})")
-                        st.video(corte_output_path)
+                        out_res = get_video_resolution(corte_output_path)
+                        st.success(f"🎉 Corte gerado com sucesso! Resolução: **{out_res}** | Formato: **{aspect_option}**")
+                        
+                        if "9:16" in selected_aspect:
+                            col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
+                            with col_v2:
+                                st.video(corte_output_path)
+                        else:
+                            st.video(corte_output_path)
                         
                         with open(corte_output_path, "rb") as file:
                             st.download_button(
-                                label="💾 Baixar Arquivo MP4 em Alta Qualidade",
+                                label=f"💾 Baixar Vídeo ({out_res})",
                                 data=file,
-                                file_name="corte_viral.mp4",
-                                mime="video/mp4"
+                                file_name=f"corte_{selected_aspect}.mp4",
+                                mime="video/mp4",
+                                use_container_width=True
                             )
+
