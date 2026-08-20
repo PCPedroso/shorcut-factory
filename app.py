@@ -722,6 +722,7 @@ if st.session_state.transcription_done:
     aspect_option = st.radio(
         "Escolha o enquadramento:",
         [
+            "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen - Estilo Podpah & Flow)",
             "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)",
             "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)",
             "📱 Vertical 9:16 (Corte Central 100% Tela)",
@@ -732,6 +733,7 @@ if st.session_state.transcription_done:
     )
     
     aspect_map = {
+        "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen - Estilo Podpah & Flow)": "9:16_split",
         "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)": "9:16_smart_face",
         "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)": "9:16_blur",
         "📱 Vertical 9:16 (Corte Central 100% Tela)": "9:16_crop",
@@ -745,8 +747,78 @@ if st.session_state.transcription_done:
     face_zoom_active = True
     face_margin_val = 1.55
     person_pref_val = "auto"
+    split_top_pan = -0.65
+    split_bottom_pan = 0.65
+    split_zoom_val = 1.15
+    split_div_color = "black"
+    split_div_w = 4
 
-    if selected_aspect == "9:16_smart_face":
+    if selected_aspect == "9:16_split":
+        with st.expander("👥 Ajustes do Layout Dividido (Split Screen 9:16)", expanded=True):
+            col_sp1, col_sp2 = st.columns(2)
+            with col_sp1:
+                split_preset = st.selectbox(
+                    "🎬 Distribuição dos Personagens:",
+                    [
+                        "👈 Entrevistador(es) no Topo | 👉 Entrevistado na Base (Padrão Podpah/Flow)",
+                        "👉 Entrevistado no Topo | 👈 Entrevistador(es) na Base",
+                        "🎛️ Personalizado (Sliders Manuais)"
+                    ],
+                    key="split_preset_choice"
+                )
+                
+                if split_preset == "👈 Entrevistador(es) no Topo | 👉 Entrevistado na Base (Padrão Podpah/Flow)":
+                    split_top_pan = -0.65
+                    split_bottom_pan = 0.65
+                elif split_preset == "👉 Entrevistado no Topo | 👈 Entrevistador(es) na Base":
+                    split_top_pan = 0.65
+                    split_bottom_pan = -0.65
+                else:
+                    split_top_pan = st.slider("↔️ Foco Horizontal do Topo:", -1.0, 1.0, -0.65, 0.05)
+                    split_bottom_pan = st.slider("↔️ Foco Horizontal da Base:", -1.0, 1.0, 0.65, 0.05)
+
+            with col_sp2:
+                split_zoom_val = st.slider(
+                    "🔍 Zoom / Aproximação dos Quadros:",
+                    min_value=1.0,
+                    max_value=2.0,
+                    value=1.15,
+                    step=0.05,
+                    format="%.2fx",
+                    help="Aumente para aproximar o enquadramento de rosto e busto nos dois quadros."
+                )
+                col_div1, col_div2 = st.columns(2)
+                with col_div1:
+                    split_div_color = st.selectbox("Linha Divisória:", ["black", "white", "gray", "none"], index=0, format_func=lambda x: {"black": "⬛ Preta", "white": "⬜ Branca", "gray": "🔘 Cinza", "none": "🚫 Sem Linha"}[x])
+                with col_div2:
+                    split_div_w = st.slider("Espessura:", 0, 8, 4)
+
+            if start_time:
+                if st.button("👁️ Visualizar Prévia do Split Screen", key="btn_prev_split"):
+                    active_u = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                    v_id = get_video_id(active_u)
+                    v_full = os.path.join("data", v_id, "video_full.mp4") if v_id else ""
+                    if os.path.exists(v_full):
+                        from core.face_tracker import generate_split_preview_image
+                        prev_sp_path = os.path.join("data", v_id, "preview_split.jpg")
+                        p_res = generate_split_preview_image(
+                            v_full,
+                            start_time,
+                            prev_sp_path,
+                            top_pan=split_top_pan,
+                            bottom_pan=split_bottom_pan,
+                            zoom=split_zoom_val,
+                            divider_color=split_div_color,
+                            divider_width=split_div_w
+                        )
+                        if p_res.get("path") and os.path.exists(p_res["path"]):
+                            st.image(p_res["path"], caption=f"Prévia 9:16 Split Screen em {start_time}", use_container_width=True)
+                        else:
+                            st.error(f"Erro na prévia: {p_res.get('error')}")
+                    else:
+                        st.info("O vídeo precisa ser baixado para gerar a prévia.")
+
+    elif selected_aspect == "9:16_smart_face":
         with st.expander("🎯 Ajustes de Rastreamento, Foco e Margens do Personagem", expanded=True):
             col_fz1, col_fz2 = st.columns(2)
             with col_fz1:
@@ -963,6 +1035,8 @@ if st.session_state.transcription_done:
                         extra_info = f" (Zoom: {blur_zoom_val:.2f}x)"
                     elif selected_aspect == "9:16_smart_face" and face_zoom_active:
                         extra_info = f" (Auto-Zoom Inteligente)"
+                    elif selected_aspect == "9:16_split":
+                        extra_info = f" (Split Screen Topo/Base)"
 
                     with st.spinner(f"Renderizando corte [{start_time} → {end_time}] no formato {aspect_option}{extra_info}..."):
                         cut_res = cut_video(
@@ -976,7 +1050,12 @@ if st.session_state.transcription_done:
                             blur_intensity=blur_int_val,
                             face_auto_zoom=face_zoom_active,
                             face_margin_ratio=face_margin_val,
-                            person_preference=person_pref_val
+                            person_preference=person_pref_val,
+                            split_top_pan=split_top_pan,
+                            split_bottom_pan=split_bottom_pan,
+                            split_zoom=split_zoom_val,
+                            split_divider_color=split_div_color,
+                            split_divider_width=split_div_w
                         )
                         if cut_res.get("error"):
                             st.error(f"Erro ao cortar: {cut_res['error']}")

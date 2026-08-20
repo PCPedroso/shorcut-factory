@@ -93,7 +93,12 @@ def cut_video(
     blur_intensity: int = 25,
     face_auto_zoom: bool = True,
     face_margin_ratio: float = 1.55,
-    person_preference: str = "auto"
+    person_preference: str = "auto",
+    split_top_pan: float = -0.65,
+    split_bottom_pan: float = 0.65,
+    split_zoom: float = 1.15,
+    split_divider_color: str = "black",
+    split_divider_width: int = 4
 ) -> dict:
     """
     Corta e formata o vídeo com alta precisão e velocidade via FFmpeg.
@@ -104,12 +109,7 @@ def cut_video(
         - '9:16_blur': Vertical 1080x1920 com fundo ampliado e desfocado
         - '9:16_crop': Vertical 1080x1920 com corte central preenchendo 100% da tela
         - '9:16_smart_face': Vertical 1080x1920 com rastreamento inteligente de rosto
-    - blur_zoom: Nível de aproximação do vídeo principal no modo blur (1.0x a 2.5x).
-    - blur_pan: Posição horizontal do vídeo principal (-1.0 à esquerda até +1.0 à direita).
-    - blur_intensity: Intensidade do desfoque de fundo (10 a 50).
-    - face_auto_zoom: Ativa o auto-zoom dinâmico no orador com corte de bordas vazias.
-    - face_margin_ratio: Margem de segurança lateral do interlocutor (1.2x a 2.0x).
-    - person_preference: 'auto', 'right', 'left', 'center' (Trava no orador desejado).
+        - '9:16_split': Vertical 1080x1920 Dividido (Topo: Entrevistador / Base: Entrevistado - Estilo Podcasts/Flow)
     """
     try:
         if os.path.exists(output_path):
@@ -131,6 +131,44 @@ def cut_video(
                 margin_ratio=face_margin_ratio,
                 person_preference=person_preference
             )
+
+        elif aspect_ratio_mode == "9:16_split":
+            # Pipeline 9:16 Split Screen (Topo: Interlocutor 1 / Base: Interlocutor 2)
+            base_w = int(1080 * 1.125 / split_zoom)
+            base_h = int(1080 / split_zoom)
+            max_x = max(0, 1920 - base_w)
+            max_y = max(0, 1080 - base_h)
+            
+            top_x = int(max(0, min(max_x, (max_x / 2.0) + (split_top_pan * (max_x / 2.0)))))
+            top_y = int(max(0, min(max_y, max_y / 2.0)))
+            bot_x = int(max(0, min(max_x, (max_x / 2.0) + (split_bottom_pan * (max_x / 2.0)))))
+            bot_y = top_y
+
+            div_filter = f"[v_stacked]drawbox=y=958:h={split_divider_width}:color={split_divider_color}@0.9:t=fill[v]" if split_divider_width > 0 else "[v_stacked]null[v]"
+
+            filter_complex = (
+                f"[0:v]split=2[v_top_in][v_bot_in];"
+                f"[v_top_in]crop={base_w}:{base_h}:{top_x}:{top_y},scale=1080:960[v_top];"
+                f"[v_bot_in]crop={base_w}:{base_h}:{bot_x}:{bot_y},scale=1080:960[v_bot];"
+                f"[v_top][v_bot]vstack=inputs=2[v_stacked];"
+                f"{div_filter}"
+            )
+            cmd = [
+                FFMPEG_EXE, "-y",
+                "-ss", start_time_str,
+                "-to", end_time_str,
+                "-i", input_path,
+                "-filter_complex", filter_complex,
+                "-map", "[v]",
+                "-map", "0:a?",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "20",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-pix_fmt", "yuv420p",
+                output_path
+            ]
 
         elif aspect_ratio_mode == "9:16_blur":
             # Pipeline 9:16 Fundo Desfocado com Zoom e Pan configuráveis

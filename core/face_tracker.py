@@ -495,3 +495,125 @@ def crop_video_with_smart_face_tracking(
 
     except Exception as exc:
         return {"path": None, "error": str(exc)}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Layout Dividido (Split Screen 9:16 - Topo: Entrevistador(es) / Base: Entrevistado)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def detect_split_screen_params(
+    video_path: str,
+    timestamp_str: str,
+    top_preference: str = "left",
+    bottom_preference: str = "right"
+) -> dict:
+    """
+    Detecta automaticamente as posições dos interlocutores para o Split Screen 9:16.
+    Retorna os fatores normalizados de enquadramento (-1.0 a +1.0) para Topo e Base.
+    """
+    try:
+        ensure_face_model()
+        t_sec = parse_time_to_seconds(timestamp_str)
+        cap = cv2.VideoCapture(video_path)
+        cap.set(cv2.CAP_PROP_POS_MSEC, t_sec * 1000.0)
+        ret, frame = cap.read()
+        cap.release()
+
+        if not ret or frame is None:
+            return {"top_pan": -0.65, "bottom_pan": 0.65, "zoom": 1.15}
+
+        h, w = frame.shape[:2]
+
+        base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
+        options = vision.FaceDetectorOptions(base_options=base_options, min_detection_confidence=0.35)
+        detector = vision.FaceDetector.create_from_options(options)
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        results = detector.detect(mp_image)
+        detector.close()
+
+        if not results.detections or len(results.detections) < 2:
+            return {"top_pan": -0.65, "bottom_pan": 0.65, "zoom": 1.15}
+
+        detections = results.detections
+        sorted_faces = sorted(detections, key=lambda d: d.bounding_box.origin_x + d.bounding_box.width / 2.0)
+
+        left_cx = sorted_faces[0].bounding_box.origin_x + sorted_faces[0].bounding_box.width / 2.0
+        right_cx = sorted_faces[-1].bounding_box.origin_x + sorted_faces[-1].bounding_box.width / 2.0
+
+        left_pan = max(-0.85, min(0.85, (left_cx / (w / 2.0)) - 1.0))
+        right_pan = max(-0.85, min(0.85, (right_cx / (w / 2.0)) - 1.0))
+
+        top_pan = left_pan if top_preference == "left" else right_pan
+        bottom_pan = right_pan if bottom_preference == "right" else left_pan
+
+        return {"top_pan": round(top_pan, 2), "bottom_pan": round(bottom_pan, 2), "zoom": 1.20}
+
+    except Exception:
+        return {"top_pan": -0.65, "bottom_pan": 0.65, "zoom": 1.15}
+
+
+def generate_split_preview_image(
+    input_video_path: str,
+    timestamp_str: str,
+    output_preview_path: str = "temp_split_preview.jpg",
+    top_pan: float = -0.65,
+    bottom_pan: float = 0.65,
+    zoom: float = 1.15,
+    divider_color: str = "black",
+    divider_width: int = 4
+) -> dict:
+    """
+    Gera uma imagem de prévia instantânea do Layout Dividido (Split Screen 9:16).
+    """
+    try:
+        t_sec = parse_time_to_seconds(timestamp_str)
+        cap = cv2.VideoCapture(input_video_path)
+        cap.set(cv2.CAP_PROP_POS_MSEC, t_sec * 1000.0)
+        ret, frame = cap.read()
+        cap.release()
+
+        if not ret or frame is None:
+            return {"path": None, "error": "Não foi possível extrair o frame do vídeo para a prévia."}
+
+        h, w = frame.shape[:2]
+
+        base_w = int(h * 1.125 / zoom)
+        base_h = int(h / zoom)
+
+        max_x = max(0, w - base_w)
+        max_y = max(0, h - base_h)
+
+        # Coordenadas Topo
+        top_x = int(max(0, min(max_x, (max_x / 2.0) + (top_pan * (max_x / 2.0)))))
+        top_y = int(max(0, min(max_y, max_y / 2.0)))
+
+        # Coordenadas Base
+        bot_x = int(max(0, min(max_x, (max_x / 2.0) + (bottom_pan * (max_x / 2.0)))))
+        bot_y = top_y
+
+        # Recorta
+        top_crop = frame[top_y : top_y + base_h, top_x : top_x + base_w]
+        bot_crop = frame[bot_y : bot_y + base_h, bot_x : bot_x + base_w]
+
+        top_resized = cv2.resize(top_crop, (1080, 960), interpolation=cv2.INTER_LINEAR)
+        bot_resized = cv2.resize(bot_crop, (1080, 960), interpolation=cv2.INTER_LINEAR)
+
+        # Monta canvas vertical 1080x1920
+        canvas = cv2.vconcat([top_resized, bot_resized])
+
+        # Desenha linha divisória elegante
+        if divider_width > 0:
+            div_c = (0, 0, 0) if divider_color == "black" else ((255, 255, 255) if divider_color == "white" else (180, 180, 180))
+            y_mid = 960
+            y1 = max(0, y_mid - divider_width // 2)
+            y2 = min(1920, y_mid + divider_width // 2)
+            canvas[y1:y2, :] = div_c
+
+        cv2.imwrite(output_preview_path, canvas)
+        return {"path": output_preview_path, "error": None}
+
+    except Exception as exc:
+        return {"path": None, "error": str(exc)}
+
