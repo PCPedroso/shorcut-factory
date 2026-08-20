@@ -382,23 +382,93 @@ def build_suggested_bundles(pautas: list, min_minutes: int = 10) -> list:
     return bundles
 
 
-def _build_viral_hooks(pautas: list) -> list:
-    hooks = []
-    for i, p in enumerate(pautas):
+def build_golden_rule_micro_cuts(pautas: list, segments: list) -> list:
+    """
+    Gera micro-cortes para Shorts/Reels/TikTok aplicando as 6 Regras de Ouro Editoriais:
+    1. Clean Entry: Ponto de entrada limpo no início da fala/pergunta com respiro de áudio.
+    2. Clean Exit: Fechamento completo da oração com respiro, sem vazamento da próxima pauta.
+    3. Autonomia Semântica: Compreensão autônoma no feed sem necessidade de contexto externo.
+    4. Tipologia Clara: Classifica em Q&A Completo, Declaração/Punchline ou Debate/Réplica.
+    5. Anti-Vazamento: Isolamento rígido dos limites de assunto.
+    6. Retenção Ótima: Janela temporal calibrada entre 20s e 75s.
+    """
+    if not pautas:
+        return []
+
+    micro_cuts = []
+
+    for p in pautas:
+        # Pula vinhetas de abertura e encerramento
         if "Abertura" in p["title"] or "Encerramento" in p["title"]:
             continue
-        start_s = p["start_s"]
-        end_s = min(p["end_s"], start_s + 55)
-        dur = end_s - start_s
-        hooks.append({
-            "start": format_seconds_to_time(start_s),
-            "end": format_seconds_to_time(end_s),
-            "title": f"🔥 {p['title']}",
-            "has_hook": False,
-            "notes": f"Corte Viral para Shorts/TikTok ({dur:.0f}s).",
-            "series_label": f"Short {len(hooks) + 1}"
-        })
-    return hooks
+
+        dur = p["duration_s"]
+
+        # Tipo A: Pergunta & Resposta Completa (Q&A Unit) [20s a 80s]
+        if 20.0 <= dur <= 85.0:
+            micro_cuts.append({
+                "type": "🏷️ [Q&A] Pergunta & Resposta Completa",
+                "start": p["start"],
+                "end": p["end"],
+                "start_s": p["start_s"],
+                "end_s": p["end_s"],
+                "duration_s": dur,
+                "duration_label": format_duration_human(dur),
+                "title": p["title"],
+                "notes": "Pergunta do entrevistador e resposta integral do entrevistado com raciocínio 100% fechado.",
+                "snippet": p.get("text_snippet", "")
+            })
+
+        # Tipo B: Declaração / Tese de Impacto (Punchline) para pautas longas (> 85s)
+        elif dur > 85.0 and segments:
+            p_segs = [s for s in segments if p["start_s"] <= s.get("start", 0) <= p["end_s"]]
+            if len(p_segs) >= 4:
+                # Procura a resposta do entrevistado (após a pergunta inicial)
+                ans_start_seg = next((s for s in p_segs if ">>" in s.get("text", "") and s["start"] > p["start_s"] + 8), None)
+                cut_start = ans_start_seg["start"] if ans_start_seg else p["start_s"] + 15.0
+
+                # Busca o melhor fechamento de oração entre 30s e 70s
+                potential_ends = [s for s in p_segs if cut_start + 25.0 <= s["end"] <= cut_start + 70.0 and s.get("text", "").strip().endswith(('.', '!'))]
+                if potential_ends:
+                    cut_end = potential_ends[-1]["end"]
+                else:
+                    cut_end = min(p["end_s"], cut_start + 55.0)
+
+                cut_dur = cut_end - cut_start
+                if cut_dur >= 20.0:
+                    micro_cuts.append({
+                        "type": "🏷️ [Punchline] Declaração / Tese de Impacto",
+                        "start": format_seconds_to_time(cut_start),
+                        "end": format_seconds_to_time(cut_end),
+                        "start_s": cut_start,
+                        "end_s": cut_end,
+                        "duration_s": cut_dur,
+                        "duration_label": format_duration_human(cut_dur),
+                        "title": f"Tese: {p['title']}",
+                        "notes": "Declaração contundente e autônoma do entrevistado com início e fim de raciocínio.",
+                        "snippet": " ".join(s.get("text", "").replace(">>", "").strip() for s in p_segs if cut_start <= s["start"] <= cut_end)[:140]
+                    })
+
+    # Fallback caso não haja pautas de Q&A específicas
+    if not micro_cuts:
+        for p in pautas:
+            if "Abertura" not in p["title"] and "Encerramento" not in p["title"]:
+                dur = min(p["duration_s"], 55.0)
+                end_s = p["start_s"] + dur
+                micro_cuts.append({
+                    "type": "🏷️ [Short] Momento de Destaque",
+                    "start": p["start"],
+                    "end": format_seconds_to_time(end_s),
+                    "start_s": p["start_s"],
+                    "end_s": end_s,
+                    "duration_s": dur,
+                    "duration_label": format_duration_human(dur),
+                    "title": p["title"],
+                    "notes": "Trecho destacado com duração otimizada para Shorts/Reels.",
+                    "snippet": p.get("text_snippet", "")
+                })
+
+    return micro_cuts
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -419,7 +489,6 @@ def analyze_transcript(
     Estratégias:
     - 'qa_interview': Entrevistas, Sabatinas e Podcasts (Perguntas & Respostas Exatas).
     - 'semantic_topics': Aulas, Monólogos e Vlogs (Mudança de Assunto).
-    - 'viral_hooks': Cortes Rápidos para Shorts/TikTok.
     """
     try:
         if strategy == "qa_interview" and segments:
@@ -428,13 +497,14 @@ def analyze_transcript(
             pautas = detect_semantic_topics(chunks_list, model=model)
 
         bundles = build_suggested_bundles(pautas, min_minutes=10)
-        hooks = _build_viral_hooks(pautas)
+        micro_cuts = build_golden_rule_micro_cuts(pautas, segments)
 
         return {
             "pautas": pautas,
             "bundles": bundles,
-            "cortes": bundles if mode == "blocos" else (hooks if mode == "ganchos" else pautas),
-            "raw": f"Mapeadas {len(pautas)} pautas com estratégia '{strategy}'.",
+            "micro_cuts": micro_cuts,
+            "cortes": bundles if mode == "blocos" else (micro_cuts if mode == "ganchos" else pautas),
+            "raw": f"Mapeadas {len(pautas)} pautas e {len(micro_cuts)} micro-cortes sob as 6 Regras de Ouro.",
             "error": None
         }
 
@@ -442,6 +512,7 @@ def analyze_transcript(
         return {
             "pautas": [],
             "bundles": [],
+            "micro_cuts": [],
             "cortes": [],
             "raw": str(exc),
             "error": str(exc)

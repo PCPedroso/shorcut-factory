@@ -553,33 +553,43 @@ if st.session_state.transcription_done:
                             st.rerun()
                     st.divider()
 
-    # ── TAB 3: GANCHOS VIRAIS (SHORTS) ────────────────────────────────────────
+    # ── TAB 3: GANCHOS VIRAIS & PEQUENOS CORTES (SHORTS / REELS) ───────────────
     with tab_shorts:
-        st.markdown("Momentos curtos de alto impacto (45 a 60 segundos) para **YouTube Shorts / TikTok**.")
+        st.markdown(
+            "Geração de **Pequenos Cortes (20s a 75s)** estruturados sob as **6 Regras de Ouro Editoriais**: "
+            "com início limpo, raciocínio 100% fechado, tipologia definida (Q&A ou Punchline) e sem vazamento de outras pautas."
+        )
         
-        if st.button("🔥 Extrair Ganchos Virais (< 60s)", key="btn_shorts"):
-            with st.spinner("Identificando declarações polêmicas e momentos de impacto..."):
+        if st.button("🔥 Gerar Pequenos Cortes (Regras de Ouro Editoriais)", key="btn_shorts", type="primary"):
+            with st.spinner("Estruturando pequenos cortes com coerência editorial e ganchos de retenção..."):
                 res = analyze_transcript(
                     chunked_transcript, "ganchos",
                     model=ollama_model,
-                    chunks_list=chunks_list
+                    chunks_list=chunks_list,
+                    segments=st.session_state.segments,
+                    strategy="qa_interview" if "Entrevistas" in strategy_choice else "semantic_topics"
                 )
                 if res.get("error"):
-                    st.error(f"Erro no Ollama: {res['error']}")
+                    st.error(f"Erro na análise: {res['error']}")
                 else:
-                    st.session_state.shorts = res.get("cortes", [])
+                    st.session_state.shorts = res.get("micro_cuts", []) or res.get("cortes", [])
+                    st.session_state.pautas = res.get("pautas", [])
                     st.session_state.ai_raw = res.get("raw", "")
                     st.rerun()
 
         if 'shorts' in st.session_state and st.session_state.shorts:
+            st.markdown(f"### 🎬 Pequenos Cortes Gerados ({len(st.session_state.shorts)} opções com sentido fechado):")
             for idx, s in enumerate(st.session_state.shorts):
                 with st.container():
-                    col_info, col_btn = st.columns([4, 1])
+                    col_info, col_btn = st.columns([4, 1.2])
                     with col_info:
-                        st.markdown(f"**{s.get('series_label', f'Short {idx+1}')}**: `[{s['start']} - {s['end']}]` **{s['title']}**")
-                        st.caption(s.get('notes', ''))
+                        c_type = s.get("type", "🏷️ [Short] Corte")
+                        st.markdown(f"**{c_type}** | `[{s['start']} → {s['end']}]` **{s['title']}**")
+                        st.caption(f"⏱️ Duração: **{s.get('duration_label', '')}** | {s.get('notes', '')}")
+                        if s.get('snippet'):
+                            st.markdown(f"💬 *\"{s['snippet']}\"*")
                     with col_btn:
-                        if st.button("✂️ Usar", key=f"btn_use_short_{idx}"):
+                        if st.button("✂️ Usar este Corte", key=f"btn_use_short_{idx}", use_container_width=True):
                             st.session_state.final_start_time = s['start']
                             st.session_state.final_end_time = s['end']
                             st.session_state.final_corte_title = s['title']

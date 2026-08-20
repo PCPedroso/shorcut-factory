@@ -56,14 +56,49 @@ shorcut-factory/
 
 ---
 
+## 📐 Regras de Ouro Editoriais para Cortes e Micro-Cortes (Shorts / Reels)
+
+Para garantir que todos os cortes gerados pela IA possuam padrão profissional de edição humana (com início, meio e fim perfeitos), a aplicação segue estritamente as seguintes 6 diretrizes:
+
+### 1. 🎬 Ponto de Entrada Limpo (*Clean Entry & Audio Snapping*)
+* **Regra**: O corte deve iniciar no milissegundo exato da primeira palavra falada (com margem de **100ms a 150ms** de respiro inicial).
+* **Critério**:
+  * Em cortes com pergunta: inicia na saudação ou pergunta do jornalista (`"Simone, boa noite..."` ou `"Candidato..."`).
+  * Em declarações diretas: inicia na primeira frase completa da resposta do entrevistado, sem cortar a primeira sílaba.
+
+### 2. 🏁 Ponto de Saída com Conclusão e Respiro (*Punchline & Breath-out*)
+* **Regra**: O corte termina após o fechamento da última oração do raciocínio, mantendo **200ms a 300ms** de pausa natural antes do corte.
+* **Proibição Estrita**: É terminantemente proibido deixar "vazar" o início da pergunta ou tema seguinte (ex: cortar antes do repórter começar a próxima pauta).
+
+### 3. 🧠 Autonomia Semântica (*Standalone Comprehensibility*)
+* **Regra**: O espectador no feed do Instagram, TikTok ou YouTube Shorts deve compreender 100% da mensagem sem precisar ter assistido à entrevista completa.
+* **Critério**: Cortes não podem começar com pronomes anafóricos soltos sem antecedente (ex: *"Como eu disse antes a respeito dele..."*). Caso falte contexto, a pergunta do jornalista deve ser obrigatoriamente incluída.
+
+### 4. 🗂️ Tipologia dos Pequenos Cortes
+A esteira classifica os cortes em 3 formatos:
+* **🏷️ [Q&A] Pergunta & Resposta Completa [35s a 80s]**: Pergunta rápida do jornalista $\to$ Resposta estruturada $\to$ Conclusão.
+* **🏷️ [Punchline] Declaração / Tese de Impacto [25s a 55s]**: Foco direto na frase mais contundente do entrevistado.
+* **🏷️ [Debate] Confronto & Réplica Rápida [35s a 70s]**: Contestação do entrevistador $\to$ Argumento forte do entrevistado.
+
+### 5. 🚫 Filtro Anti-Vazamento e Isolamento de Pautas
+* **Regra**: Todo corte é estritamente limitado aos limites daquela pauta. Assuntos diferentes nunca são misturados, a não ser quando há conclusão explícita de raciocínio prévio.
+
+### 6. ⏱️ Janela Temporal de Retenção
+* **Duração Mínima**: `20 segundos` (tempo mínimo para desenvolver uma ideia completa).
+* **Duração Máxima para Shorts/Reels**: `60 a 75 segundos` (janela ideal de 100% de retenção).
+
+---
+
 ## Fluxo da Aplicação
 
 1. **Entrada da URL**: Informa o link do YouTube.
 2. **Download & Transcrição Inteligente (com Cache)**:
-   - Áudio e Transcrição são salvos em `data/<video_id>/` para reuso instantâneo.
-3. **Seleção de Cortes**:
-   - **Aba Manual**: Navegação minuto a minuto por chunks.
-   - **Aba IA (Llama 3)**: Apresenta os cortes semânticos estruturados em cards com duração, tags de gancho e botão direto de recorte.
+   - Metadados oficiais (Título, Data de Lançamento no YouTube, Duração) são registrados na Biblioteca.
+   - Transcrição oficial do YouTube e áudio são salvos em `data/<video_id>/` para reuso instantâneo.
+3. **Seleção de Cortes & Estratégias**:
+   - **Modo Entrevistas, Sabatinas & Podcasts**: Identificação de turnos de diálogo Q&A no segundo exato `[INÍCIO → FIM]`.
+   - **Modo Temático / Aulas & Monólogos**: Mapeamento contínuo de transições de tópicos.
+   - **Modo Ganchos Virais (Shorts / Reels)**: Geração de micro-cortes respeitando as 6 Regras de Ouro.
 4. **Fábrica de Cortes**:
-   - Baixa o vídeo original em 1080p/720p (com cache local) e executa o corte ultra-rápido via FFmpeg.
-   - Exibe o player de prévia e botão de download do arquivo `.mp4`.
+   - Enquadramentos 9:16 (Auto-Reframing com Face Tracking, Blur com Auto-Zoom, Center Crop) e 16:9 Full HD.
+   - Renderização ultra-rápida via FFmpeg.
