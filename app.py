@@ -62,7 +62,10 @@ if library_videos:
             col_l1, col_l2 = st.columns(2)
             with col_l1:
                 if st.button("📥 Abrir", key=f"btn_load_{v_id}", use_container_width=True):
-                    st.session_state.video_url = v.get("url", f"https://www.youtube.com/watch?v={v_id}")
+                    v_url = v.get("url", f"https://www.youtube.com/watch?v={v_id}")
+                    st.session_state.video_url = v_url
+                    st.session_state.input_yt_url = v_url
+                    
                     # Carrega transcrição e pautas se existirem
                     v_dir = os.path.join("data", v_id)
                     t_file = os.path.join(v_dir, "transcript.json")
@@ -90,11 +93,13 @@ if library_videos:
             with col_l2:
                 if st.button("🗑️ Excluir", key=f"btn_del_{v_id}", use_container_width=True):
                     remove_video_from_library(v_id, delete_folder=True)
-                    if st.session_state.get("video_url") == v.get("url"):
+                    if st.session_state.get("video_url") == v.get("url") or st.session_state.get("input_yt_url") == v.get("url"):
                         st.session_state.transcription_done = False
                         st.session_state.full_text = ""
                         st.session_state.segments = []
                         st.session_state.pautas = []
+                        st.session_state.video_url = ""
+                        st.session_state.input_yt_url = ""
                     st.rerun()
 else:
     st.sidebar.info("Nenhum vídeo registrado ainda. Insira uma URL abaixo para começar!")
@@ -124,10 +129,12 @@ if 'ai_results' not in st.session_state:
     st.session_state.ai_results = ""
 if 'video_url' not in st.session_state:
     st.session_state.video_url = ""
+if 'input_yt_url' not in st.session_state:
+    st.session_state.input_yt_url = st.session_state.video_url
 
 # Seção 1
 st.header("1. Ingestão e Transcrição do Vídeo")
-video_url = st.text_input("Cole a URL do vídeo do YouTube:", value=st.session_state.video_url, key="input_yt_url")
+video_url = st.text_input("Cole a URL do vídeo do YouTube:", key="input_yt_url")
 
 if st.button("🚀 Processar Vídeo / Atualizar", type="primary"):
     if not video_url:
@@ -874,77 +881,82 @@ if st.session_state.transcription_done:
             importlib.reload(core.video_processor)
             from core.video_processor import download_full_video, cut_video, get_video_resolution
             
-            video_id = get_video_id(video_url)
-            data_dir = os.path.join("data", video_id) if video_id else "data"
-            os.makedirs(data_dir, exist_ok=True)
-            video_full_path = os.path.join(data_dir, "video_full.mp4")
-            corte_output_path = os.path.join(data_dir, f"corte_{selected_aspect}.mp4")
+            active_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+            video_id = get_video_id(active_url)
             
-            # Detecta se o vídeo no cache é de baixa resolução (< 720p) e força o download em 1080p
-            need_download = not os.path.exists(video_full_path)
-            if os.path.exists(video_full_path):
-                current_res = get_video_resolution(video_full_path)
-                try:
-                    h = int(current_res.split('x')[1])
-                    if h < 720:
-                        st.info(f"🔄 Cache antigo detectado em baixa resolução ({current_res}). Baixando automaticamente em 1080p Full HD...")
-                        if os.path.exists(video_full_path):
-                            os.remove(video_full_path)
-                        need_download = True
-                except Exception:
-                    pass
-
-            if need_download:
-                with st.spinner("Baixando vídeo original na máxima resolução disponível (1080p Full HD)..."):
-                    video_res = download_full_video(video_url, video_full_path)
+            if not video_id:
+                st.error("URL do vídeo do YouTube não identificada. Por favor, confirme a URL na Seção 1.")
             else:
-                current_res = get_video_resolution(video_full_path)
-                st.success(f"Vídeo em alta qualidade encontrado no cache ({current_res})!")
-                video_res = {"path": video_full_path, "error": None}
+                data_dir = os.path.join("data", video_id)
+                os.makedirs(data_dir, exist_ok=True)
+                video_full_path = os.path.join(data_dir, "video_full.mp4")
+                corte_output_path = os.path.join(data_dir, f"corte_{selected_aspect}.mp4")
                 
-            if video_res.get("error"):
-                st.error(f"Erro ao baixar vídeo: {video_res['error']}")
-            else:
-                extra_info = ""
-                if selected_aspect == "9:16_blur":
-                    extra_info = f" (Zoom: {blur_zoom_val:.2f}x)"
-                elif selected_aspect == "9:16_smart_face" and face_zoom_active:
-                    extra_info = f" (Auto-Zoom Inteligente)"
+                # Detecta se o vídeo no cache é de baixa resolução (< 720p) e força o download em 1080p
+                need_download = not os.path.exists(video_full_path)
+                if os.path.exists(video_full_path):
+                    current_res = get_video_resolution(video_full_path)
+                    try:
+                        h = int(current_res.split('x')[1])
+                        if h < 720:
+                            st.info(f"🔄 Cache antigo detectado em baixa resolução ({current_res}). Baixando automaticamente em 1080p Full HD...")
+                            if os.path.exists(video_full_path):
+                                os.remove(video_full_path)
+                            need_download = True
+                    except Exception:
+                        pass
 
-                with st.spinner(f"Renderizando corte [{start_time} → {end_time}] no formato {aspect_option}{extra_info}..."):
-                    cut_res = cut_video(
-                        video_res["path"],
-                        start_time,
-                        end_time,
-                        corte_output_path,
-                        aspect_ratio_mode=selected_aspect,
-                        blur_zoom=blur_zoom_val,
-                        blur_pan=blur_pan_val,
-                        blur_intensity=blur_int_val,
-                        face_auto_zoom=face_zoom_active,
-                        face_margin_ratio=face_margin_val,
-                        person_preference=person_pref_val
-                    )
-                    if cut_res.get("error"):
-                        st.error(f"Erro ao cortar: {cut_res['error']}")
-                    else:
-                        out_res = get_video_resolution(corte_output_path)
-                        st.success(f"🎉 Corte gerado com sucesso! Resolução: **{out_res}** | Formato: **{aspect_option}**{extra_info}")
-                        
-                        if "9:16" in selected_aspect:
-                            col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
-                            with col_v2:
-                                st.video(corte_output_path)
+                if need_download:
+                    with st.spinner("Baixando vídeo original na máxima resolução disponível (1080p Full HD)..."):
+                        video_res = download_full_video(active_url, video_full_path)
+                else:
+                    current_res = get_video_resolution(video_full_path)
+                    st.success(f"Vídeo em alta qualidade encontrado no cache ({current_res})!")
+                    video_res = {"path": video_full_path, "error": None}
+                    
+                if video_res.get("error"):
+                    st.error(f"Erro ao baixar vídeo: {video_res['error']}")
+                else:
+                    extra_info = ""
+                    if selected_aspect == "9:16_blur":
+                        extra_info = f" (Zoom: {blur_zoom_val:.2f}x)"
+                    elif selected_aspect == "9:16_smart_face" and face_zoom_active:
+                        extra_info = f" (Auto-Zoom Inteligente)"
+
+                    with st.spinner(f"Renderizando corte [{start_time} → {end_time}] no formato {aspect_option}{extra_info}..."):
+                        cut_res = cut_video(
+                            video_res["path"],
+                            start_time,
+                            end_time,
+                            corte_output_path,
+                            aspect_ratio_mode=selected_aspect,
+                            blur_zoom=blur_zoom_val,
+                            blur_pan=blur_pan_val,
+                            blur_intensity=blur_int_val,
+                            face_auto_zoom=face_zoom_active,
+                            face_margin_ratio=face_margin_val,
+                            person_preference=person_pref_val
+                        )
+                        if cut_res.get("error"):
+                            st.error(f"Erro ao cortar: {cut_res['error']}")
                         else:
-                            st.video(corte_output_path)
-                        
-                        with open(corte_output_path, "rb") as file:
-                            st.download_button(
-                                label=f"💾 Baixar Vídeo ({out_res})",
-                                data=file,
-                                file_name=f"corte_{selected_aspect}.mp4",
-                                mime="video/mp4",
-                                use_container_width=True
-                            )
+                            out_res = get_video_resolution(corte_output_path)
+                            st.success(f"🎉 Corte gerado com sucesso! Resolução: **{out_res}** | Formato: **{aspect_option}**{extra_info}")
+                            
+                            if "9:16" in selected_aspect:
+                                col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
+                                with col_v2:
+                                    st.video(corte_output_path)
+                            else:
+                                st.video(corte_output_path)
+                            
+                            with open(corte_output_path, "rb") as file:
+                                st.download_button(
+                                    label=f"💾 Baixar Vídeo ({out_res})",
+                                    data=file,
+                                    file_name=f"corte_{selected_aspect}.mp4",
+                                    mime="video/mp4",
+                                    use_container_width=True
+                                )
 
 
