@@ -324,21 +324,35 @@ if st.session_state.transcription_done:
     # ── TAB 1: COMPOSITOR DE PAUTAS ───────────────────────────────────────────
     with tab_composer:
         st.markdown(
-            "Em entrevistas e podcasts dinâmicos, repórteres mudam de assunto a cada 1-4 minutos. "
-            "Use a IA para mapear todas as pautas e selecione múltiplas para compor cortes de **10+ minutos**."
+            "Selecione o tipo de conteúdo para o mapeamento inteligente de cortes e pautas:"
         )
         
-        col_act1, col_act2 = st.columns([1, 2])
-        with col_act1:
-            if st.button("🔍 Mapear Todas as Pautas (IA)", key="btn_map_pautas"):
-                with st.spinner("Mapeando perguntas e mudanças de pauta com IA..."):
+        col_strat, col_act = st.columns([3, 1])
+        with col_strat:
+            strategy_choice = st.radio(
+                "🎯 Estratégia de Identificação de Pautas:",
+                [
+                    "🎙️ Entrevistas, Sabatinas & Podcasts (Perguntas e Respostas Exatas)",
+                    "🧠 Temático / Monólogos, Aulas & Palestras (Transições de Assunto)"
+                ],
+                horizontal=False,
+                key="analysis_strategy_radio"
+            )
+            strat_code = "qa_interview" if "Entrevistas" in strategy_choice else "semantic_topics"
+
+        with col_act:
+            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            if st.button("🔍 Mapear Pautas (IA)", key="btn_map_pautas", type="primary", use_container_width=True):
+                with st.spinner("Mapeando perguntas e limites de pauta com IA..."):
                     res = analyze_transcript(
                         chunked_transcript, "pautas",
                         model=ollama_model,
-                        chunks_list=chunks_list
+                        chunks_list=chunks_list,
+                        segments=st.session_state.segments,
+                        strategy=strat_code
                     )
                     if res.get("error"):
-                        st.error(f"Erro no Ollama: {res['error']}")
+                        st.error(f"Erro na análise: {res['error']}")
                     else:
                         st.session_state.pautas = res.get("pautas", [])
                         st.session_state.bundles = res.get("bundles", [])

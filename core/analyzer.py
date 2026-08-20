@@ -1,18 +1,14 @@
 """
-analyzer.py — Inteligência Temática: Pautas, Compositor de Micro-Assuntos e Blocos
-
-Estratégia Otimizada:
-1. Condensação Inteligente da Transcrição:
-   - Em vez de enviar milhares de palavras de ruído/pausa, envia os trechos de cada minuto
-     de forma concisa com timestamps claros [HH:MM:SS].
-2. Prompt Direto e Específico:
-   - Força Llama 3 / Qwen / Mistral a retornar estritamente a lista numerada de 8 a 15 pautas.
-3. Compositor de Pautas Interativo:
-   - Transforma as pautas em blocos temporais reais para composição e corte.
+analyzer.py — Inteligência Temática Multi-Estratégia:
+1. 🎙️ Modo Entrevista / Sabatina (Detecção Semântica Exata de Perguntas e Respostas [INÍCIO -> FIM])
+2. 🧠 Modo Temático / Monólogo / Aula (Detecção de Mudança Semântica de Assunto)
+3. 🔥 Modo Ganchos Virais (Shorts/Reels 30s-60s)
 """
 
-import ollama
+import os
 import re
+import json
+import ollama
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -39,7 +35,7 @@ def format_seconds_to_time(secs: float) -> str:
 
 
 def format_duration_human(secs: float) -> str:
-    """Retorna duração amigável como '3m 45s' ou '12m 10s'."""
+    """Retorna duração amigável como '1m 27s' ou '12m 10s'."""
     m = int(secs // 60)
     s = int(secs % 60)
     if m > 0:
@@ -67,23 +63,175 @@ def _clean_ai_title(title: str) -> str:
     return title
 
 
-def _build_concise_transcript(chunks_list: list, chars_per_chunk: int = 140) -> str:
+# ──────────────────────────────────────────────────────────────────────────────
+# Estratégia 1: 🎙️ Entrevistas & Sabatinas (Q&A Turn Boundary Detection)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def detect_qa_pautas(segments: list, model: str = "llama3") -> list:
     """
-    Condensa os chunks de 1 minuto em linhas objetivas com timestamp,
-    reduzindo o consumo de tokens e melhorando a atenção do LLM.
+    Detecta perguntas de jornalistas/apresentadores e respostas completas de entrevistados.
+    Gera pautas com limites precisos de INÍCIO e FIM no segundo exato.
     """
+    if not segments:
+        return []
+
+    question_starts = []
+    # 1. Início do vídeo (Abertura)
+    question_starts.append({"start_s": 0.0, "is_opening": True})
+
+    for i, s in enumerate(segments):
+        txt = s.get("text", "").strip()
+        t = s.get("start", 0.0)
+
+        is_new_speaker = ">>" in txt
+        is_q_pattern = bool(re.search(
+            r"(candidato|jornalista|primeira pergunta|gostaria de|o senhor disse|como defender|que que é|já que o senhor|dá tempo da gente|muitíssimo obrigado|boa noite)",
+            txt,
+            re.IGNORECASE
+        ))
+
+        # Detecta a 1ª pergunta formal do entrevistador (geralmente após a vinheta/apresentação ~60s-90s)
+        if is_new_speaker and t >= 60.0 and len(question_starts) == 1:
+            question_starts.append({"start_s": t, "is_opening": False})
+            continue
+
+        # Perguntas subsequentes (com distância mínima de 30 segundos)
+        if is_new_speaker and is_q_pattern and (t - question_starts[-1]["start_s"] >= 30.0):
+            question_starts.append({"start_s": t, "is_opening": False})
+
+    total_dur = segments[-1]["end"]
+    pautas = []
+
+    for idx, q in enumerate(question_starts):
+        st_s = q["start_s"]
+        if idx + 1 < len(question_starts):
+            next_st = question_starts[idx + 1]["start_s"]
+            prev_seg = next((s for s in reversed(segments) if s["end"] <= next_st + 1.0), None)
+            end_s = prev_seg["end"] if prev_seg else next_st
+        else:
+            end_s = total_dur
+
+        dur_s = max(0, end_s - st_s)
+        p_texts = [s["text"].replace(">>", "").strip() for s in segments if st_s <= s["start"] <= end_s]
+        p_text = " ".join(p_texts)
+
+        # Determina título base
+        if q.get("is_opening"):
+            title = "Abertura e Apresentação da Sabatina"
+        elif "muitíssimo obrigado" in p_text.lower() and dur_s < 30:
+            title = "Encerramento e Agradecimentos Finais"
+        else:
+            # Pega a frase da pergunta
+            first_sentence = p_text.split('.')[0] if '.' in p_text else p_text[:90]
+            title = first_sentence[:80].strip()
+
+        pautas.append({
+            "id": len(pautas) + 1,
+            "start": format_seconds_to_time(st_s),
+            "end": format_seconds_to_time(end_s),
+            "start_s": st_s,
+            "end_s": end_s,
+            "duration_s": dur_s,
+            "duration_label": format_duration_human(dur_s),
+            "title": title,
+            "text_snippet": p_text[:160]
+        })
+
+    # Otimiza títulos com IA via Ollama em lote rápido (se disponível)
+    pautas = _refine_pauta_titles_with_ai(pautas, model=model)
+    return pautas
+
+
+def _refine_pauta_titles_with_ai(pautas: list, model: str = "llama3") -> list:
+    """Refina os títulos das pautas usando a IA para deixá-los curtos, jornalísticos e atrativos."""
+    if not pautas or len(pautas) <= 2:
+        return pautas
+
+    try:
+        items_to_title = []
+        for p in pautas:
+            if "Abertura" not in p["title"] and "Encerramento" not in p["title"]:
+                items_to_title.append(f"Pauta {p['id']}: {p['text_snippet']}")
+
+        if not items_to_title:
+            return pautas
+
+        prompt = f"""Você é um editor sênior de jornalismo.
+Crie um título curto, objetivo e jornalístico (4 a 8 palavras) para cada pauta da entrevista abaixo.
+
+PAUTAS:
+{chr(10).join(items_to_title)}
+
+REGRAS:
+1. Responda ESTRITAMENTE no formato: Pauta X: Título do assunto
+2. Não adicione explicações ou notas.
+"""
+        response = ollama.chat(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            options={"temperature": 0.2}
+        )
+        content = response["message"]["content"]
+
+        for line in content.splitlines():
+            line = line.strip()
+            match = re.match(r'Pauta\s*(\d+)[\s:]+(.+)', line, re.IGNORECASE)
+            if match:
+                p_id = int(match.group(1))
+                new_title = _clean_ai_title(match.group(2))
+                for p in pautas:
+                    if p["id"] == p_id and len(new_title) > 4:
+                        p["title"] = new_title
+                        break
+    except Exception:
+        pass
+
+    return pautas
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Estratégia 2: 🧠 Modo Temático / Monólogos / Aulas (Mudança Semântica)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def detect_semantic_topics(chunks_list: list, model: str = "llama3") -> list:
+    """
+    Identifica tópicos e mudanças semânticas de raciocínio para vídeos com 1 orador único.
+    """
+    if not chunks_list:
+        return []
+
     lines = []
     for c in chunks_list:
         t_str = format_seconds_to_time(c['start'])
-        snippet = c['text'].strip()[:chars_per_chunk].replace('\n', ' ')
+        snippet = c['text'].strip()[:200].replace('\n', ' ')
         lines.append(f"[{t_str}] {snippet}...")
-    return "\n".join(lines)
+
+    concise_text = "\n".join(lines)
+
+    prompt = f"""Analise os trechos do vídeo abaixo.
+Identifique os principais blocos temáticos ou mudanças de assunto.
+
+TRANSCRIÇÃO:
+{concise_text}
+
+REGRAS:
+1. Responda em Português no formato: 1. [HH:MM:SS] Título do assunto
+2. Apenas a lista numerada.
+"""
+    try:
+        response = ollama.chat(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            options={"temperature": 0.2}
+        )
+        raw_text = response['message']['content']
+        topics = _extract_topics_resilient(raw_text, chunks_list)
+        return build_micro_pautas(topics, chunks_list)
+    except Exception:
+        return []
 
 
-def _extract_topics_resilient(raw_text: str, chunks_list: list) -> list[dict]:
-    """
-    Extrai lista de tópicos no formato: 1. [00:05:00] Título do assunto.
-    """
+def _extract_topics_resilient(raw_text: str, chunks_list: list) -> list:
     topics = []
     time_regex = re.compile(r'(\d{1,2}:\d{2}(?::\d{2})?)')
 
@@ -91,14 +239,13 @@ def _extract_topics_resilient(raw_text: str, chunks_list: list) -> list[dict]:
         line = line.strip()
         if not line or len(line) < 4:
             continue
-
-        if any(h in line.lower() for h in ["example", "transcript", "aqui estão", "observações", "principais pontos"]):
+        if any(h in line.lower() for h in ["example", "transcript", "aqui estão", "observações"]):
             continue
 
-        is_numbered_main = bool(re.match(r'^\s*\d+[\.\)\-:]\s+', line))
+        is_numbered = bool(re.match(r'^\s*\d+[\.\)\-:]\s+', line))
         t_match = time_regex.search(line)
 
-        if is_numbered_main or t_match:
+        if is_numbered or t_match:
             if t_match:
                 time_raw = t_match.group(1).strip()
                 if len(time_raw.split(':')) == 2:
@@ -119,25 +266,20 @@ def _extract_topics_resilient(raw_text: str, chunks_list: list) -> list[dict]:
                 })
 
     topics = sorted(topics, key=lambda x: x["start_s"])
-    unique_topics = []
-    seen_starts = set()
+    unique = []
+    seen = set()
     for t in topics:
-        if t["start_str"] not in seen_starts:
-            seen_starts.add(t["start_str"])
-            unique_topics.append(t)
+        if t["start_str"] not in seen:
+            seen.add(t["start_str"])
+            unique.append(t)
+    return unique
 
-    return unique_topics
 
-
-def build_micro_pautas(topics: list[dict], chunks_list: list) -> list[dict]:
-    """
-    Estrutura a lista de micro-assuntos com início, fim e duração exata de cada um.
-    """
+def build_micro_pautas(topics: list, chunks_list: list) -> list:
     if not chunks_list:
         return []
 
     total_video_duration = chunks_list[-1]['end']
-
     if not topics:
         return []
 
@@ -145,7 +287,7 @@ def build_micro_pautas(topics: list[dict], chunks_list: list) -> list[dict]:
         topics.insert(0, {
             "start_str": "00:00:00",
             "start_s": 0.0,
-            "title": "Abertura e Apresentação Inicial"
+            "title": "Abertura e Introdução"
         })
 
     pautas = []
@@ -160,7 +302,6 @@ def build_micro_pautas(topics: list[dict], chunks_list: list) -> list[dict]:
             end_s = total_video_duration
 
         duration_s = max(0, end_s - start_s)
-        
         if duration_s < 10 and i + 1 < len(topics):
             continue
 
@@ -178,10 +319,11 @@ def build_micro_pautas(topics: list[dict], chunks_list: list) -> list[dict]:
     return pautas
 
 
-def build_suggested_bundles(pautas: list[dict], min_minutes: int = 10) -> list[dict]:
-    """
-    Agrupa pautas sequenciais automaticamente formando vídeos de 10+ minutos.
-    """
+# ──────────────────────────────────────────────────────────────────────────────
+# Sugestões de Séries (10+ min) e Ganchos Virais (Shorts)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def build_suggested_bundles(pautas: list, min_minutes: int = 10) -> list:
     if not pautas:
         return []
 
@@ -240,32 +382,22 @@ def build_suggested_bundles(pautas: list[dict], min_minutes: int = 10) -> list[d
     return bundles
 
 
-def _build_viral_hooks(topics: list[dict], chunks_list: list) -> list[dict]:
-    """Cortes virais curtos (30s a 60s) para Shorts/TikTok."""
-    if not chunks_list:
-        return []
-
-    total_video_duration = chunks_list[-1]['end']
+def _build_viral_hooks(pautas: list) -> list:
     hooks = []
-
-    for i, item in enumerate(topics):
-        start_s = item["start_s"]
-        if start_s >= total_video_duration:
+    for i, p in enumerate(pautas):
+        if "Abertura" in p["title"] or "Encerramento" in p["title"]:
             continue
-
-        end_s = min(start_s + 55, total_video_duration)
-        start_fmt = format_seconds_to_time(start_s)
-        end_fmt = format_seconds_to_time(end_s)
-
+        start_s = p["start_s"]
+        end_s = min(p["end_s"], start_s + 55)
+        dur = end_s - start_s
         hooks.append({
-            "start": start_fmt,
-            "end": end_fmt,
-            "title": f"🔥 {item['title']}",
+            "start": format_seconds_to_time(start_s),
+            "end": format_seconds_to_time(end_s),
+            "title": f"🔥 {p['title']}",
             "has_hook": False,
-            "notes": f"Corte Viral para Shorts/TikTok ({(end_s - start_s):.0f}s).",
-            "series_label": f"Short {i + 1}"
+            "notes": f"Corte Viral para Shorts/TikTok ({dur:.0f}s).",
+            "series_label": f"Short {len(hooks) + 1}"
         })
-
     return hooks
 
 
@@ -273,79 +405,36 @@ def _build_viral_hooks(topics: list[dict], chunks_list: list) -> list[dict]:
 # API Principal
 # ──────────────────────────────────────────────────────────────────────────────
 
-def analyze_transcript(chunked_transcript: str, mode: str = "pautas",
-                       model: str = "llama3",
-                       chunks_list: list = None) -> dict:
+def analyze_transcript(
+    chunked_transcript: str = "",
+    mode: str = "pautas",
+    model: str = "llama3",
+    chunks_list: list = None,
+    segments: list = None,
+    strategy: str = "qa_interview"
+) -> dict:
     """
-    Executa a identificação de pautas ou ganchos no Ollama com prompting otimizado.
+    Executa a identificação de pautas ou ganchos adaptando-se ao tipo de vídeo.
+    
+    Estratégias:
+    - 'qa_interview': Entrevistas, Sabatinas e Podcasts (Perguntas & Respostas Exatas).
+    - 'semantic_topics': Aulas, Monólogos e Vlogs (Mudança de Assunto).
+    - 'viral_hooks': Cortes Rápidos para Shorts/TikTok.
     """
-    log = []
-
     try:
-        # Usa representação concisa dos chunks para máxima atenção da IA
-        if chunks_list:
-            concise_text = _build_concise_transcript(chunks_list)
+        if strategy == "qa_interview" and segments:
+            pautas = detect_qa_pautas(segments, model=model)
         else:
-            concise_text = chunked_transcript
+            pautas = detect_semantic_topics(chunks_list, model=model)
 
-        if mode in ("pautas", "blocos"):
-            prompt = f"""Analise a lista de trechos da entrevista abaixo.
-Extraia uma lista numerada contendo apenas as perguntas ou assuntos novos abordados.
-
-Regras:
-- Responda OBRIGATORIAMENTE em português.
-- Use estritamente o formato: 1. [HH:MM:SS] Título do assunto
-- Não escreva introduções, resumos ou conclusões.
-
-Exemplo de formato:
-1. [00:00:00] Pergunta sobre reforma do Estado e nomes de ministros
-2. [00:01:00] Modelo da Justiça do Trabalho e contratações
-3. [00:06:00] Recursos do Banco Master e produção cinematográfica
-4. [00:14:00] Redução da maioridade penal e novos presídios
-
-Transcrição da entrevista:
-{concise_text}"""
-        else:
-            prompt = f"""Analise os trechos abaixo e encontre de 3 a 6 momentos de alto impacto (máximo 60 segundos cada) para YouTube Shorts ou TikTok.
-Formato estrito:
-1. [00:02:15] "Declaração contundente sobre o assunto"
-2. [00:08:40] "Outra frase de alto impacto"
-
-Transcrição:
-{concise_text}"""
-
-        response = ollama.chat(
-            model=model,
-            messages=[
-                {'role': 'system', 'content': 'Responda estritamente no formato de lista solicitado. Não converse nem explique.'},
-                {'role': 'user', 'content': prompt},
-            ]
-        )
-
-        raw_content = response['message']['content']
-        log.append(f"=== RESPOSTA DO MODELO ({model}) ===\n{raw_content}")
-
-        # Extração de tópicos
-        topics = _extract_topics_resilient(raw_content, chunks_list or [])
-
-        log.append(f"\n=== TÓPICOS/PAUTAS PROCESSADOS ({len(topics)}) ===")
-        for t in topics:
-            log.append(f"  • [{t['start_str']}] {t['title']}")
-
-        # Estrutura as pautas individuais
-        pautas = build_micro_pautas(topics, chunks_list or [])
-
-        # Gera sugestões de séries (10+ min)
         bundles = build_suggested_bundles(pautas, min_minutes=10)
-
-        # Gera ganchos virais
-        hooks = _build_viral_hooks(topics, chunks_list or [])
+        hooks = _build_viral_hooks(pautas)
 
         return {
             "pautas": pautas,
             "bundles": bundles,
             "cortes": bundles if mode == "blocos" else (hooks if mode == "ganchos" else pautas),
-            "raw": "\n".join(log),
+            "raw": f"Mapeadas {len(pautas)} pautas com estratégia '{strategy}'.",
             "error": None
         }
 
@@ -354,6 +443,6 @@ Transcrição:
             "pautas": [],
             "bundles": [],
             "cortes": [],
-            "raw": "\n".join(log) if log else str(exc),
+            "raw": str(exc),
             "error": str(exc)
         }
