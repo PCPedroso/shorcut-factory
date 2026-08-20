@@ -42,6 +42,71 @@ def get_video_id(url):
 
 st.title("✂️ ViralCut - Fábrica de Cortes")
 
+def load_video_saved_artifacts(video_id: str):
+    """Carrega todas as ações e análises salvas individualmente para o vídeo."""
+    if not video_id:
+        return
+    v_dir = os.path.join("data", video_id)
+    
+    # 1. Transcrição
+    t_file = os.path.join(v_dir, "transcript.json")
+    if os.path.exists(t_file):
+        try:
+            with open(t_file, "r", encoding="utf-8") as f:
+                t_data = json.load(f)
+                st.session_state.full_text = t_data.get("full_text", "")
+                st.session_state.segments = t_data.get("segments", [])
+                st.session_state.transcript_source = t_data.get("source", "YouTube Oficial")
+                st.session_state.transcription_done = True
+        except Exception:
+            pass
+            
+    # 2. Pautas Mapeadas
+    p_file = os.path.join(v_dir, "pautas.json")
+    if os.path.exists(p_file):
+        try:
+            with open(p_file, "r", encoding="utf-8") as f:
+                p_data = json.load(f)
+                st.session_state.pautas = p_data.get("pautas", []) if isinstance(p_data, dict) else p_data
+        except Exception:
+            st.session_state.pautas = []
+    else:
+        st.session_state.pautas = []
+
+    # 3. Séries (10+ min)
+    s_file = os.path.join(v_dir, "series.json")
+    if os.path.exists(s_file):
+        try:
+            with open(s_file, "r", encoding="utf-8") as f:
+                st.session_state.bundles = json.load(f)
+        except Exception:
+            st.session_state.bundles = []
+    else:
+        st.session_state.bundles = []
+
+    # 4. Ganchos Virais & Pequenos Cortes (Shorts / Reels)
+    sh_file = os.path.join(v_dir, "shorts.json")
+    if os.path.exists(sh_file):
+        try:
+            with open(sh_file, "r", encoding="utf-8") as f:
+                st.session_state.shorts = json.load(f)
+        except Exception:
+            st.session_state.shorts = []
+    else:
+        st.session_state.shorts = []
+
+    # 5. Histórico de Passos / Cortes Montados
+    steps_file = os.path.join(v_dir, "saved_steps.json")
+    if os.path.exists(steps_file):
+        try:
+            with open(steps_file, "r", encoding="utf-8") as f:
+                st.session_state.saved_steps = json.load(f)
+        except Exception:
+            st.session_state.saved_steps = []
+    else:
+        st.session_state.saved_steps = []
+
+
 # Barra Lateral (Biblioteca & Configurações)
 st.sidebar.header("📚 Biblioteca de Vídeos")
 
@@ -65,29 +130,7 @@ if library_videos:
                     v_url = v.get("url", f"https://www.youtube.com/watch?v={v_id}")
                     st.session_state.video_url = v_url
                     st.session_state.input_yt_url = v_url
-                    
-                    # Carrega transcrição e pautas se existirem
-                    v_dir = os.path.join("data", v_id)
-                    t_file = os.path.join(v_dir, "transcript.json")
-                    if os.path.exists(t_file):
-                        with open(t_file, "r", encoding="utf-8") as f:
-                            t_data = json.load(f)
-                            st.session_state.full_text = t_data.get("full_text", "")
-                            st.session_state.segments = t_data.get("segments", [])
-                            st.session_state.transcript_source = t_data.get("source", "YouTube Oficial")
-                            st.session_state.transcription_done = True
-                    
-                    p_file = os.path.join(v_dir, "pautas.json")
-                    if os.path.exists(p_file):
-                        with open(p_file, "r", encoding="utf-8") as f:
-                            p_data = json.load(f)
-                            st.session_state.pautas = p_data.get("pautas", [])
-                            st.session_state.bundles = p_data.get("bundles", [])
-                            st.session_state.ai_raw = p_data.get("raw", "")
-                    else:
-                        st.session_state.pautas = []
-                        st.session_state.bundles = []
-
+                    load_video_saved_artifacts(v_id)
                     st.rerun()
 
             with col_l2:
@@ -98,6 +141,9 @@ if library_videos:
                         st.session_state.full_text = ""
                         st.session_state.segments = []
                         st.session_state.pautas = []
+                        st.session_state.bundles = []
+                        st.session_state.shorts = []
+                        st.session_state.saved_steps = []
                         st.session_state.video_url = ""
                         st.session_state.input_yt_url = ""
                     st.rerun()
@@ -169,22 +215,8 @@ if st.button("🚀 Processar Vídeo / Atualizar", type="primary"):
 
             # CACHE: Verifica se já temos a transcrição pronta
             if os.path.exists(transcript_file):
-                st.success("✅ Cache encontrado! Carregando transcrição salva...")
-                with open(transcript_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    st.session_state.full_text = data["full_text"]
-                    st.session_state.segments = data["segments"]
-                    st.session_state.transcript_source = data.get("source", "YouTube Oficial")
-                st.session_state.transcription_done = True
-                
-                # Carrega pautas salvas se existirem
-                p_file = os.path.join(data_dir, "pautas.json")
-                if os.path.exists(p_file):
-                    with open(p_file, "r", encoding="utf-8") as f:
-                        p_data = json.load(f)
-                        st.session_state.pautas = p_data.get("pautas", [])
-                        st.session_state.bundles = p_data.get("bundles", [])
-                        st.session_state.ai_raw = p_data.get("raw", "")
+                st.success("✅ Cache encontrado! Carregando transcrição e histórico salvo...")
+                load_video_saved_artifacts(video_id)
             else:
                 st.info("Iniciando extração do YouTube...")
                 if meta.get("title"):
@@ -365,24 +397,22 @@ if st.session_state.transcription_done:
                         st.session_state.bundles = res.get("bundles", [])
                         st.session_state.ai_raw = res.get("raw", "")
                         
-                        video_id = get_video_id(video_url)
-                        if video_id:
-                            p_file = os.path.join("data", video_id, "pautas.json")
+                        active_u = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                        v_id = get_video_id(active_u)
+                        if v_id:
+                            p_file = os.path.join("data", v_id, "pautas.json")
                             with open(p_file, "w", encoding="utf-8") as f:
-                                json.dump({
-                                    "pautas": st.session_state.pautas,
-                                    "bundles": st.session_state.bundles,
-                                    "raw": st.session_state.ai_raw
-                                }, f, ensure_ascii=False, indent=4)
+                                json.dump({"pautas": st.session_state.pautas, "raw": st.session_state.ai_raw}, f, ensure_ascii=False, indent=4)
                         st.rerun()
 
         if 'pautas' in st.session_state and st.session_state.pautas:
             pautas = st.session_state.pautas
             
             # Carrega passos salvos do disco se existirem
-            video_id = get_video_id(video_url)
-            steps_file = os.path.join("data", video_id, "saved_steps.json") if video_id else "data/saved_steps.json"
-            if 'saved_steps' not in st.session_state:
+            active_u = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+            v_id = get_video_id(active_u)
+            steps_file = os.path.join("data", v_id, "saved_steps.json") if v_id else "data/saved_steps.json"
+            if 'saved_steps' not in st.session_state or not st.session_state.saved_steps:
                 if os.path.exists(steps_file):
                     try:
                         with open(steps_file, "r", encoding="utf-8") as f:
@@ -400,7 +430,6 @@ if st.session_state.transcription_done:
             col_head1, col_head2 = st.columns([3, 2])
             with col_head1:
                 st.markdown(f"### 📋 Pautas Detectadas ({len(pautas)} encontradas):")
-                st.caption("Marque as caixas das pautas que deseja juntar no corte final:")
             with col_head2:
                 col_btn_uncheck, col_btn_reanalyze = st.columns(2)
                 with col_btn_uncheck:
@@ -409,66 +438,79 @@ if st.session_state.transcription_done:
                             st.session_state[f"chk_pauta_{p['id']}"] = False
                         st.rerun()
                 with col_btn_reanalyze:
-                    if st.button("🔄 Refazer Mapeamento", key="btn_reanalyze_ai", help="Limpa o mapeamento atual e permite re-executar a IA"):
-                        st.session_state.pautas = []
-                        st.session_state.bundles = []
-                        st.session_state.ai_raw = ""
-                        st.rerun()
+                    pass
 
-            selected_pauta_ids = []
-            
+            # Monta lista de pautas em cards selecionáveis
+            st.markdown("")
+            selected_pauta_objs = []
+
             for p in pautas:
-                label = f"**[{p['start']} - {p['end']}]** `({p['duration_label']})` — {p['title']}"
                 chk_key = f"chk_pauta_{p['id']}"
                 if chk_key not in st.session_state:
                     st.session_state[chk_key] = False
-                checked = st.checkbox(label, key=chk_key)
-                if checked:
-                    selected_pauta_ids.append(p)
 
-            # Painel Dinâmico de Composição (Sincronização em Tempo Real)
-            if selected_pauta_ids:
-                total_composed_s = sum(x['duration_s'] for x in selected_pauta_ids)
-                total_min = total_composed_s / 60
-                earliest_start = min(selected_pauta_ids, key=lambda x: x['start_s'])['start']
-                latest_end = max(selected_pauta_ids, key=lambda x: x['end_s'])['end']
-                composed_title = f"{selected_pauta_ids[0]['title']} (+ {len(selected_pauta_ids)-1} pautas)"
+                col_chk, col_p_info, col_dur = st.columns([0.5, 4.5, 1.2])
+                with col_chk:
+                    is_checked = st.checkbox("", key=chk_key)
+                    if is_checked:
+                        selected_pauta_objs.append(p)
+                with col_p_info:
+                    st.markdown(f"**Pauta #{p['id']}**: `[{p['start']} → {p['end']}]` **{p['title']}**")
+                    if p.get('text_snippet'):
+                        st.caption(f"💬 *\"{p['text_snippet']}...\"*")
+                with col_dur:
+                    st.markdown(f"⏱️ **{p['duration_label']}**")
+                st.divider()
 
-                # Sincronização automática e instantânea com a Fábrica de Cortes (Seção 3)
-                st.session_state.final_start_time = earliest_start
-                st.session_state.final_end_time = latest_end
-                st.session_state.final_corte_title = composed_title
-                st.session_state.cut_ready_banner = f"✅ Composição ativa: [{earliest_start} → {latest_end}] ({composed_title})"
-
-                st.markdown("---")
-                st.markdown("#### ⏱️ Resumo da Composição Selecionada *(Sincronizado Automaticamente)*:")
+            # ── BARRA INFORMATIVA DA SELEÇÃO (COMPOSITOR) ─────────────────────────
+            if selected_pauta_objs:
+                # Ordena por timestamp de início
+                selected_pauta_objs = sorted(selected_pauta_objs, key=lambda x: x["start_s"])
+                comb_start = selected_pauta_objs[0]["start"]
+                comb_end = selected_pauta_objs[-1]["end"]
+                comb_dur_s = sum(x["duration_s"] for x in selected_pauta_objs)
+                comb_dur_fmt = format_time(comb_dur_s)
                 
-                col_m1, col_m2, col_m3 = st.columns(3)
-                col_m1.metric("Pautas Selecionadas", f"{len(selected_pauta_ids)}")
-                col_m2.metric("Duração Total Composta", f"{int(total_min)}m {int(total_composed_s%60):02d}s")
-                col_m3.metric("Intervalo Contínuo", f"{earliest_start} → {latest_end}")
-
-                if total_min >= 10.0:
-                    st.success(f"✅ Meta de 10+ minutos atingida ({total_min:.1f} min)! Campos da Seção 3 preenchidos automaticamente.")
+                # Título composto inteligente
+                if len(selected_pauta_objs) == 1:
+                    comb_title = selected_pauta_objs[0]["title"]
                 else:
-                    st.info(f"⏳ Duração atual: {total_min:.1f} min. Faltam {(10.0 - total_min):.1f} min para atingir 10 minutos.")
+                    comb_title = f"{selected_pauta_objs[0]['title']} (+ {len(selected_pauta_objs)-1} pautas)"
 
-                # Botão para guardar o passo atual
-                if st.button("💾 Guardar esta Seleção como Passo/Corte", key="btn_save_current_step", type="secondary"):
+                st.info(
+                    f"🎯 **Corte Composto**: `[{comb_start} → {comb_end}]` | "
+                    f"⏱️ Duração Total: **{comb_dur_fmt}** | "
+                    f"Pautas Inclusas: **{len(selected_pauta_objs)}** ({', '.join(f'#{x['id']}' for x in selected_pauta_objs)})"
+                )
+
+                col_ap1, col_ap2 = st.columns([2, 1])
+                with col_ap1:
+                    if st.button("✂️ Carregar Seleção para Exportação (Seção 3)", key="btn_apply_composed", type="primary", use_container_width=True):
+                        st.session_state.final_start_time = comb_start
+                        st.session_state.final_end_time = comb_end
+                        st.session_state.final_corte_title = comb_title
+                        st.session_state.cut_ready_banner = f"✅ Composição pronta para corte: [{comb_start} → {comb_end}] ({comb_dur_fmt})"
+                        st.rerun()
+
+                with col_ap2:
                     step_num = len(st.session_state.saved_steps) + 1
-                    new_step = {
-                        "id": f"step_{step_num}_{int(total_composed_s)}",
-                        "title": f"Corte #{step_num}: {composed_title}",
-                        "start": earliest_start,
-                        "end": latest_end,
-                        "duration_label": f"{int(total_min)}m {int(total_composed_s%60):02d}s",
-                        "pauta_ids": [p['id'] for p in selected_pauta_ids],
-                        "pautas_titles": [p['title'] for p in selected_pauta_ids]
-                    }
-                    st.session_state.saved_steps.append(new_step)
-                    _save_steps_to_disk()
-                    st.success(f"🎉 Passo #{step_num} guardado com sucesso!")
-                    st.rerun()
+                    if st.button("💾 Guardar como Passo", key="btn_save_step", use_container_width=True, help="Salva esta composição no histórico de passos para poder montar múltiplos cortes sem perder o progresso"):
+                        new_step = {
+                            "step_id": step_num,
+                            "start": comb_start,
+                            "end": comb_end,
+                            "start_s": selected_pauta_objs[0]["start_s"],
+                            "end_s": selected_pauta_objs[-1]["end_s"],
+                            "duration_s": comb_dur_s,
+                            "duration_label": comb_dur_fmt,
+                            "title": comb_title,
+                            "pauta_ids": [x["id"] for x in selected_pauta_objs],
+                            "pautas_titles": [f"Pauta #{x['id']}: {x['title']} ({x['duration_label']})" for x in selected_pauta_objs]
+                        }
+                        st.session_state.saved_steps.append(new_step)
+                        _save_steps_to_disk()
+                        st.success(f"🎉 Passo #{step_num} guardado com sucesso!")
+                        st.rerun()
 
             else:
                 if 'cut_ready_banner' in st.session_state:
@@ -478,33 +520,24 @@ if st.session_state.transcription_done:
             st.markdown("---")
             st.markdown("### 🗂️ Histórico de Passos / Cortes Salvos:")
             if 'saved_steps' in st.session_state and st.session_state.saved_steps:
-                st.caption(f"Você possui **{len(st.session_state.saved_steps)} passos/cortes** guardados. Você pode refazer/carregar a seleção, gerar o corte ou excluir cada passo individualmente:")
+                st.caption(f"Você possui **{len(st.session_state.saved_steps)} passos/cortes** guardados.")
                 
                 for idx, step in enumerate(st.session_state.saved_steps):
                     with st.container():
                         col_s_info, col_s_redo, col_s_del = st.columns([4, 1.2, 1])
                         with col_s_info:
                             st.markdown(f"**Passo #{idx+1}**: `[{step['start']} → {step['end']}]` **{step['title']}**")
-                            st.caption(f"⏱️ Duração: **{step['duration_label']}** | {len(step.get('pauta_ids', []))} pautas inclusas")
-                            if step.get('pautas_titles'):
-                                with st.expander(f"Ver pautas do Passo #{idx+1}"):
-                                    for pt in step['pautas_titles']:
-                                        st.write(f"• {pt}")
+                            st.caption(f"⏱️ Duração: **{step['duration_label']}**")
                         
                         with col_s_redo:
-                            if st.button("🔁 Refazer / Carregar", key=f"btn_redo_step_{idx}", help="Restaura esta seleção nos checkboxes e nos campos de corte"):
-                                # Restaura os checkboxes
-                                target_ids = set(step.get('pauta_ids', []))
-                                for p in pautas:
-                                    st.session_state[f"chk_pauta_{p['id']}"] = (p['id'] in target_ids)
+                            if st.button("🔁 Carregar", key=f"btn_redo_step_{idx}"):
                                 st.session_state.final_start_time = step['start']
                                 st.session_state.final_end_time = step['end']
                                 st.session_state.final_corte_title = step['title']
-                                st.session_state.cut_ready_banner = f"✅ Passo #{idx+1} carregado: [{step['start']} → {step['end']}] ({step['title']})"
                                 st.rerun()
 
                         with col_s_del:
-                            if st.button("🗑️ Excluir", key=f"btn_del_step_{idx}", help="Remove este passo da lista"):
+                            if st.button("🗑️ Excluir", key=f"btn_del_step_{idx}"):
                                 st.session_state.saved_steps.pop(idx)
                                 _save_steps_to_disk()
                                 st.rerun()
@@ -516,7 +549,7 @@ if st.session_state.transcription_done:
                     st.success("Todos os passos foram excluídos.")
                     st.rerun()
             else:
-                st.info("Nenhum passo guardado ainda. Selecione pautas acima e clique em **'💾 Guardar esta Seleção como Passo/Corte'** para montar sua fila de cortes!")
+                st.info("Nenhum passo guardado ainda. Selecione pautas acima e clique em **'💾 Guardar como Passo'** para montar sua fila de cortes!")
 
 
     # ── TAB 2: SÉRIES AUTOMÁTICAS ─────────────────────────────────────────────
@@ -528,14 +561,23 @@ if st.session_state.transcription_done:
                 res = analyze_transcript(
                     chunked_transcript, "blocos",
                     model=ollama_model,
-                    chunks_list=chunks_list
+                    chunks_list=chunks_list,
+                    segments=st.session_state.segments,
+                    strategy="qa_interview" if "Entrevistas" in strategy_choice else "semantic_topics"
                 )
                 if res.get("error"):
                     st.error(f"Erro no Ollama: {res['error']}")
                 else:
-                    st.session_state.pautas = res.get("pautas", [])
                     st.session_state.bundles = res.get("bundles", [])
+                    st.session_state.pautas = res.get("pautas", [])
                     st.session_state.ai_raw = res.get("raw", "")
+                    
+                    active_u = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                    v_id = get_video_id(active_u)
+                    if v_id:
+                        s_file = os.path.join("data", v_id, "series.json")
+                        with open(s_file, "w", encoding="utf-8") as f:
+                            json.dump(st.session_state.bundles, f, ensure_ascii=False, indent=4)
                     st.rerun()
 
         if 'bundles' in st.session_state and st.session_state.bundles:
@@ -544,13 +586,8 @@ if st.session_state.transcription_done:
                     col_info, col_btn = st.columns([4, 1])
                     with col_info:
                         badge = f"**{b.get('series_label', f'Vídeo {idx+1}')}**"
-                        hook_tag = " 🔗 *(Com Gancho)*" if b.get('has_hook') else ""
-                        st.markdown(f"{badge}: `[{b['start']} - {b['end']}]` **{b['title']}** {hook_tag}")
-                        st.caption(f"⏱️ Duração: {b.get('duration_label', '')} | {b.get('notes', '')}")
-                        if b.get('pautas_incluidas'):
-                            with st.expander("Ver pautas inclusas neste vídeo"):
-                                for pt in b['pautas_incluidas']:
-                                    st.write(f"• {pt}")
+                        st.markdown(f"{badge}: `[{b['start']} - {b['end']}]` **{b['title']}**")
+                        st.caption(f"⏱️ Duração: {b.get('duration_label', '')}")
                     with col_btn:
                         if st.button("✂️ Usar", key=f"btn_use_bundle_{idx}"):
                             st.session_state.final_start_time = b['start']
@@ -563,12 +600,11 @@ if st.session_state.transcription_done:
     # ── TAB 3: GANCHOS VIRAIS & PEQUENOS CORTES (SHORTS / REELS) ───────────────
     with tab_shorts:
         st.markdown(
-            "Geração de **Pequenos Cortes (20s a 75s)** estruturados sob as **6 Regras de Ouro Editoriais**: "
-            "com início limpo, raciocínio 100% fechado, tipologia definida (Q&A ou Punchline) e sem vazamento de outras pautas."
+            "Geração de **Pequenos Cortes (20s a 75s)** estruturados sob as **6 Regras de Ouro Editoriais**."
         )
         
-        if st.button("🔥 Gerar Pequenos Cortes (Regras de Ouro Editoriais)", key="btn_shorts", type="primary"):
-            with st.spinner("Estruturando pequenos cortes com coerência editorial e ganchos de retenção..."):
+        if st.button("🔥 Gerar Pequenos Cortes", key="btn_shorts", type="primary"):
+            with st.spinner("Estruturando pequenos cortes com coerência editorial..."):
                 res = analyze_transcript(
                     chunked_transcript, "ganchos",
                     model=ollama_model,
@@ -582,17 +618,23 @@ if st.session_state.transcription_done:
                     st.session_state.shorts = res.get("micro_cuts", []) or res.get("cortes", [])
                     st.session_state.pautas = res.get("pautas", [])
                     st.session_state.ai_raw = res.get("raw", "")
+                    
+                    active_u = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                    v_id = get_video_id(active_u)
+                    if v_id:
+                        sh_file = os.path.join("data", v_id, "shorts.json")
+                        with open(sh_file, "w", encoding="utf-8") as f:
+                            json.dump(st.session_state.shorts, f, ensure_ascii=False, indent=4)
                     st.rerun()
 
         if 'shorts' in st.session_state and st.session_state.shorts:
-            st.markdown(f"### 🎬 Pequenos Cortes Gerados ({len(st.session_state.shorts)} opções com sentido fechado):")
+            st.markdown(f"### 🎬 Pequenos Cortes Gerados ({len(st.session_state.shorts)}):")
             for idx, s in enumerate(st.session_state.shorts):
                 with st.container():
                     col_info, col_btn = st.columns([4, 1.2])
                     with col_info:
-                        c_type = s.get("type", "🏷️ [Short] Corte")
-                        st.markdown(f"**{c_type}** | `[{s['start']} → {s['end']}]` **{s['title']}**")
-                        st.caption(f"⏱️ Duração: **{s.get('duration_label', '')}** | {s.get('notes', '')}")
+                        st.markdown(f"**{s.get('type', 'Corte')}** | `[{s['start']} → {s['end']}]` **{s['title']}**")
+                        st.caption(f"⏱️ Duração: **{s.get('duration_label', '')}**")
                         if s.get('snippet'):
                             st.markdown(f"💬 *\"{s['snippet']}\"*")
                     with col_btn:
@@ -606,7 +648,6 @@ if st.session_state.transcription_done:
 
     # ── TAB 4: SELEÇÃO MANUAL ────────────────────────────────────────────────
     with tab_manual:
-        st.markdown("Selecione os blocos exatos de início e fim da fala para definir o corte:")
         
         mode_manual = st.radio("Modo de Seleção:", ["📜 Blocos de Legenda (Estilo YouTube)", "⏱️ Intervalos de 1 Minuto"], horizontal=True)
         
