@@ -16,9 +16,25 @@ def get_video_metadata(url: str):
             heatmap = info.get('heatmap')
             title = info.get('title')
             duration = info.get('duration')
-            return {"title": title, "heatmap": heatmap, "duration": duration, "error": None}
+            upload_date = info.get('upload_date')
+            thumbnail = info.get('thumbnail')
+            return {
+                "title": title,
+                "heatmap": heatmap,
+                "duration": duration,
+                "upload_date": upload_date,
+                "thumbnail": thumbnail,
+                "error": None
+            }
         except Exception as e:
-            return {"title": None, "heatmap": None, "duration": None, "error": str(e)}
+            return {
+                "title": None,
+                "heatmap": None,
+                "duration": None,
+                "upload_date": None,
+                "thumbnail": None,
+                "error": str(e)
+            }
 
 def download_audio(url: str, output_path: str = "temp_audio.mp3"):
     """

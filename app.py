@@ -10,35 +10,97 @@ import core.transcriber
 import core.analyzer
 import core.video_processor
 import core.face_tracker
+import core.library_manager
 
 importlib.reload(core.extractor)
 importlib.reload(core.transcriber)
 importlib.reload(core.analyzer)
 importlib.reload(core.video_processor)
 importlib.reload(core.face_tracker)
+importlib.reload(core.library_manager)
 
 
 from core.extractor import download_audio, get_video_metadata
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
 from core.analyzer import analyze_transcript
 from core.video_processor import download_full_video, cut_video, get_video_resolution
+from core.library_manager import get_library, add_or_update_video_in_library, remove_video_from_library
 
 
 st.set_page_config(page_title="Fábrica de Cortes", layout="wide")
 
 def get_video_id(url):
+    if not url:
+        return None
     query = urlparse(url)
     if query.hostname == 'youtu.be': return query.path[1:]
     if query.hostname in ('www.youtube.com', 'youtube.com'):
-        if query.path == '/watch': return parse_qs(query.query)['v'][0]
+        if query.path == '/watch': return parse_qs(query.query).get('v', [None])[0]
         if query.path[:7] == '/embed/': return query.path.split('/')[2]
         if query.path[:3] == '/v/': return query.path.split('/')[2]
     return None
 
 st.title("✂️ ViralCut - Fábrica de Cortes")
 
-# Barra Lateral (Configurações)
-st.sidebar.header("Configurações")
+# Barra Lateral (Biblioteca & Configurações)
+st.sidebar.header("📚 Biblioteca de Vídeos")
+
+library_videos = get_library()
+if library_videos:
+    st.sidebar.caption(f"**{len(library_videos)}** vídeos registrados")
+    for v in library_videos:
+        v_title = v.get("title", "Vídeo sem título")
+        v_date = v.get("upload_date", "Data N/D")
+        v_id = v.get("video_id")
+        
+        with st.sidebar.expander(f"🎬 {v_title[:35]}...", expanded=False):
+            st.markdown(f"**Título:** {v_title}")
+            st.markdown(f"📅 **Lançado em:** `{v_date}`")
+            if v.get("added_at"):
+                st.caption(f"➕ Adicionado: {v['added_at']}")
+            
+            col_l1, col_l2 = st.columns(2)
+            with col_l1:
+                if st.button("📥 Abrir", key=f"btn_load_{v_id}", use_container_width=True):
+                    st.session_state.video_url = v.get("url", f"https://www.youtube.com/watch?v={v_id}")
+                    # Carrega transcrição e pautas se existirem
+                    v_dir = os.path.join("data", v_id)
+                    t_file = os.path.join(v_dir, "transcript.json")
+                    if os.path.exists(t_file):
+                        with open(t_file, "r", encoding="utf-8") as f:
+                            t_data = json.load(f)
+                            st.session_state.full_text = t_data.get("full_text", "")
+                            st.session_state.segments = t_data.get("segments", [])
+                            st.session_state.transcript_source = t_data.get("source", "YouTube Oficial")
+                            st.session_state.transcription_done = True
+                    
+                    p_file = os.path.join(v_dir, "pautas.json")
+                    if os.path.exists(p_file):
+                        with open(p_file, "r", encoding="utf-8") as f:
+                            p_data = json.load(f)
+                            st.session_state.pautas = p_data.get("pautas", [])
+                            st.session_state.bundles = p_data.get("bundles", [])
+                            st.session_state.ai_raw = p_data.get("raw", "")
+                    else:
+                        st.session_state.pautas = []
+                        st.session_state.bundles = []
+
+                    st.rerun()
+
+            with col_l2:
+                if st.button("🗑️ Excluir", key=f"btn_del_{v_id}", use_container_width=True):
+                    remove_video_from_library(v_id, delete_folder=True)
+                    if st.session_state.get("video_url") == v.get("url"):
+                        st.session_state.transcription_done = False
+                        st.session_state.full_text = ""
+                        st.session_state.segments = []
+                        st.session_state.pautas = []
+                    st.rerun()
+else:
+    st.sidebar.info("Nenhum vídeo registrado ainda. Insira uma URL abaixo para começar!")
+
+st.sidebar.markdown("---")
+st.sidebar.header("⚙️ Configurações")
 device_option = st.sidebar.selectbox("Dispositivo de Processamento", ["cpu", "cuda"], index=0)
 model_size = st.sidebar.selectbox("Tamanho do Modelo Whisper", ["tiny", "small", "medium", "large-v3"], index=1)
 
@@ -60,13 +122,18 @@ if 'segments' not in st.session_state:
     st.session_state.segments = []
 if 'ai_results' not in st.session_state:
     st.session_state.ai_results = ""
+if 'video_url' not in st.session_state:
+    st.session_state.video_url = ""
 
-video_url = st.text_input("Cole a URL do vídeo do YouTube:")
+# Seção 1
+st.header("1. Ingestão e Transcrição do Vídeo")
+video_url = st.text_input("Cole a URL do vídeo do YouTube:", value=st.session_state.video_url, key="input_yt_url")
 
-if st.button("Iniciar Processamento"):
+if st.button("🚀 Processar Vídeo / Atualizar", type="primary"):
     if not video_url:
         st.warning("Por favor, insira uma URL válida.")
     else:
+        st.session_state.video_url = video_url
         video_id = get_video_id(video_url)
         if not video_id:
             st.error("URL do YouTube inválida.")
@@ -76,6 +143,23 @@ if st.button("Iniciar Processamento"):
             transcript_file = os.path.join(data_dir, "transcript.json")
             audio_path = os.path.join(data_dir, "audio.mp3")
             
+            # Passo 1: Extrai e Registra Metadados na Biblioteca
+            with st.spinner("Buscando informações e metadados oficiais do vídeo..."):
+                meta = get_video_metadata(video_url)
+                v_title = meta.get("title") or f"Vídeo {video_id}"
+                v_date = meta.get("upload_date")
+                v_thumb = meta.get("thumbnail")
+                v_dur = meta.get("duration")
+
+                add_or_update_video_in_library(
+                    video_id=video_id,
+                    title=v_title,
+                    upload_date_raw=v_date,
+                    url=video_url,
+                    thumbnail_url=v_thumb,
+                    duration_sec=v_dur
+                )
+
             # CACHE: Verifica se já temos a transcrição pronta
             if os.path.exists(transcript_file):
                 st.success("✅ Cache encontrado! Carregando transcrição salva...")
@@ -83,58 +167,63 @@ if st.button("Iniciar Processamento"):
                     data = json.load(f)
                     st.session_state.full_text = data["full_text"]
                     st.session_state.segments = data["segments"]
+                    st.session_state.transcript_source = data.get("source", "YouTube Oficial")
                 st.session_state.transcription_done = True
+                
+                # Carrega pautas salvas se existirem
+                p_file = os.path.join(data_dir, "pautas.json")
+                if os.path.exists(p_file):
+                    with open(p_file, "r", encoding="utf-8") as f:
+                        p_data = json.load(f)
+                        st.session_state.pautas = p_data.get("pautas", [])
+                        st.session_state.bundles = p_data.get("bundles", [])
+                        st.session_state.ai_raw = p_data.get("raw", "")
             else:
                 st.info("Iniciando extração do YouTube...")
-                
-                # Passo 1: Metadados
-                with st.spinner("Extraindo metadados e heatmap..."):
-                    meta = get_video_metadata(video_url)
-                    if meta.get("error"):
-                        st.error(f"Erro ao extrair dados: {meta['error']}")
+                if meta.get("title"):
+                    st.success(f"🎬 Vídeo: **{meta['title']}** (Publicado em: `{meta.get('upload_date')}`) ")
+
+                # Passo 2: Transcrição (Tenta legendas oficiais do YouTube primeiro, fallback para Whisper)
+                with st.spinner("Buscando transcrição oficial do YouTube (alta precisão e fidelidade)..."):
+                    transcribe_res = fetch_youtube_transcript(video_id)
+                    
+                    if transcribe_res.get("transcript_segments"):
+                        st.success(f"⚡ Transcrição oficial do YouTube carregada ({len(transcribe_res['transcript_segments'])} segmentos)! Máxima precisão.")
                     else:
-                        st.success(f"Vídeo encontrado: {meta['title']}")
-                    # Passo 2: Transcrição (Tenta legendas oficiais do YouTube primeiro, fallback para Whisper)
-                    with st.spinner("Buscando transcrição oficial do YouTube (alta precisão e fidelidade)..."):
-                        transcribe_res = fetch_youtube_transcript(video_id)
-                        
-                        if transcribe_res.get("transcript_segments"):
-                            st.success(f"⚡ Transcrição oficial do YouTube carregada ({len(transcribe_res['transcript_segments'])} segmentos)! Máxima precisão.")
+                        st.info("Legendas oficiais não encontradas no YouTube. Processando áudio via Whisper local...")
+                        if os.path.exists(audio_path):
+                            audio_res = {"path": audio_path, "error": None}
                         else:
-                            st.info("Legendas oficiais não encontradas no YouTube. Processando áudio via Whisper local...")
-                            if os.path.exists(audio_path):
-                                audio_res = {"path": audio_path, "error": None}
-                            else:
-                                with st.spinner("Baixando áudio para transcrição local..."):
-                                    audio_res = download_audio(video_url, output_path=audio_path)
-                                    
-                            if audio_res.get("error"):
-                                st.error(f"Erro no download: {audio_res['error']}")
-                                transcribe_res = {"error": audio_res["error"]}
-                            else:
-                                with st.spinner(f"Transcrevendo áudio com Whisper ({model_size}) na {device_option.upper()}..."):
-                                    transcribe_res = transcribe_audio(
-                                        audio_res["path"], 
-                                        model_size=model_size, 
-                                        device=device_option
-                                    )
+                            with st.spinner("Baixando áudio para transcrição local..."):
+                                audio_res = download_audio(video_url, output_path=audio_path)
                                 
-                    if transcribe_res.get("error"):
-                        st.error(f"Erro na transcrição: {transcribe_res['error']}")
-                    else:
-                        st.success("Transcrição concluída com sucesso!")
-                        st.session_state.transcription_done = True
-                        st.session_state.full_text = transcribe_res["full_text"]
-                        st.session_state.segments = transcribe_res["transcript_segments"]
-                        st.session_state.transcript_source = transcribe_res.get("source", "YouTube Oficial")
-                        
-                        # Salvar no cache
-                        with open(transcript_file, "w", encoding="utf-8") as f:
-                            json.dump({
-                                "full_text": st.session_state.full_text,
-                                "segments": st.session_state.segments,
-                                "source": st.session_state.transcript_source
-                            }, f, ensure_ascii=False, indent=4)
+                        if audio_res.get("error"):
+                            st.error(f"Erro no download: {audio_res['error']}")
+                            transcribe_res = {"error": audio_res["error"]}
+                        else:
+                            with st.spinner(f"Transcrevendo áudio com Whisper ({model_size}) na {device_option.upper()}..."):
+                                transcribe_res = transcribe_audio(
+                                    audio_res["path"], 
+                                    model_size=model_size, 
+                                    device=device_option
+                                )
+                            
+                if transcribe_res.get("error"):
+                    st.error(f"Erro na transcrição: {transcribe_res['error']}")
+                else:
+                    st.success("Transcrição concluída com sucesso!")
+                    st.session_state.transcription_done = True
+                    st.session_state.full_text = transcribe_res["full_text"]
+                    st.session_state.segments = transcribe_res["transcript_segments"]
+                    st.session_state.transcript_source = transcribe_res.get("source", "YouTube Oficial")
+                    
+                    # Salvar no cache
+                    with open(transcript_file, "w", encoding="utf-8") as f:
+                        json.dump({
+                            "full_text": st.session_state.full_text,
+                            "segments": st.session_state.segments,
+                            "source": st.session_state.transcript_source
+                        }, f, ensure_ascii=False, indent=4)
 
 if st.session_state.transcription_done:
     def format_time(seconds):
@@ -254,6 +343,16 @@ if st.session_state.transcription_done:
                         st.session_state.pautas = res.get("pautas", [])
                         st.session_state.bundles = res.get("bundles", [])
                         st.session_state.ai_raw = res.get("raw", "")
+                        
+                        video_id = get_video_id(video_url)
+                        if video_id:
+                            p_file = os.path.join("data", video_id, "pautas.json")
+                            with open(p_file, "w", encoding="utf-8") as f:
+                                json.dump({
+                                    "pautas": st.session_state.pautas,
+                                    "bundles": st.session_state.bundles,
+                                    "raw": st.session_state.ai_raw
+                                }, f, ensure_ascii=False, indent=4)
                         st.rerun()
 
         if 'pautas' in st.session_state and st.session_state.pautas:
