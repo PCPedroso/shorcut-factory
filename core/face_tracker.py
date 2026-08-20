@@ -617,3 +617,187 @@ def generate_split_preview_image(
     except Exception as exc:
         return {"path": None, "error": str(exc)}
 
+
+def crop_video_with_dynamic_auto_switch(
+    input_video_path: str,
+    start_time_str: str,
+    end_time_str: str,
+    output_video_path: str = "corte_dynamic_switch.mp4",
+    split_zoom: float = 1.15,
+    top_pan: float = -0.65,
+    bottom_pan: float = 0.65,
+    divider_color: str = "black",
+    divider_width: int = 4,
+    auto_switch_enabled: bool = True
+) -> dict:
+    """
+    Renderiza vídeo 9:16 com Transição Dinâmica Inteligente:
+    - Quando houver >= 2 pessoas visíveis na cena: renderiza em Split Screen 9:16 (Topo e Base).
+    - Quando a câmera fechar em Close-up de 1 pessoa: faz a transição suave para 9:16 Full Screen.
+    """
+    try:
+        ensure_face_model()
+        start_s = parse_time_to_seconds(start_time_str)
+        end_s = parse_time_to_seconds(end_time_str)
+
+        cap = cv2.VideoCapture(input_video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        start_frame = int(start_s * fps)
+        end_frame = int(end_s * fps)
+        total_cut_frames = max(1, end_frame - start_frame)
+
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+        out_dir = os.path.dirname(output_video_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
+        temp_audio_cut = os.path.join(out_dir, "temp_dyn_audio.aac") if out_dir else "temp_dyn_audio.aac"
+        temp_video_raw = os.path.join(out_dir, "temp_dyn_raw.mp4") if out_dir else "temp_dyn_raw.mp4"
+
+        # Extrai áudio sincronizado
+        cmd_audio = [
+            FFMPEG_EXE, "-y",
+            "-ss", start_time_str,
+            "-to", end_time_str,
+            "-i", input_video_path,
+            "-vn", "-c:a", "aac", "-b:a", "192k",
+            temp_audio_cut
+        ]
+        subprocess.run(cmd_audio, capture_output=True)
+
+        # Inicia processo FFmpeg para receber os frames 1080x1920 via stdin
+        cmd_ffmpeg = [
+            FFMPEG_EXE, "-y",
+            "-f", "rawvideo",
+            "-vcodec", "rawvideo",
+            "-s", "1080x1920",
+            "-pix_fmt", "bgr24",
+            "-r", str(fps),
+            "-i", "-",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "20",
+            "-pix_fmt", "yuv420p",
+            temp_video_raw
+        ]
+        ffmpeg_proc = subprocess.Popen(cmd_ffmpeg, stdin=subprocess.PIPE)
+
+        base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
+        options = vision.FaceDetectorOptions(base_options=base_options, min_detection_confidence=0.35)
+        detector = vision.FaceDetector.create_from_options(options)
+
+        current_mode = "split"
+        recent_face_counts = []
+        current_single_cx = 960.0
+
+        frame_idx = 0
+        while frame_idx < total_cut_frames:
+            ret, frame = cap.read()
+            if not ret or frame is None:
+                break
+
+            h, w = frame.shape[:2]
+
+            if auto_switch_enabled:
+                # Detecção a cada 2 frames com histerese
+                if frame_idx % 2 == 0 or frame_idx == 0:
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                    results = detector.detect(mp_image)
+                    num_faces = len(results.detections) if results.detections else 0
+                    recent_face_counts.append(num_faces)
+                    if len(recent_face_counts) > 8:
+                        recent_face_counts.pop(0)
+
+                    avg_faces = sum(recent_face_counts) / len(recent_face_counts)
+                    if avg_faces >= 1.4:
+                        current_mode = "split"
+                    elif avg_faces <= 1.1 and num_faces == 1:
+                        current_mode = "single"
+
+                    if current_mode == "single" and results.detections:
+                        target_f = max(results.detections, key=lambda d: d.bounding_box.width * d.bounding_box.height)
+                        bx = target_f.bounding_box
+                        raw_cx = bx.origin_x + bx.width / 2.0
+                        current_single_cx = current_single_cx * 0.80 + raw_cx * 0.20
+            else:
+                current_mode = "split"
+
+            if current_mode == "split":
+                base_w = int(h * 1.125 / split_zoom)
+                base_h = int(h / split_zoom)
+                max_x = max(0, w - base_w)
+                max_y = max(0, h - base_h)
+                top_x = int(max(0, min(max_x, (max_x / 2.0) + (top_pan * (max_x / 2.0)))))
+                top_y = int(max(0, min(max_y, max_y / 2.0)))
+                bot_x = int(max(0, min(max_x, (max_x / 2.0) + (bottom_pan * (max_x / 2.0)))))
+                bot_y = top_y
+
+                top_crop = frame[top_y : top_y + base_h, top_x : top_x + base_w]
+                bot_crop = frame[bot_y : bot_y + base_h, bot_x : bot_x + base_w]
+
+                top_res = cv2.resize(top_crop, (1080, 960), interpolation=cv2.INTER_LINEAR)
+                bot_res = cv2.resize(bot_crop, (1080, 960), interpolation=cv2.INTER_LINEAR)
+
+                out_frame = cv2.vconcat([top_res, bot_res])
+                if divider_width > 0:
+                    div_c = (0, 0, 0) if divider_color == "black" else ((255, 255, 255) if divider_color == "white" else (180, 180, 180))
+                    y_mid = 960
+                    y1 = max(0, y_mid - divider_width // 2)
+                    y2 = min(1920, y_mid + divider_width // 2)
+                    out_frame[y1:y2, :] = div_c
+            else:
+                # Single person 9:16 full-screen crop
+                crop_w = int(h * (9.0 / 16.0))
+                crop_h = h
+                max_cx = w - crop_w // 2
+                min_cx = crop_w // 2
+                clamped_cx = max(min_cx, min(max_cx, int(current_single_cx)))
+                x1 = clamped_cx - crop_w // 2
+                x2 = x1 + crop_w
+                single_crop = frame[0:crop_h, x1:x2]
+                out_frame = cv2.resize(single_crop, (1080, 1920), interpolation=cv2.INTER_LINEAR)
+
+            ffmpeg_proc.stdin.write(out_frame.tobytes())
+            frame_idx += 1
+
+        cap.release()
+        detector.close()
+        ffmpeg_proc.stdin.close()
+        ffmpeg_proc.wait()
+
+        # Mescla áudio e vídeo
+        if os.path.exists(temp_audio_cut) and os.path.getsize(temp_audio_cut) > 0:
+            cmd_merge = [
+                FFMPEG_EXE, "-y",
+                "-i", temp_video_raw,
+                "-i", temp_audio_cut,
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-shortest",
+                output_video_path
+            ]
+        else:
+            cmd_merge = [
+                FFMPEG_EXE, "-y",
+                "-i", temp_video_raw,
+                "-c:v", "copy",
+                output_video_path
+            ]
+        subprocess.run(cmd_merge, capture_output=True)
+
+        if os.path.exists(temp_video_raw):
+            os.remove(temp_video_raw)
+        if os.path.exists(temp_audio_cut):
+            os.remove(temp_audio_cut)
+
+        if os.path.exists(output_video_path) and os.path.getsize(output_video_path) > 0:
+            return {"path": output_video_path, "error": None}
+        else:
+            return {"path": None, "error": "Falha ao gerar o corte dinâmico."}
+
+    except Exception as exc:
+        return {"path": None, "error": str(exc)}
+

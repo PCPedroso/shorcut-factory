@@ -752,9 +752,15 @@ if st.session_state.transcription_done:
     split_zoom_val = 1.15
     split_div_color = "black"
     split_div_w = 4
+    split_auto_switch = True
 
     if selected_aspect == "9:16_split":
         with st.expander("👥 Ajustes do Layout Dividido (Split Screen 9:16)", expanded=True):
+            split_auto_switch = st.toggle(
+                "🤖 Transição Dinâmica Inteligente (Auto-Switch)",
+                value=True,
+                help="Recomendado: Quando houver 2+ pessoas no enquadramento, aplica o Split Screen. Se a câmera fechar em Close-up de apenas 1 pessoa, expande suavemente para 9:16 Full Screen sem cortar ninguém!"
+            )
             col_sp1, col_sp2 = st.columns(2)
             with col_sp1:
                 split_preset = st.selectbox(
@@ -1036,7 +1042,7 @@ if st.session_state.transcription_done:
                     elif selected_aspect == "9:16_smart_face" and face_zoom_active:
                         extra_info = f" (Auto-Zoom Inteligente)"
                     elif selected_aspect == "9:16_split":
-                        extra_info = f" (Split Screen Topo/Base)"
+                        extra_info = f" (Split Screen + Auto-Switch)" if split_auto_switch else " (Split Screen Fixo)"
 
                     with st.spinner(f"Renderizando corte [{start_time} → {end_time}] no formato {aspect_option}{extra_info}..."):
                         cut_res = cut_video(
@@ -1055,7 +1061,8 @@ if st.session_state.transcription_done:
                             split_bottom_pan=split_bottom_pan,
                             split_zoom=split_zoom_val,
                             split_divider_color=split_div_color,
-                            split_divider_width=split_div_w
+                            split_divider_width=split_div_w,
+                            split_auto_switch=split_auto_switch
                         )
                         if cut_res.get("error"):
                             st.error(f"Erro ao cortar: {cut_res['error']}")

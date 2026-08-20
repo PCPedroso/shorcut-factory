@@ -98,7 +98,8 @@ def cut_video(
     split_bottom_pan: float = 0.65,
     split_zoom: float = 1.15,
     split_divider_color: str = "black",
-    split_divider_width: int = 4
+    split_divider_width: int = 4,
+    split_auto_switch: bool = True
 ) -> dict:
     """
     Corta e formata o vídeo com alta precisão e velocidade via FFmpeg.
@@ -133,42 +134,20 @@ def cut_video(
             )
 
         elif aspect_ratio_mode == "9:16_split":
-            # Pipeline 9:16 Split Screen (Topo: Interlocutor 1 / Base: Interlocutor 2)
-            base_w = int(1080 * 1.125 / split_zoom)
-            base_h = int(1080 / split_zoom)
-            max_x = max(0, 1920 - base_w)
-            max_y = max(0, 1080 - base_h)
-            
-            top_x = int(max(0, min(max_x, (max_x / 2.0) + (split_top_pan * (max_x / 2.0)))))
-            top_y = int(max(0, min(max_y, max_y / 2.0)))
-            bot_x = int(max(0, min(max_x, (max_x / 2.0) + (split_bottom_pan * (max_x / 2.0)))))
-            bot_y = top_y
-
-            div_filter = f"[v_stacked]drawbox=y=958:h={split_divider_width}:color={split_divider_color}@0.9:t=fill[v]" if split_divider_width > 0 else "[v_stacked]null[v]"
-
-            filter_complex = (
-                f"[0:v]split=2[v_top_in][v_bot_in];"
-                f"[v_top_in]crop={base_w}:{base_h}:{top_x}:{top_y},scale=1080:960[v_top];"
-                f"[v_bot_in]crop={base_w}:{base_h}:{bot_x}:{bot_y},scale=1080:960[v_bot];"
-                f"[v_top][v_bot]vstack=inputs=2[v_stacked];"
-                f"{div_filter}"
+            # Pipeline 9:16 Split Screen com Transição Dinâmica Inteligente
+            from core.face_tracker import crop_video_with_dynamic_auto_switch
+            return crop_video_with_dynamic_auto_switch(
+                input_video_path=input_path,
+                start_time_str=start_time_str,
+                end_time_str=end_time_str,
+                output_video_path=output_path,
+                split_zoom=split_zoom,
+                top_pan=split_top_pan,
+                bottom_pan=split_bottom_pan,
+                divider_color=split_divider_color,
+                divider_width=split_divider_width,
+                auto_switch_enabled=split_auto_switch
             )
-            cmd = [
-                FFMPEG_EXE, "-y",
-                "-ss", start_time_str,
-                "-to", end_time_str,
-                "-i", input_path,
-                "-filter_complex", filter_complex,
-                "-map", "[v]",
-                "-map", "0:a?",
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-crf", "20",
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-pix_fmt", "yuv420p",
-                output_path
-            ]
 
         elif aspect_ratio_mode == "9:16_blur":
             # Pipeline 9:16 Fundo Desfocado com Zoom e Pan configuráveis
