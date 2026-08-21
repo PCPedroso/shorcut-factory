@@ -18,12 +18,16 @@ def get_video_metadata(url: str):
             duration = info.get('duration')
             upload_date = info.get('upload_date')
             thumbnail = info.get('thumbnail')
+            uploader = info.get('uploader') or info.get('channel') or "Canal Desconhecido"
+            webpage_url = info.get('webpage_url') or url
             return {
                 "title": title,
                 "heatmap": heatmap,
                 "duration": duration,
                 "upload_date": upload_date,
                 "thumbnail": thumbnail,
+                "channel": uploader,
+                "url": webpage_url,
                 "error": None
             }
         except Exception as e:
@@ -33,6 +37,8 @@ def get_video_metadata(url: str):
                 "duration": None,
                 "upload_date": None,
                 "thumbnail": None,
+                "channel": None,
+                "url": url,
                 "error": str(e)
             }
 

@@ -226,7 +226,8 @@ if st.button("🚀 Processar Vídeo / Atualizar", type="primary"):
                     upload_date_raw=v_date,
                     url=video_url,
                     thumbnail_url=v_thumb,
-                    duration_sec=v_dur
+                    duration_sec=v_dur,
+                    channel=meta.get("channel")
                 )
 
             # CACHE: Verifica se já temos a transcrição pronta
@@ -1304,7 +1305,24 @@ if st.session_state.transcription_done:
                             else:
                                 st.video(corte_output_path)
                             
-                            # Criação da Pasta Estruturada do Corte + Arquivo ZIP
+                            # Carrega metadados do vídeo original
+                            _meta_file = os.path.join(data_dir, "metadata.json")
+                            orig_info = {}
+                            if os.path.exists(_meta_file):
+                                try:
+                                    with open(_meta_file, "r", encoding="utf-8") as _mf:
+                                        orig_info = json.load(_mf)
+                                except Exception:
+                                    pass
+                            if not orig_info:
+                                orig_info = {
+                                    "title": f"Vídeo {video_id}",
+                                    "channel": "Canal Oficial",
+                                    "upload_date": "N/D",
+                                    "url": active_url
+                                }
+
+                            # Criação da Pasta Estruturada do Corte (sem arquivo ZIP)
                             import core.export_kit
                             package_res = core.export_kit.create_viral_package(
                                 video_path=corte_output_path,
@@ -1313,31 +1331,19 @@ if st.session_state.transcription_done:
                                 hashtags=cut_hashtags_val.split(),
                                 tags_seo=cut_tags_seo_val,
                                 aspect_mode=selected_aspect,
-                                output_base_dir=data_dir
+                                output_base_dir=data_dir,
+                                orig_video_info=orig_info
                             )
 
-                            col_dl1, col_dl2 = st.columns(2)
-                            with col_dl1:
-                                with open(package_res["video_dest_path"], "rb") as vf:
-                                    st.download_button(
-                                        label=f"💾 Baixar Vídeo ({package_res['video_filename']})",
-                                        data=vf,
-                                        file_name=package_res["video_filename"],
-                                        mime="video/mp4",
-                                        type="primary",
-                                        use_container_width=True
-                                    )
-                            with col_dl2:
-                                if package_res.get("zip_path") and os.path.exists(package_res["zip_path"]):
-                                    with open(package_res["zip_path"], "rb") as zf:
-                                        st.download_button(
-                                            label=f"📦 Baixar Pacote Completo (.ZIP) — {package_res['folder_name']}",
-                                            data=zf,
-                                            file_name=os.path.basename(package_res["zip_path"]),
-                                            mime="application/zip",
-                                            use_container_width=True,
-                                            help="Inclui o vídeo MP4 renomeado + info_publicacao.txt + descricao.txt + tags.txt"
-                                        )
+                            with open(package_res["video_dest_path"], "rb") as vf:
+                                st.download_button(
+                                    label=f"💾 Baixar Vídeo ({package_res['video_filename']})",
+                                    data=vf,
+                                    file_name=package_res["video_filename"],
+                                    mime="video/mp4",
+                                    type="primary",
+                                    use_container_width=True
+                                )
 
                             with st.expander(f"📁 Pasta de Publicação Criada em: data/{video_id}/{package_res['folder_name']}/", expanded=True):
                                 st.markdown(f"**🎬 Arquivo de Vídeo:** `{package_res['video_filename']}`")
@@ -1345,5 +1351,8 @@ if st.session_state.transcription_done:
                                 st.markdown(f"**📝 Legenda para Redes:**\n```\n{cut_desc_val}\n```")
                                 st.markdown(f"**🏷️ Hashtags:** `{cut_hashtags_val}`")
                                 st.markdown(f"**🔍 Tags SEO:** `{cut_tags_seo_val}`")
+                                st.divider()
+                                st.markdown("##### 📺 Dados do Vídeo Original Salvos no `info_publicacao.txt`:")
+                                st.markdown(f"• **Título Original:** {orig_info.get('title')}\n• **Canal:** {orig_info.get('channel')}\n• **Lançamento:** {orig_info.get('upload_date')}\n• **Link:** {orig_info.get('url')}")
 
 

@@ -73,7 +73,8 @@ def add_or_update_video_in_library(
     upload_date_raw: str,
     url: str,
     thumbnail_url: str = None,
-    duration_sec: int = None
+    duration_sec: int = None,
+    channel: str = None
 ) -> dict:
     """Registra ou atualiza um vídeo no catálogo da biblioteca."""
     lib = get_library()
@@ -88,6 +89,7 @@ def add_or_update_video_in_library(
         "url": url,
         "thumbnail": thumbnail_url,
         "duration_sec": duration_sec,
+        "channel": channel or "Canal Desconhecido",
         "added_at": datetime.now().strftime("%d/%m/%Y %H:%M")
     }
 

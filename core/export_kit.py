@@ -1,13 +1,13 @@
 """
 export_kit.py — Criação do Pacote de Publicação Viral Estruturado
 Salva a pasta do corte em data/<video_id>/<PREFIXO>_<Palavras_Do_Titulo>/
-com vídeo renderizado, textos de publicação, tags e arquivo ZIP compactado.
+com vídeo renderizado, info_publicacao.txt (incluindo dados do vídeo original),
+descricao.txt e tags.txt.
 """
 
 import os
 import re
 import shutil
-import zipfile
 
 
 def build_cut_folder_name(aspect_mode: str, title: str) -> str:
@@ -60,16 +60,16 @@ def create_viral_package(
     hashtags: list,
     tags_seo: str,
     aspect_mode: str,
-    output_base_dir: str
+    output_base_dir: str,
+    orig_video_info: dict = None
 ) -> dict:
     """
     Cria a pasta estruturada do corte dentro de data/<video_id>/<PREFIXO>_<Palavras>/
     e gera:
     1. Vídeo renderizado (.mp4) nomeado com o código do corte
-    2. info_publicacao.txt (guia completo de postagem formatado)
+    2. info_publicacao.txt (guia completo de postagem + dados do vídeo original)
     3. descricao.txt (apenas a legenda pronta para colar)
     4. tags.txt (hashtags e tags SEO)
-    5. Pacote compactado .zip para download rápido
     """
     try:
         folder_name = build_cut_folder_name(aspect_mode, title)
@@ -85,13 +85,20 @@ def create_viral_package(
         # Formata hashtags
         hashtags_str = " ".join(h if h.startswith("#") else f"#{h}" for h in hashtags) if hashtags else "#shorts #viral #cortes"
 
+        # Dados do vídeo original
+        orig_info = orig_video_info or {}
+        orig_title = orig_info.get("title", "Título Desconhecido")
+        orig_channel = orig_info.get("channel", "Canal Desconhecido")
+        orig_date = orig_info.get("upload_date", "Data N/D")
+        orig_url = orig_info.get("url", "")
+
         # 2. info_publicacao.txt
         info_content = f"""════════════════════════════════════════════════════════════════
-🚀 PACOTE DE PUBLICAÇÃO VIRAL — {title}
+🚀 PACOTE DE PUBLICAÇÃO VIRAL
 📁 CÓDIGO DO CORTE: {folder_name}
 ════════════════════════════════════════════════════════════════
 
-📌 TÍTULO DO VÍDEO:
+📌 TÍTULO DO CORTE:
 {title}
 
 📝 DESCRIÇÃO / LEGENDA (Instagram Reels, TikTok, YouTube Shorts):
@@ -102,8 +109,16 @@ def create_viral_package(
 🏷️ TAGS SEO (separadas por vírgula):
 {tags_seo}
 
-🎬 ARQUIVO DE VÍDEO:
+🎬 ARQUIVO DE VÍDEO GERADO:
 {video_filename}
+
+════════════════════════════════════════════════════════════════
+📺 INFORMAÇÕES DO VÍDEO ORIGINAL
+════════════════════════════════════════════════════════════════
+• Título Original: {orig_title}
+• Canal do YouTube: {orig_channel}
+• Data de Lançamento: {orig_date}
+• Link do Vídeo: {orig_url}
 """
         with open(os.path.join(package_dir, "info_publicacao.txt"), "w", encoding="utf-8") as f:
             f.write(info_content)
@@ -118,22 +133,9 @@ def create_viral_package(
         with open(os.path.join(package_dir, "tags.txt"), "w", encoding="utf-8") as f:
             f.write(tags_content)
 
-        # 5. Gera arquivo ZIP
-        zip_filename = f"{folder_name}_kit_publicacao.zip"
-        zip_dest_path = os.path.join(package_dir, zip_filename)
-        with zipfile.ZipFile(zip_dest_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for root, _, files in os.walk(package_dir):
-                for file in files:
-                    if file == zip_filename:
-                        continue
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, start=package_dir)
-                    zipf.write(file_path, arcname=arcname)
-
         return {
             "folder_name": folder_name,
             "package_dir": package_dir,
-            "zip_path": zip_dest_path,
             "video_filename": video_filename,
             "video_dest_path": video_dest_path,
             "error": None
@@ -143,7 +145,6 @@ def create_viral_package(
         return {
             "folder_name": "corte_viral",
             "package_dir": output_base_dir,
-            "zip_path": None,
             "video_filename": f"{aspect_mode}_corte.mp4",
             "video_dest_path": video_path,
             "error": str(exc)
