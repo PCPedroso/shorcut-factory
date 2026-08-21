@@ -719,7 +719,13 @@ if st.session_state.transcription_done:
 
                     with col_bp2:
                         batch_sub_enabled = st.toggle("✨ Ativar Legendas Dinâmicas em Todos", value=_cfg.get("subtitle_enabled", True), key="batch_sub_toggle")
-                        st.caption(f"Fontes e cores configuradas: {_cfg.get('subtitle_font_size', 80)}px • Destaque {_cfg.get('subtitle_highlight_color', '#FFFF00')}")
+                        st.caption(f"Fontes e cores: {_cfg.get('subtitle_font_size', 80)}px • Destaque {_cfg.get('subtitle_highlight_color', '#FFFF00')}")
+
+                    batch_force_rerender = st.checkbox(
+                        "🔄 Forçar Re-renderização de Cortes Já Gerados",
+                        value=False,
+                        help="Por padrão, a aplicação pula e reaproveita cortes que já foram gerados neste formato. Marque para reprocessar tudo."
+                    )
 
                     if st.button(f"⚡ Iniciar Renderização em Lote ({len(selected_items)} Cortes)", type="primary", use_container_width=True, key="btn_start_batch"):
                         _active_u_batch = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
@@ -746,11 +752,12 @@ if st.session_state.transcription_done:
                                 subtitle_font_size=_cfg.get("subtitle_font_size", 80),
                                 ollama_model=ollama_model,
                                 aspect_params=_cfg,
+                                force_rerender=batch_force_rerender,
                                 progress_callback=_batch_cb
                             )
 
                             prog_bar.progress(100)
-                            status_box.success(f"🎉 **{len(batch_res)} cortes renderizados e empacotados com sucesso!** Verifique a Galeria abaixo.")
+                            status_box.success(f"🎉 **Processamento em lote concluído!** Verifique a Galeria abaixo.")
                             st.session_state["batch_short_selected"] = {}
                             st.rerun()
 
@@ -1542,15 +1549,31 @@ if st.session_state.transcription_done:
             st.caption(f"📁 Total de **{len(catalog_gal)}** minutagens e instâncias registradas no catálogo.")
             for c_idx, (t_key, cut_item) in enumerate(catalog_gal.items()):
                 with st.container():
-                    col_g_head, col_g_del = st.columns([4, 1])
+                    col_g_head, col_g_del = st.columns([3.8, 1.2])
                     with col_g_head:
                         st.subheader(f"📌 {cut_item.get('title', 'Corte sem título')}")
                         st.caption(f"⏱️ Trecho: `[{cut_item.get('start_time')} → {cut_item.get('end_time')}]` • Atualizado em: `{cut_item.get('updated_at', 'N/D')}`")
                     with col_g_del:
-                        if st.button("🗑️ Excluir Corte", key=f"btn_del_cut_gal_{c_idx}", use_container_width=True):
-                            delete_entire_cut(_vid_id_gal, cut_item.get('start_time'), cut_item.get('end_time'))
-                            st.success("Corte e pastas excluídos.")
-                            st.rerun()
+                        with st.popover("🗑️ Excluir", use_container_width=True):
+                            st.markdown("⚠️ **Confirmar Exclusão**")
+                            del_opt = st.radio(
+                                "Escolha o que deseja excluir:",
+                                [
+                                    "🎬 Apenas Vídeos (.mp4)\n*(Mantém o Kit de Publicação .txt)*",
+                                    "💥 Excluir Tudo\n*(Vídeos + Pastas + Kit de Publicação)*"
+                                ],
+                                key=f"rad_del_choice_{c_idx}"
+                            )
+                            st.markdown("")
+                            col_cdel1, col_cdel2 = st.columns(2)
+                            with col_cdel1:
+                                if st.button("✅ Confirmar", key=f"btn_confirm_del_{c_idx}", type="primary", use_container_width=True):
+                                    is_full_delete = "Excluir Tudo" in del_opt
+                                    delete_entire_cut(_vid_id_gal, cut_item.get('start_time'), cut_item.get('end_time'), delete_publication_kit=is_full_delete)
+                                    st.success("Exclusão concluída.")
+                                    st.rerun()
+                            with col_cdel2:
+                                st.button("❌ Fechar", key=f"btn_close_pop_{c_idx}", use_container_width=True)
 
                     # Instâncias de formatos renderizadas para esta minutagem
                     formats_dict = cut_item.get("formats", {})

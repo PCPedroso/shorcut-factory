@@ -25,6 +25,7 @@ def process_batch_cuts(
     subtitle_font_size: int,
     ollama_model: str,
     aspect_params: Dict = None,
+    force_rerender: bool = False,
     progress_callback: Callable[[int, int, str], None] = None
 ) -> List[Dict]:
     """
@@ -33,6 +34,7 @@ def process_batch_cuts(
         {"start": "00:02:45", "end": "00:03:45", "title": "...", "type": "Shorts"},
         ...
     ]
+    Se force_rerender=False, ignora automaticamente cortes que já existam no disco naquele formato.
     """
     if not video_id or not cut_items:
         return []
@@ -75,6 +77,28 @@ def process_batch_cuts(
         start_t = item.get("start", "")
         end_t = item.get("end", "")
         base_title = item.get("title", f"Corte {idx+1}")
+
+        # Verificação se o corte já foi gerado neste formato
+        if not force_rerender:
+            existing_inst = core.cuts_catalog.get_format_instance(video_id, start_t, end_t, aspect_ratio_mode)
+            if existing_inst and os.path.exists(existing_inst.get("video_path", "")):
+                if progress_callback:
+                    progress_callback(idx + 1, total, f"[{idx+1}/{total}] ⚡ Já gerado: '{existing_inst.get('video_filename')}' (Ignorado)")
+                results.append({
+                    "item": item,
+                    "title": base_title,
+                    "start": start_t,
+                    "end": end_t,
+                    "folder_name": existing_inst.get("folder_name"),
+                    "video_path": existing_inst.get("video_path"),
+                    "video_filename": existing_inst.get("video_filename"),
+                    "package_dir": existing_inst.get("folder_path"),
+                    "resolution": existing_inst.get("resolution", "1080p"),
+                    "skipped": True,
+                    "success": True,
+                    "error": None
+                })
+                continue
 
         if progress_callback:
             progress_callback(idx, total, f"[{idx+1}/{total}] Analisando trecho [{start_t} → {end_t}]...")

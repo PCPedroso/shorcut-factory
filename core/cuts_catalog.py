@@ -211,35 +211,79 @@ def update_cut_texts_only(
     return {"entry": entry, "error": None}
 
 
-def delete_format_instance(video_id: str, start_time: str, end_time: str, aspect_mode: str, delete_folder: bool = True) -> bool:
-    """Remove uma instância de formato específica do catálogo e opcionalmente apaga a pasta do disco."""
+def delete_format_instance(
+    video_id: str,
+    start_time: str,
+    end_time: str,
+    aspect_mode: str,
+    delete_publication_kit: bool = True
+) -> bool:
+    """
+    Remove uma instância de formato específica.
+    Se delete_publication_kit=False: apaga APENAS o arquivo .mp4, mantendo a pasta e o kit de publicação (.txt).
+    Se delete_publication_kit=True: apaga a pasta completa e remove o formato do catálogo.
+    """
     catalog = load_cuts_catalog(video_id)
     key = make_time_key(start_time, end_time)
     if key in catalog and aspect_mode in catalog[key].get("formats", {}):
-        inst = catalog[key]["formats"].pop(aspect_mode)
-        if delete_folder:
+        inst = catalog[key]["formats"].get(aspect_mode)
+        if not delete_publication_kit:
+            # Apaga apenas o arquivo de vídeo (.mp4)
+            v_path = inst.get("video_path")
+            if v_path and os.path.exists(v_path):
+                try:
+                    os.remove(v_path)
+                except Exception:
+                    pass
+            # Marca no catálogo que o vídeo foi removido mas o kit permanece
+            inst["video_path"] = ""
+            inst["video_deleted"] = True
+        else:
+            # Apaga a pasta inteira daquele formato
+            inst = catalog[key]["formats"].pop(aspect_mode)
             f_path = inst.get("folder_path")
             if f_path and os.path.exists(f_path):
                 shutil.rmtree(f_path, ignore_errors=True)
-        # Se não restou nenhum formato, remove a entrada inteira
-        if not catalog[key]["formats"]:
-            catalog.pop(key, None)
+            if not catalog[key]["formats"]:
+                catalog.pop(key, None)
+
         save_cuts_catalog(video_id, catalog)
         return True
     return False
 
 
-def delete_entire_cut(video_id: str, start_time: str, end_time: str, delete_folders: bool = True) -> bool:
-    """Remove todos os formatos daquela minutagem e apaga as respectivas pastas do disco."""
+def delete_entire_cut(
+    video_id: str,
+    start_time: str,
+    end_time: str,
+    delete_publication_kit: bool = True
+) -> bool:
+    """
+    Remove todos os formatos daquela minutagem.
+    Se delete_publication_kit=False: apaga APENAS os arquivos .mp4 de todos os formatos, preservando os textos.
+    Se delete_publication_kit=True: apaga todas as pastas do disco e limpa o catálogo.
+    """
     catalog = load_cuts_catalog(video_id)
     key = make_time_key(start_time, end_time)
     if key in catalog:
-        entry = catalog.pop(key)
-        if delete_folders:
+        entry = catalog[key]
+        if not delete_publication_kit:
+            for inst in entry.get("formats", {}).values():
+                v_path = inst.get("video_path")
+                if v_path and os.path.exists(v_path):
+                    try:
+                        os.remove(v_path)
+                    except Exception:
+                        pass
+                inst["video_path"] = ""
+                inst["video_deleted"] = True
+        else:
+            catalog.pop(key, None)
             for inst in entry.get("formats", {}).values():
                 f_path = inst.get("folder_path")
                 if f_path and os.path.exists(f_path):
                     shutil.rmtree(f_path, ignore_errors=True)
+
         save_cuts_catalog(video_id, catalog)
         return True
     return False
