@@ -5,6 +5,7 @@ utilizando o formato padrão de indústria ASS (Advanced SubStation Alpha) e o r
 """
 
 import os
+import re
 import json
 import hashlib
 import subprocess
@@ -75,11 +76,19 @@ def _hex_to_ass_color(hex_color: str, alpha: float = 0.0) -> str:
     return f"&H{a_hex}{b.upper()}{g.upper()}{r.upper()}&"
 
 
+def _clean_word_text(text: str) -> str:
+    """Remove pontuações residuais de marcadores (como '>>', '<<', '[Música]')."""
+    text = re.sub(r'\[.*?\]', '', text)
+    text = re.sub(r'[><]{2,}', '', text)
+    return text.strip()
+
+
 def extract_words_in_range(transcript_path: str, start_time_str: str, end_time_str: str) -> list:
     """
     Lê o transcript.json e extrai todas as palavras que ocorrem dentro do intervalo do corte.
     Trata tanto transcripts com word_timestamps (Whisper) quanto transcripts do YouTube ASR
     (que possuem janelas de segmentos sobrepostas).
+    Remove marcadores de interlocutor ('>>') e ruído ('[Música]'), marcando quebras de fala.
     Garante estrita ordem cronológica e zero sobreposição temporal entre palavras.
     """
     if not os.path.exists(transcript_path):
@@ -109,20 +118,21 @@ def extract_words_in_range(transcript_path: str, start_time_str: str, end_time_s
             for w in seg["words"]:
                 w_start = w.get("start", seg_start)
                 w_end = w.get("end", seg_end)
-                word_text = w.get("word", "").strip()
+                word_text = _clean_word_text(w.get("word", ""))
+                is_break = bool(re.search(r'[><]{2,}', w.get("word", "")))
                 if word_text:
                     raw_words.append({
                         "word": word_text,
                         "start": w_start,
-                        "end": w_end
+                        "end": w_end,
+                        "break_before": is_break
                     })
         else:
             # 2. Transcrição por segmentos (ex: YouTube ASR)
-            # Em legendas do YouTube, cada segmento se sobrepõe ao próximo na exibição.
-            # O áudio falado real do segmento termina quando o próximo segmento começa!
-            text = seg.get("text", "").strip()
-            words_list = text.split()
-            if not words_list:
+            raw_text = seg.get("text", "").strip()
+            # Remove ruídos entre colchetes como [Música], [Aplausos]
+            raw_text = re.sub(r'\[.*?\]', '', raw_text)
+            if not raw_text.strip():
                 continue
 
             if i < len(segments) - 1 and segments[i + 1].get("start", 0.0) > seg_start:
@@ -130,17 +140,34 @@ def extract_words_in_range(transcript_path: str, start_time_str: str, end_time_s
             else:
                 actual_end = seg_end
 
-            seg_duration = max(0.1, actual_end - seg_start)
-            word_duration = seg_duration / len(words_list)
+            # Divide o texto considerando marcadores de interlocutor '>>'
+            speaker_parts = re.split(r'\s*>{2,}\s*', raw_text)
+            # Agrupa palavras por parte
+            total_words_in_seg = sum(len(p.split()) for p in speaker_parts if p.strip())
+            if total_words_in_seg == 0:
+                continue
 
-            for j, word_text in enumerate(words_list):
-                w_start = seg_start + j * word_duration
-                w_end = w_start + word_duration
-                raw_words.append({
-                    "word": word_text,
-                    "start": w_start,
-                    "end": w_end
-                })
+            seg_duration = max(0.1, actual_end - seg_start)
+            word_duration = seg_duration / total_words_in_seg
+
+            word_counter = 0
+            for part_idx, part in enumerate(speaker_parts):
+                part_words = part.split()
+                for word_idx, w in enumerate(part_words):
+                    cleaned_w = _clean_word_text(w)
+                    if not cleaned_w:
+                        continue
+                    w_start = seg_start + word_counter * word_duration
+                    w_end = w_start + word_duration
+                    # Se a palavra é o início de um novo interlocutor pós-'>>'
+                    is_break = (part_idx > 0 and word_idx == 0)
+                    raw_words.append({
+                        "word": cleaned_w,
+                        "start": w_start,
+                        "end": w_end,
+                        "break_before": is_break
+                    })
+                    word_counter += 1
 
     if not raw_words:
         return []
@@ -173,7 +200,10 @@ def extract_words_in_range(transcript_path: str, start_time_str: str, end_time_s
 def group_words_into_lines(words: list, max_words_per_line: int = 4, max_gap_seconds: float = 1.0) -> list:
     """
     Agrupa palavras em blocos/linhas curtas para exibição dinâmica estilo CapCut.
-    Quebra de linha ocorre quando atinge max_words_per_line ou há uma pausa longa.
+    Quebra de linha ocorre quando:
+      - Atinge max_words_per_line
+      - Ocorre uma pausa longa (> max_gap_seconds)
+      - Ocorre uma quebra de interlocutor/assunto (marcador '>>')
     """
     if not words:
         return []
@@ -188,9 +218,10 @@ def group_words_into_lines(words: list, max_words_per_line: int = 4, max_gap_sec
 
         prev_w = current_line_words[-1]
         gap = w["start"] - prev_w["end"]
+        is_break = w.get("break_before", False)
 
-        # Se atingiu o limite de palavras ou houve pausa relevante, fecha a linha
-        if len(current_line_words) >= max_words_per_line or gap > max_gap_seconds:
+        # Se atingiu o limite de palavras, houve pausa ou mudança de interlocutor ('>>'), fecha a linha
+        if len(current_line_words) >= max_words_per_line or gap > max_gap_seconds or is_break:
             line_start = current_line_words[0]["start"]
             line_end = current_line_words[-1]["end"]
             lines.append({
@@ -221,12 +252,12 @@ def generate_ass_file(
     output_ass_path: str,
     video_width: int = 1080,
     video_height: int = 1920,
-    font_size: int = 55,
+    font_size: int = 75,
     highlight_color: str = "#FFFF00",
     base_color: str = "#FFFFFF",
     outline_color: str = "#000000",
-    outline_width: int = 5,
-    shadow_depth: int = 2,
+    outline_width: int = None,
+    shadow_depth: int = None,
 ) -> bool:
     """
     Gera arquivo de legendas .ass completo com estilos e eventos karaokê palavra-a-palavra.
@@ -242,6 +273,12 @@ def generate_ass_file(
     # Margem vertical inferior (aproximadamente 22% a partir do fundo = posição no terço inferior)
     margin_v = int(video_height * 0.22)
     margin_lr = int(video_width * 0.05)
+
+    # Outline e sombra proporcionais ao tamanho da fonte para manter o estilo Alex Hormozi nítido
+    if outline_width is None:
+        outline_width = max(4, int(font_size * 0.08))
+    if shadow_depth is None:
+        shadow_depth = max(2, int(font_size * 0.035))
 
     # Monta cabeçalho do script ASS
     content = [

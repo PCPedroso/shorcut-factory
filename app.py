@@ -996,7 +996,7 @@ if st.session_state.transcription_done:
     subtitle_enabled = False
     subtitle_highlight_color = "#FFFF00"
     subtitle_base_color = "#FFFFFF"
-    subtitle_font_size = 55
+    subtitle_font_size = 80
 
     with st.expander("📝 Legendas Dinâmicas (Estilo CapCut / Alex Hormozi)", expanded=False):
         subtitle_enabled = st.toggle(
@@ -1044,11 +1044,12 @@ if st.session_state.transcription_done:
                 with col_sub3:
                     subtitle_font_size = st.slider(
                         "🔤 Fonte",
-                        min_value=35,
-                        max_value=85,
-                        value=55,
+                        min_value=40,
+                        max_value=160,
+                        value=80,
                         step=5,
-                        key="sub_font_size"
+                        key="sub_font_size",
+                        help="Tamanho da fonte das legendas (recomendado entre 75 e 110 para cortes 9:16 estilo Alex Hormozi)."
                     )
                 st.caption("📌 Legendas no terço inferior da tela • Fonte Montserrat Bold (ou Arial como fallback) • Contorno preto para legibilidade em qualquer fundo")
 
