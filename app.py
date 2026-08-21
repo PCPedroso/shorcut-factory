@@ -1101,10 +1101,15 @@ if st.session_state.transcription_done:
     # ─────────────────────────────────────────────────────────────────
     # Kit de Publicação Viral & Título (IA)
     # ─────────────────────────────────────────────────────────────────
+    # Inicializa título sugerido a partir da pauta selecionada na Seção 2 se houver
+    if "meta_title" not in st.session_state or not st.session_state["meta_title"] or st.session_state["meta_title"] == "Corte Viral":
+        if st.session_state.get("final_corte_title"):
+            st.session_state["meta_title"] = st.session_state["final_corte_title"]
+
     with st.expander("🚀 Kit de Publicação Viral (Título, Descrição & Tags para Redes)", expanded=True):
         col_meta_btn, col_meta_info = st.columns([1.5, 2.5])
         with col_meta_btn:
-            if st.button("✨ Gerar Título e Textos com IA", use_container_width=True, help="Analisa o trecho exato do corte e gera Título Viral, Descrição com CTA e Hashtags estratégicas via Llama 3."):
+            if st.button("✨ Gerar Título e Textos com IA", use_container_width=True, help="Analisa o trecho exato do corte e gera Título Viral específico, Descrição contextualizada com CTA e Hashtags estratégicas."):
                 _vid_id_meta = get_video_id(video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or "")
                 _transcript_path_meta = os.path.join("data", _vid_id_meta, "transcript.json") if _vid_id_meta else ""
                 if not os.path.exists(_transcript_path_meta):
@@ -1112,7 +1117,7 @@ if st.session_state.transcription_done:
                 elif not start_time or not end_time:
                     st.warning("⚠️ Defina o tempo inicial e final do corte primeiro.")
                 else:
-                    with st.spinner("Analisando o corte e gerando título magnético, descrição persuasiva e tags virais..."):
+                    with st.spinner("Analisando o áudio e gerando título de alto impacto, legenda jornalística e tags com IA..."):
                         import core.analyzer
                         from core.subtitle_burner import extract_words_in_range
                         words_meta = extract_words_in_range(_transcript_path_meta, start_time, end_time)
@@ -1120,9 +1125,9 @@ if st.session_state.transcription_done:
                         if not snippet_text:
                             st.warning("Nenhuma fala encontrada no intervalo selecionado.")
                         else:
-                            model_for_meta = selected_model if 'selected_model' in locals() and selected_model else "llama3:latest"
+                            model_for_meta = ollama_model if 'ollama_model' in locals() and ollama_model else "llama3"
                             meta_res = core.analyzer.generate_viral_cut_metadata(snippet_text, model=model_for_meta)
-                            st.session_state["meta_title"] = meta_res.get("titulo_principal", "Corte Viral")
+                            st.session_state["meta_title"] = meta_res.get("titulo_principal", "Corte Selecionado")
                             st.session_state["meta_alt_titles"] = meta_res.get("titulos_alternativos", [])
                             st.session_state["meta_desc"] = meta_res.get("descricao", "")
                             st.session_state["meta_hashtags"] = meta_res.get("hashtags", [])
@@ -1130,8 +1135,8 @@ if st.session_state.transcription_done:
                             st.rerun()
 
         cut_title_val = st.text_input(
-            "🏷️ Título do Corte (usado no nome do arquivo e na postagem):",
-            value=st.session_state.get("meta_title", "Corte Viral"),
+            "🏷️ Título do Corte (usado no nome da pasta, do arquivo e na postagem):",
+            value=st.session_state.get("meta_title", "Corte Selecionado"),
             key="input_cut_title"
         )
         
@@ -1150,12 +1155,12 @@ if st.session_state.transcription_done:
         with col_desc:
             cut_desc_val = st.text_area(
                 "📝 Descrição / Legenda (Instagram Reels, TikTok, Shorts):",
-                value=st.session_state.get("meta_desc", "Confira este momento imperdível! Curta e compartilhe sua opinião."),
+                value=st.session_state.get("meta_desc", "Confira a declaração e participe do debate nos comentários!"),
                 height=110,
                 key="input_cut_desc"
             )
         with col_tags:
-            cut_hashtags_default = " ".join(st.session_state.get("meta_hashtags", ["#shorts", "#viral", "#cortes"]))
+            cut_hashtags_default = " ".join(st.session_state.get("meta_hashtags", ["#shorts", "#viral", "#cortes", "#reels"]))
             cut_hashtags_val = st.text_input(
                 "🏷️ Hashtags:",
                 value=cut_hashtags_default,
@@ -1163,7 +1168,7 @@ if st.session_state.transcription_done:
             )
             cut_tags_seo_val = st.text_input(
                 "🔍 Tags SEO (separadas por vírgula):",
-                value=st.session_state.get("meta_tags_seo", "cortes, viral, shorts, podcast"),
+                value=st.session_state.get("meta_tags_seo", "cortes, viral, shorts, podcast, debate"),
                 key="input_cut_tags_seo"
             )
 
@@ -1186,8 +1191,7 @@ if st.session_state.transcription_done:
                 data_dir = os.path.join("data", video_id)
                 os.makedirs(data_dir, exist_ok=True)
                 video_full_path = os.path.join(data_dir, "video_full.mp4")
-                # Normaliza o aspect ratio para nome de arquivo seguro no Windows
-                # (substituindo ':' por '-' para evitar Alternate Data Streams)
+                # Normaliza o aspect ratio para nome de arquivo temporário seguro
                 safe_aspect_name = selected_aspect.replace(":", "-")
                 corte_output_path = os.path.join(data_dir, f"corte_{safe_aspect_name}.mp4")
                 
@@ -1274,7 +1278,7 @@ if st.session_state.transcription_done:
                             else:
                                 st.video(corte_output_path)
                             
-                            # Criação do Pacote Viral com pasta e ZIP
+                            # Criação da Pasta Estruturada do Corte + Arquivo ZIP
                             import core.export_kit
                             package_res = core.export_kit.create_viral_package(
                                 video_path=corte_output_path,
@@ -1282,6 +1286,7 @@ if st.session_state.transcription_done:
                                 description=cut_desc_val,
                                 hashtags=cut_hashtags_val.split(),
                                 tags_seo=cut_tags_seo_val,
+                                aspect_mode=selected_aspect,
                                 output_base_dir=data_dir
                             )
 
@@ -1300,7 +1305,7 @@ if st.session_state.transcription_done:
                                 if package_res.get("zip_path") and os.path.exists(package_res["zip_path"]):
                                     with open(package_res["zip_path"], "rb") as zf:
                                         st.download_button(
-                                            label="📦 Baixar Pacote Completo (.ZIP)",
+                                            label=f"📦 Baixar Pacote Completo (.ZIP) — {package_res['folder_name']}",
                                             data=zf,
                                             file_name=os.path.basename(package_res["zip_path"]),
                                             mime="application/zip",
@@ -1308,10 +1313,11 @@ if st.session_state.transcription_done:
                                             help="Inclui o vídeo MP4 renomeado + info_publicacao.txt + descricao.txt + tags.txt"
                                         )
 
-                            with st.expander(f"📁 Pasta de Publicação Salva em: data/{video_id}/cortes/{package_res['safe_title']}/", expanded=False):
-                                st.markdown(f"**Título:** `{cut_title_val}`")
-                                st.markdown(f"**Legenda:**\n```\n{cut_desc_val}\n```")
-                                st.markdown(f"**Hashtags:** `{cut_hashtags_val}`")
-                                st.markdown(f"**Tags SEO:** `{cut_tags_seo_val}`")
+                            with st.expander(f"📁 Pasta de Publicação Criada em: data/{video_id}/{package_res['folder_name']}/", expanded=True):
+                                st.markdown(f"**🎬 Arquivo de Vídeo:** `{package_res['video_filename']}`")
+                                st.markdown(f"**📌 Título:** `{cut_title_val}`")
+                                st.markdown(f"**📝 Legenda para Redes:**\n```\n{cut_desc_val}\n```")
+                                st.markdown(f"**🏷️ Hashtags:** `{cut_hashtags_val}`")
+                                st.markdown(f"**🔍 Tags SEO:** `{cut_tags_seo_val}`")
 
 
