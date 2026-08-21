@@ -13,6 +13,7 @@ import core.face_tracker
 import core.library_manager
 import core.config_manager
 import core.export_kit
+import core.cuts_catalog
 
 importlib.reload(core.extractor)
 importlib.reload(core.transcriber)
@@ -22,6 +23,7 @@ importlib.reload(core.face_tracker)
 importlib.reload(core.library_manager)
 importlib.reload(core.config_manager)
 importlib.reload(core.export_kit)
+importlib.reload(core.cuts_catalog)
 
 from core.extractor import download_audio, get_video_metadata
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
@@ -30,6 +32,7 @@ from core.video_processor import download_full_video, cut_video, get_video_resol
 from core.library_manager import get_library, add_or_update_video_in_library, remove_video_from_library
 from core.config_manager import load_settings, save_all_settings
 from core.export_kit import build_cut_folder_name, create_viral_package
+from core.cuts_catalog import get_cut_entry, get_format_instance, register_cut_instance, update_cut_texts_only
 
 # Carrega todas as configurações persistentes salvas
 _cfg = load_settings()
@@ -1104,11 +1107,24 @@ if st.session_state.transcription_done:
     # ─────────────────────────────────────────────────────────────────
     # Kit de Publicação Viral & Título (IA)
     # ─────────────────────────────────────────────────────────────────
+    _active_url_cat = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+    _vid_id_cat = get_video_id(_active_url_cat) or ""
+
+    # Consulta se a minutagem e o formato específico já foram gerados anteriormente
+    existing_cut = get_cut_entry(_vid_id_cat, start_time, end_time) if (_vid_id_cat and start_time and end_time) else None
+    existing_inst = get_format_instance(_vid_id_cat, start_time, end_time, selected_aspect) if (_vid_id_cat and start_time and end_time) else None
+
     if "meta_generated" not in st.session_state:
         st.session_state["meta_generated"] = False
 
-    # Se uma pauta da Seção 2 foi selecionada e ainda não há título preenchido, inicializa
-    if "input_cut_title" not in st.session_state or not st.session_state["input_cut_title"]:
+    # Se existe entrada salva no catálogo para esta minutagem, sincroniza automaticamente
+    if existing_cut and not st.session_state.get("meta_generated"):
+        st.session_state["input_cut_title"] = existing_cut.get("title", "Corte Selecionado")
+        st.session_state["input_cut_desc"] = existing_cut.get("description", "")
+        st.session_state["input_cut_hashtags"] = " ".join(existing_cut.get("hashtags", []))
+        st.session_state["input_cut_tags_seo"] = existing_cut.get("tags_seo", "")
+        st.session_state["meta_generated"] = True
+    elif "input_cut_title" not in st.session_state or not st.session_state["input_cut_title"]:
         if st.session_state.get("final_corte_title"):
             st.session_state["input_cut_title"] = st.session_state["final_corte_title"]
             st.session_state["meta_generated"] = True
@@ -1117,8 +1133,7 @@ if st.session_state.transcription_done:
         col_meta_btn, col_meta_status = st.columns([1.8, 2.2])
         with col_meta_btn:
             if st.button("✨ Gerar Título e Textos com IA", use_container_width=True, type="secondary", help="Analisa o trecho exato do corte e gera Título Viral específico, Descrição contextualizada com CTA e Hashtags estratégicas."):
-                _vid_id_meta = get_video_id(video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or "")
-                _transcript_path_meta = os.path.join("data", _vid_id_meta, "transcript.json") if _vid_id_meta else ""
+                _transcript_path_meta = os.path.join("data", _vid_id_cat, "transcript.json") if _vid_id_cat else ""
                 if not os.path.exists(_transcript_path_meta):
                     st.warning("⚠️ Transcrição não encontrada. Transcreva o vídeo na Seção 1 primeiro.")
                 elif not start_time or not end_time:
@@ -1135,7 +1150,6 @@ if st.session_state.transcription_done:
                             model_for_meta = ollama_model if 'ollama_model' in locals() and ollama_model else "llama3"
                             meta_res = core.analyzer.generate_viral_cut_metadata(snippet_text, model=model_for_meta)
                             
-                            # Atualiza diretamente os estados dos widgets do Streamlit
                             st.session_state["input_cut_title"] = meta_res.get("titulo_principal", "Corte Selecionado")
                             st.session_state["input_cut_desc"] = meta_res.get("descricao", "")
                             st.session_state["input_cut_hashtags"] = " ".join(meta_res.get("hashtags", ["#shorts", "#viral", "#cortes"]))
@@ -1145,7 +1159,12 @@ if st.session_state.transcription_done:
                             st.rerun()
 
         with col_meta_status:
-            if st.session_state.get("meta_generated"):
+            if existing_inst:
+                st.success(f"⚡ **Instância Encontrada no Cache ({existing_inst.get('rendered_at')})!**")
+            elif existing_cut:
+                other_formats = list(existing_cut.get("formats", {}).keys())
+                st.info(f"💡 Minutagem já gerada em: `{', '.join(other_formats)}`. Textos reaproveitados!")
+            elif st.session_state.get("meta_generated"):
                 st.success("✅ **Textos Gerados pela IA!** Conteúdo contextual pronto para postagem.")
             else:
                 st.info("ℹ️ Clique no botão ao lado para gerar textos específicos com base no áudio.")
@@ -1163,10 +1182,8 @@ if st.session_state.transcription_done:
         )
         
         # Prévia do nome da pasta e do arquivo de vídeo gerados
-        from core.export_kit import build_cut_folder_name
-        _v_id_cur = get_video_id(video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or "video") or "video"
         _preview_folder = build_cut_folder_name(selected_aspect, cut_title_val)
-        st.caption(f"📁 **Pasta a ser criada:** `data/{_v_id_cur}/{_preview_folder}/`  |  🎬 **Arquivo:** `{_preview_folder}.mp4`")
+        st.caption(f"📁 **Pasta da Instância ({selected_aspect}):** `data/{_vid_id_cat}/{_preview_folder}/`  |  🎬 **Vídeo:** `{_preview_folder}.mp4`")
 
         # Se houver títulos alternativos sugeridos pela IA, exibe botões rápidos de troca
         alt_titles = st.session_state.get("meta_alt_titles", [])
@@ -1199,8 +1216,54 @@ if st.session_state.transcription_done:
                 key="input_cut_tags_seo"
             )
 
+        # Se a minutagem já existe no catálogo, botão para salvar edições de texto instantaneamente
+        if existing_cut:
+            if st.button("💾 Atualizar Apenas Textos no Disco (Sem Re-renderizar Vídeo)", use_container_width=True):
+                _meta_file_quick = os.path.join("data", _vid_id_cat, "metadata.json")
+                orig_info_quick = {}
+                if os.path.exists(_meta_file_quick):
+                    try:
+                        with open(_meta_file_quick, "r", encoding="utf-8") as _mfq:
+                            orig_info_quick = json.load(_mfq)
+                    except Exception:
+                        pass
+                update_res = update_cut_texts_only(
+                    video_id=_vid_id_cat,
+                    start_time=start_time,
+                    end_time=end_time,
+                    title=cut_title_val,
+                    description=cut_desc_val,
+                    hashtags=cut_hashtags_val.split(),
+                    tags_seo=cut_tags_seo_val,
+                    orig_video_info=orig_info_quick
+                )
+                st.success("✅ Arquivos de texto atualizados com sucesso em todas as instâncias existentes deste corte!")
+
+    # Exibição imediata da instância existente do cache se já renderizada
+    if existing_inst and os.path.exists(existing_inst.get("video_path", "")):
+        st.markdown(f"#### 🎬 Prévia da Instância Pronta ({aspect_option})")
+        if "9:16" in selected_aspect:
+            col_pv1, col_pv2, col_pv3 = st.columns([1, 2, 1])
+            with col_pv2:
+                st.video(existing_inst["video_path"])
+        else:
+            st.video(existing_inst["video_path"])
+
+        with open(existing_inst["video_path"], "rb") as vf_cached:
+            st.download_button(
+                label=f"💾 Baixar Vídeo Pronto do Cache ({existing_inst['video_filename']})",
+                data=vf_cached,
+                file_name=existing_inst["video_filename"],
+                mime="video/mp4",
+                type="primary",
+                use_container_width=True,
+                key="btn_dl_cached_instance"
+            )
+        st.caption(f"⚡ Carregado instantaneamente do cache: `{existing_inst['folder_path']}`")
+
     st.markdown("")
-    if st.button("✂️ Gerar Corte no Formato Escolhido", type="primary", use_container_width=True):
+    render_button_label = "🔄 Forçar Re-renderização no Formato Escolhido" if existing_inst else "✂️ Gerar Corte no Formato Escolhido"
+    if st.button(render_button_label, type="primary" if not existing_inst else "secondary", use_container_width=True):
         if not start_time or not end_time:
             st.warning("Preencha o tempo inicial e final.")
         else:
@@ -1333,6 +1396,22 @@ if st.session_state.transcription_done:
                                 aspect_mode=selected_aspect,
                                 output_base_dir=data_dir,
                                 orig_video_info=orig_info
+                            )
+
+                            # Registra no Catálogo de Cortes
+                            register_cut_instance(
+                                video_id=video_id,
+                                start_time=start_time,
+                                end_time=end_time,
+                                title=cut_title_val,
+                                description=cut_desc_val,
+                                hashtags=cut_hashtags_val.split(),
+                                tags_seo=cut_tags_seo_val,
+                                aspect_mode=selected_aspect,
+                                folder_name=package_res["folder_name"],
+                                folder_path=package_res["package_dir"],
+                                video_path=package_res["video_dest_path"],
+                                resolution=out_res
                             )
 
                             with open(package_res["video_dest_path"], "rb") as vf:
