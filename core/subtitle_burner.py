@@ -175,7 +175,8 @@ def _hex_to_ffmpeg_color(hex_color: str, alpha: float = 1.0) -> str:
 
 def build_drawtext_filters(
     lines: list,
-    video_height: int,
+    video_width: int = 1080,
+    video_height: int = 1920,
     font_size: int = 55,
     highlight_color: str = "#FFFF00",
     base_color: str = "#FFFFFF",
@@ -184,65 +185,96 @@ def build_drawtext_filters(
     shadow_offset: int = 2,
 ) -> list:
     """
-    Gera lista de filtros drawtext do FFmpeg para todas as linhas e palavras.
+    Gera lista de filtros drawtext do FFmpeg para legendas palavra-a-palavra.
 
-    Estratégia em 2 camadas por linha:
-    1. Linha base (todas as palavras, cor semitransparente) — visível durante toda a linha
-    2. Linha highlight (mesmas palavras, cor vibrante) — visível apenas no período da palavra ativa
-
-    Retorna lista de strings de filtros drawtext.
+    Estratégia: cada palavra é renderizada individualmente na sua posição X calculada.
+    Cada palavra tem dois estados *mutuamente exclusivos*:
+      - BASE: visível quando a linha está ativa E a palavra NÃO é a atual
+              enable='between(t,LINE_START,LINE_END)*not(between(t,W_START,W_END))'
+      - HIGHLIGHT: visível apenas no intervalo da própria palavra
+              enable='between(t,W_START,W_END)'
+    Isso elimina qualquer sobreposição entre camadas.
     """
     filters = []
     font_path = _get_font_path()
 
     # Posição Y: 78% da altura (terço inferior)
     y_pos = int(video_height * 0.78)
-    x_pos = "(w-text_w)/2"
+
+    # Métricas aproximadas para Montserrat ExtraBold (calibrado empiricamente)
+    # Largura média de caractere: ~0.60 * font_size
+    # Largura do espaço entre palavras: ~0.30 * font_size
+    CHAR_W = 0.60
+    SPACE_W = 0.30
 
     highlight_ffmpeg = _hex_to_ffmpeg_color(highlight_color, alpha=1.0)
-    base_ffmpeg = _hex_to_ffmpeg_color(base_color, alpha=0.65)
+    base_ffmpeg = _hex_to_ffmpeg_color(base_color, alpha=0.70)
     outline_ffmpeg = _hex_to_ffmpeg_color(outline_color, alpha=0.88)
     shadow_ffmpeg = _hex_to_ffmpeg_color("000000", alpha=0.55)
 
     for line in lines:
         line_start = line["line_start"]
         line_end = line["line_end"]
-        line_text = _escape_ffmpeg_text(line["text"])
+        words = line["words"]
 
-        # --- Camada 1: base (cor apagada, sempre visível durante a linha) ---
-        base_filter = (
-            f"drawtext=fontfile='{font_path}'"
-            f":text='{line_text}'"
-            f":fontsize={font_size}"
-            f":fontcolor={base_ffmpeg}"
-            f":borderw={outline_width}"
-            f":bordercolor={outline_ffmpeg}"
-            f":shadowx={shadow_offset}:shadowy={shadow_offset}"
-            f":shadowcolor={shadow_ffmpeg}"
-            f":x={x_pos}:y={y_pos}"
-            f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
-        )
-        filters.append(base_filter)
+        # 1. Estima a largura de cada palavra em pixels
+        word_widths = []
+        for w in words:
+            text = w["word"]
+            est_px = int(len(text) * CHAR_W * font_size + SPACE_W * font_size)
+            word_widths.append(est_px)
 
-        # --- Camada 2: highlight (cor vibrante, piscando palavra por palavra) ---
-        for word_data in line["words"]:
+        total_line_width = sum(word_widths)
+        # Garante que a linha não saia da tela
+        start_x = max(10, (video_width - total_line_width) // 2)
+
+        # 2. Para cada palavra: renderiza base + highlight com enable exclusivos
+        x_cursor = start_x
+        for word_data, w_px in zip(words, word_widths):
+            word_text = _escape_ffmpeg_text(word_data["word"])
             w_start = word_data["start"]
             w_end = word_data["end"]
-            # Re-renderiza a linha inteira em highlight sobre a base layer,
-            # apenas no intervalo da palavra atual — cria o efeito de "karaokê"
+            wx = x_cursor
+
+            # BASE: palavra em cor apagada, visível quando a linha está ativa
+            # mas ESTA palavra não está sendo falada
+            base_enable = (
+                f"between(t,{line_start:.3f},{line_end:.3f})"
+                f"*not(between(t,{w_start:.3f},{w_end:.3f}))"
+            )
+            base_filter = (
+                f"drawtext=fontfile='{font_path}'"
+                f":text='{word_text}'"
+                f":fontsize={font_size}"
+                f":fontcolor={base_ffmpeg}"
+                f":borderw={outline_width}"
+                f":bordercolor={outline_ffmpeg}"
+                f":shadowx={shadow_offset}:shadowy={shadow_offset}"
+                f":shadowcolor={shadow_ffmpeg}"
+                f":x={wx}:y={y_pos}"
+                f":enable='{base_enable}'"
+            )
+            filters.append(base_filter)
+
+            # HIGHLIGHT: palavra em cor vibrante, visível só no seu próprio intervalo
+            hl_font_size = int(font_size * 1.06)
+            # Ajuste Y para centralizar o tamanho maior
+            hl_y = y_pos - int((hl_font_size - font_size) * 0.5)
             highlight_filter = (
                 f"drawtext=fontfile='{font_path}'"
-                f":text='{line_text}'"
-                f":fontsize={int(font_size * 1.04)}"
+                f":text='{word_text}'"
+                f":fontsize={hl_font_size}"
                 f":fontcolor={highlight_ffmpeg}"
                 f":borderw={outline_width + 1}"
                 f":bordercolor={outline_ffmpeg}"
                 f":shadowx={shadow_offset}:shadowy={shadow_offset}"
                 f":shadowcolor={shadow_ffmpeg}"
-                f":x={x_pos}:y={y_pos - 1}"
+                f":x={wx}:y={hl_y}"
                 f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
             )
             filters.append(highlight_filter)
+
+            x_cursor += w_px
 
     return filters
 
@@ -301,6 +333,7 @@ def burn_subtitles(
         # 5. Monta filtros drawtext
         drawtext_filters = build_drawtext_filters(
             lines=lines,
+            video_width=video_width,
             video_height=video_height,
             font_size=font_size,
             highlight_color=highlight_color,
