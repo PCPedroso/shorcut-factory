@@ -191,10 +191,42 @@ def extract_words_in_range(transcript_path: str, start_time_str: str, end_time_s
                 relative_words.append({
                     "word": w["word"],
                     "start": rel_start,
-                    "end": rel_end
+                    "end": rel_end,
+                    "break_before": w.get("break_before", False)
                 })
 
-    return relative_words
+    return _filter_orphan_fragments(relative_words)
+
+
+def _filter_orphan_fragments(words: list) -> list:
+    """
+    Remove fragmentos de palavras órfãs e incompletas:
+    1. Se nos primeiros 2.5s do corte houver poucas palavras (<= 3) antes de uma quebra de interlocutor ('>>'),
+       essas palavras pertencem ao final cortado da fala anterior e são removidas.
+    2. Se no final do corte houver poucas palavras (<= 2) após uma quebra de interlocutor ('>>'),
+       essas palavras são removidas para evitar corte abrupto de fala.
+    """
+    if not words:
+        return words
+
+    # 1. Fragmentos no início antes do primeiro '>>'
+    if len(words) >= 2:
+        for idx in range(1, min(4, len(words))):
+            if words[idx].get("break_before"):
+                # Se as palavras anteriores duram pouco (< 2.5s), são fragmentos residuais
+                if words[idx - 1]["end"] < 2.5:
+                    words = words[idx:]
+                    break
+
+    # 2. Fragmentos no final após o último '>>'
+    if len(words) >= 3:
+        for idx in range(len(words) - 1, max(0, len(words) - 3), -1):
+            if words[idx].get("break_before"):
+                # Menos de 3 palavras no final isoladas após o break
+                words = words[:idx]
+                break
+
+    return words
 
 
 def group_words_into_lines(words: list, max_words_per_line: int = 4, max_gap_seconds: float = 1.0) -> list:

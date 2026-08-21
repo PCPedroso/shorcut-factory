@@ -293,6 +293,9 @@ def _apply_subtitles_if_needed(
         result["subtitle_warning"] = "transcript.json não encontrado — legendas ignoradas."
         return result
 
+    import importlib
+    import core.subtitle_burner
+    importlib.reload(core.subtitle_burner)
     from core.subtitle_burner import burn_subtitles
     sub_result = burn_subtitles(
         input_video_path=result["path"],
