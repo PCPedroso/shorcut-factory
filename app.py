@@ -12,19 +12,25 @@ import core.video_processor
 import core.face_tracker
 import core.library_manager
 
+import core.config_manager
+
 importlib.reload(core.extractor)
 importlib.reload(core.transcriber)
 importlib.reload(core.analyzer)
 importlib.reload(core.video_processor)
 importlib.reload(core.face_tracker)
 importlib.reload(core.library_manager)
-
+importlib.reload(core.config_manager)
 
 from core.extractor import download_audio, get_video_metadata
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
 from core.analyzer import analyze_transcript
 from core.video_processor import download_full_video, cut_video, get_video_resolution
 from core.library_manager import get_library, add_or_update_video_in_library, remove_video_from_library
+from core.config_manager import load_settings, save_all_settings
+
+# Carrega todas as configurações persistentes salvas
+_cfg = load_settings()
 
 
 st.set_page_config(page_title="Fábrica de Cortes", layout="wide")
@@ -152,15 +158,23 @@ else:
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ Configurações")
-device_option = st.sidebar.selectbox("Dispositivo de Processamento", ["cpu", "cuda"], index=0)
-model_size = st.sidebar.selectbox("Tamanho do Modelo Whisper", ["tiny", "small", "medium", "large-v3"], index=1)
+
+_devices = ["cpu", "cuda"]
+_dev_idx = _devices.index(_cfg.get("device_option", "cpu")) if _cfg.get("device_option") in _devices else 0
+device_option = st.sidebar.selectbox("Dispositivo de Processamento", _devices, index=_dev_idx)
+
+_model_sizes = ["tiny", "small", "medium", "large-v3"]
+_ms_idx = _model_sizes.index(_cfg.get("model_size", "small")) if _cfg.get("model_size") in _model_sizes else 1
+model_size = st.sidebar.selectbox("Tamanho do Modelo Whisper", _model_sizes, index=_ms_idx)
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Modelo de IA (Ollama)")
+_ollama_models = ["llama3", "mistral", "qwen2.5", "llama3.1", "gemma2"]
+_om_idx = _ollama_models.index(_cfg.get("ollama_model", "llama3")) if _cfg.get("ollama_model") in _ollama_models else 0
 ollama_model = st.sidebar.selectbox(
     "Modelo:",
-    ["llama3", "mistral", "qwen2.5", "llama3.1", "gemma2"],
-    index=0,
+    _ollama_models,
+    index=_om_idx,
     help="Para usar mistral ou qwen2.5 rode: ollama pull mistral"
 )
 
@@ -368,12 +382,15 @@ if st.session_state.transcription_done:
         
         col_strat, col_act = st.columns([3, 1])
         with col_strat:
+            _strat_options = [
+                "🎙️ Entrevistas, Sabatinas & Podcasts (Perguntas e Respostas Exatas)",
+                "🧠 Temático / Monólogos, Aulas & Palestras (Transições de Assunto)"
+            ]
+            _strat_idx = 0 if "Entrevistas" in _cfg.get("analysis_strategy", "") else 1
             strategy_choice = st.radio(
                 "🎯 Estratégia de Identificação de Pautas:",
-                [
-                    "🎙️ Entrevistas, Sabatinas & Podcasts (Perguntas e Respostas Exatas)",
-                    "🧠 Temático / Monólogos, Aulas & Palestras (Transições de Assunto)"
-                ],
+                _strat_options,
+                index=_strat_idx,
                 horizontal=False,
                 key="analysis_strategy_radio"
             )
@@ -718,16 +735,21 @@ if st.session_state.transcription_done:
     start_time = col_start.text_input("Tempo Inicial (HH:MM:SS)", key="final_start_time", placeholder="00:00:00")
     end_time = col_end.text_input("Tempo Final (HH:MM:SS)", key="final_end_time", placeholder="00:10:00")
 
+    _aspect_list = [
+        "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen - Estilo Podpah & Flow)",
+        "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)",
+        "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)",
+        "📱 Vertical 9:16 (Corte Central 100% Tela)",
+        "💻 Horizontal 16:9 (Original 1080p Full HD)"
+    ]
+    _saved_aspect = _cfg.get("aspect_option", _aspect_list[1])
+    _asp_idx = _aspect_list.index(_saved_aspect) if _saved_aspect in _aspect_list else 1
+
     st.markdown("#### 📐 Formato de Exportação do Vídeo")
     aspect_option = st.radio(
         "Escolha o enquadramento:",
-        [
-            "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen - Estilo Podpah & Flow)",
-            "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)",
-            "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)",
-            "📱 Vertical 9:16 (Corte Central 100% Tela)",
-            "💻 Horizontal 16:9 (Original 1080p Full HD)"
-        ],
+        _aspect_list,
+        index=_asp_idx,
         horizontal=False,
         key="aspect_ratio_choice"
     )
@@ -993,15 +1015,15 @@ if st.session_state.transcription_done:
     # ─────────────────────────────────────────────────────────────────
     # Legendas Dinâmicas (Fase 2)
     # ─────────────────────────────────────────────────────────────────
-    subtitle_enabled = False
-    subtitle_highlight_color = "#FFFF00"
-    subtitle_base_color = "#FFFFFF"
-    subtitle_font_size = 80
+    subtitle_enabled = _cfg.get("subtitle_enabled", False)
+    subtitle_highlight_color = _cfg.get("subtitle_highlight_color", "#FFFF00")
+    subtitle_base_color = _cfg.get("subtitle_base_color", "#FFFFFF")
+    subtitle_font_size = _cfg.get("subtitle_font_size", 80)
 
-    with st.expander("📝 Legendas Dinâmicas (Estilo CapCut / Alex Hormozi)", expanded=False):
+    with st.expander("📝 Legendas Dinâmicas (Estilo CapCut / Alex Hormozi)", expanded=subtitle_enabled):
         subtitle_enabled = st.toggle(
             "✨ Ativar Legendas Palavra-a-Palavra",
-            value=False,
+            value=subtitle_enabled,
             help="Queima legendas sincronizadas diretamente no vídeo renderizado, com destaque animado na palavra atual."
         )
         if subtitle_enabled:
@@ -1030,14 +1052,14 @@ if st.session_state.transcription_done:
                 with col_sub1:
                     subtitle_highlight_color = st.color_picker(
                         "🎨 Cor do Destaque (Palavra Atual)",
-                        value="#FFFF00",
+                        value=subtitle_highlight_color,
                         key="sub_highlight_color",
                         help="Cor vibrante que pisca na palavra sendo falada."
                     )
                 with col_sub2:
                     subtitle_base_color = st.color_picker(
                         "💤 Cor das Demais Palavras",
-                        value="#FFFFFF",
+                        value=subtitle_base_color,
                         key="sub_base_color",
                         help="Cor das palavras da linha atual que ainda não foram ditas."
                     )
@@ -1046,12 +1068,35 @@ if st.session_state.transcription_done:
                         "🔤 Fonte",
                         min_value=40,
                         max_value=160,
-                        value=80,
+                        value=subtitle_font_size,
                         step=5,
                         key="sub_font_size",
                         help="Tamanho da fonte das legendas (recomendado entre 75 e 110 para cortes 9:16 estilo Alex Hormozi)."
                     )
                 st.caption("📌 Legendas no terço inferior da tela • Fonte Montserrat Bold (ou Arial como fallback) • Contorno preto para legibilidade em qualquer fundo")
+
+    # Salva continuamente as configurações ativas
+    save_all_settings({
+        "device_option": device_option,
+        "model_size": model_size,
+        "ollama_model": ollama_model,
+        "analysis_strategy": strategy_choice,
+        "aspect_option": aspect_option,
+        "face_auto_zoom": face_zoom_active,
+        "face_margin_ratio": face_margin_val,
+        "person_preference": person_pref_val,
+        "split_auto_switch": split_auto_switch,
+        "split_zoom": split_zoom_val,
+        "split_divider_color": split_div_color,
+        "split_divider_width": split_div_w,
+        "blur_zoom_custom": blur_zoom_val,
+        "blur_intensity": blur_int_val,
+        "blur_pan_custom": blur_pan_val,
+        "subtitle_enabled": subtitle_enabled,
+        "subtitle_highlight_color": subtitle_highlight_color,
+        "subtitle_base_color": subtitle_base_color,
+        "subtitle_font_size": subtitle_font_size,
+    })
 
     # ─────────────────────────────────────────────────────────────────
     # Kit de Publicação Viral & Título (IA)
