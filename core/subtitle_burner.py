@@ -78,7 +78,9 @@ def _hex_to_ass_color(hex_color: str, alpha: float = 0.0) -> str:
 def extract_words_in_range(transcript_path: str, start_time_str: str, end_time_str: str) -> list:
     """
     Lê o transcript.json e extrai todas as palavras que ocorrem dentro do intervalo do corte.
-    Ajusta os timestamps para serem relativos ao início do corte (t = 0).
+    Trata tanto transcripts com word_timestamps (Whisper) quanto transcripts do YouTube ASR
+    (que possuem janelas de segmentos sobrepostas).
+    Garante estrita ordem cronológica e zero sobreposição temporal entre palavras.
     """
     if not os.path.exists(transcript_path):
         return []
@@ -96,63 +98,79 @@ def extract_words_in_range(transcript_path: str, start_time_str: str, end_time_s
         return []
 
     segments = data.get("segments", [])
-    extracted_words = []
+    raw_words = []
 
-    for seg in segments:
+    for i, seg in enumerate(segments):
         seg_start = seg.get("start", 0.0)
         seg_end = seg.get("end", 0.0)
 
-        # Segmento completamente fora do corte
-        if seg_end < cut_start or seg_start > cut_end:
-            continue
-
-        # Prioridade: word_timestamps gerados pelo Whisper
+        # 1. Se tem word_timestamps detalhados (Whisper)
         if "words" in seg and seg["words"]:
             for w in seg["words"]:
                 w_start = w.get("start", seg_start)
                 w_end = w.get("end", seg_end)
                 word_text = w.get("word", "").strip()
-
-                if not word_text:
-                    continue
-
-                if w_end >= cut_start and w_start <= cut_end:
-                    rel_start = max(0.0, w_start - cut_start)
-                    rel_end = min(cut_end - cut_start, w_end - cut_start)
-                    if rel_end > rel_start:
-                        extracted_words.append({
-                            "word": word_text,
-                            "start": rel_start,
-                            "end": rel_end
-                        })
+                if word_text:
+                    raw_words.append({
+                        "word": word_text,
+                        "start": w_start,
+                        "end": w_end
+                    })
         else:
-            # Fallback: distribuição linear proporcional
+            # 2. Transcrição por segmentos (ex: YouTube ASR)
+            # Em legendas do YouTube, cada segmento se sobrepõe ao próximo na exibição.
+            # O áudio falado real do segmento termina quando o próximo segmento começa!
             text = seg.get("text", "").strip()
-            raw_words = text.split()
-            if not raw_words:
+            words_list = text.split()
+            if not words_list:
                 continue
 
-            seg_duration = max(0.1, seg_end - seg_start)
-            word_duration = seg_duration / len(raw_words)
+            if i < len(segments) - 1 and segments[i + 1].get("start", 0.0) > seg_start:
+                actual_end = segments[i + 1]["start"]
+            else:
+                actual_end = seg_end
 
-            for i, word_text in enumerate(raw_words):
-                w_start = seg_start + i * word_duration
+            seg_duration = max(0.1, actual_end - seg_start)
+            word_duration = seg_duration / len(words_list)
+
+            for j, word_text in enumerate(words_list):
+                w_start = seg_start + j * word_duration
                 w_end = w_start + word_duration
+                raw_words.append({
+                    "word": word_text,
+                    "start": w_start,
+                    "end": w_end
+                })
 
-                if w_end >= cut_start and w_start <= cut_end:
-                    rel_start = max(0.0, w_start - cut_start)
-                    rel_end = min(cut_end - cut_start, w_end - cut_start)
-                    if rel_end > rel_start:
-                        extracted_words.append({
-                            "word": word_text,
-                            "start": rel_start,
-                            "end": rel_end
-                        })
+    if not raw_words:
+        return []
 
-    return extracted_words
+    # 3. Ordena cronologicamente e elimina estritamente qualquer sobreposição
+    raw_words.sort(key=lambda x: x["start"])
+    for k in range(len(raw_words) - 1):
+        if raw_words[k]["end"] > raw_words[k + 1]["start"]:
+            raw_words[k]["end"] = raw_words[k + 1]["start"]
+        if raw_words[k + 1]["start"] < raw_words[k]["start"]:
+            raw_words[k + 1]["start"] = raw_words[k]["start"]
+
+    # 4. Filtra apenas as palavras que caem dentro do intervalo [cut_start, cut_end]
+    # e ajusta os timestamps para serem relativos ao início do corte (t = 0)
+    relative_words = []
+    for w in raw_words:
+        if w["end"] >= cut_start and w["start"] <= cut_end:
+            rel_start = max(0.0, w["start"] - cut_start)
+            rel_end = min(cut_end - cut_start, w["end"] - cut_start)
+            if rel_end > rel_start:
+                relative_words.append({
+                    "word": w["word"],
+                    "start": rel_start,
+                    "end": rel_end
+                })
+
+    return relative_words
 
 
-def group_words_into_lines(words: list, max_words_per_line: int = 4, max_gap_seconds: float = 1.2) -> list:
+def group_words_into_lines(words: list, max_words_per_line: int = 4, max_gap_seconds: float = 1.0) -> list:
     """
     Agrupa palavras em blocos/linhas curtas para exibição dinâmica estilo CapCut.
     Quebra de linha ocorre quando atinge max_words_per_line ou há uma pausa longa.
@@ -212,6 +230,7 @@ def generate_ass_file(
 ) -> bool:
     """
     Gera arquivo de legendas .ass completo com estilos e eventos karaokê palavra-a-palavra.
+    Garante transições perfeitas sem nunca sobrepor duas falas ou linhas simultâneas.
     """
     _ensure_font()
 
@@ -243,17 +262,30 @@ def generate_ass_file(
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
 
-    for line in lines:
+    for line_idx, line in enumerate(lines):
         words = line["words"]
         n_words = len(words)
 
+        # Se houver uma próxima linha, a linha atual não deve invadir o tempo de início da próxima
+        next_line_start = lines[line_idx + 1]["line_start"] if line_idx < len(lines) - 1 else None
+
         for i, curr_w in enumerate(words):
             event_start = curr_w["start"]
-            # O evento dura até o início da próxima palavra, ou até o fim da palavra atual + 0.15s
+
+            # O evento dura até o início da próxima palavra dentro da mesma linha
             if i < n_words - 1:
-                event_end = max(curr_w["end"], words[i + 1]["start"])
+                event_end = words[i + 1]["start"]
             else:
-                event_end = curr_w["end"] + 0.20
+                # Última palavra da linha: permanece na tela até o fim da palavra (ou até a próxima linha começar)
+                base_end = curr_w["end"] + 0.10
+                if next_line_start is not None:
+                    event_end = min(base_end, next_line_start)
+                else:
+                    event_end = base_end
+
+            # Garante que event_end > event_start
+            if event_end <= event_start:
+                event_end = event_start + 0.05
 
             # Monta a linha com a palavra ativa destacada com tag de cor
             line_parts = []
@@ -301,7 +333,7 @@ def burn_subtitles(
         return {"path": input_video_path, "error": None, "warning": "Transcrição não encontrada. Legendas não aplicadas."}
 
     try:
-        # 1. Extrai palavras dentro do intervalo do corte
+        # 1. Extrai palavras dentro do intervalo do corte (limpas e sequenciais)
         words = extract_words_in_range(transcript_path, start_time_str, end_time_str)
         if not words:
             return {"path": input_video_path, "error": None, "warning": "Nenhuma palavra encontrada no intervalo selecionado."}
