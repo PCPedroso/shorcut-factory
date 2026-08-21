@@ -1101,15 +1101,19 @@ if st.session_state.transcription_done:
     # ─────────────────────────────────────────────────────────────────
     # Kit de Publicação Viral & Título (IA)
     # ─────────────────────────────────────────────────────────────────
-    # Inicializa título sugerido a partir da pauta selecionada na Seção 2 se houver
-    if "meta_title" not in st.session_state or not st.session_state["meta_title"] or st.session_state["meta_title"] == "Corte Viral":
+    if "meta_generated" not in st.session_state:
+        st.session_state["meta_generated"] = False
+
+    # Se uma pauta da Seção 2 foi selecionada e ainda não há título preenchido, inicializa
+    if "input_cut_title" not in st.session_state or not st.session_state["input_cut_title"]:
         if st.session_state.get("final_corte_title"):
-            st.session_state["meta_title"] = st.session_state["final_corte_title"]
+            st.session_state["input_cut_title"] = st.session_state["final_corte_title"]
+            st.session_state["meta_generated"] = True
 
     with st.expander("🚀 Kit de Publicação Viral (Título, Descrição & Tags para Redes)", expanded=True):
-        col_meta_btn, col_meta_info = st.columns([1.5, 2.5])
+        col_meta_btn, col_meta_status = st.columns([1.8, 2.2])
         with col_meta_btn:
-            if st.button("✨ Gerar Título e Textos com IA", use_container_width=True, help="Analisa o trecho exato do corte e gera Título Viral específico, Descrição contextualizada com CTA e Hashtags estratégicas."):
+            if st.button("✨ Gerar Título e Textos com IA", use_container_width=True, type="secondary", help="Analisa o trecho exato do corte e gera Título Viral específico, Descrição contextualizada com CTA e Hashtags estratégicas."):
                 _vid_id_meta = get_video_id(video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or "")
                 _transcript_path_meta = os.path.join("data", _vid_id_meta, "transcript.json") if _vid_id_meta else ""
                 if not os.path.exists(_transcript_path_meta):
@@ -1117,7 +1121,7 @@ if st.session_state.transcription_done:
                 elif not start_time or not end_time:
                     st.warning("⚠️ Defina o tempo inicial e final do corte primeiro.")
                 else:
-                    with st.spinner("Analisando o áudio e gerando título de alto impacto, legenda jornalística e tags com IA..."):
+                    with st.spinner(f"Analisando falas de [{start_time} → {end_time}] e gerando kit viral com {ollama_model}..."):
                         import core.analyzer
                         from core.subtitle_burner import extract_words_in_range
                         words_meta = extract_words_in_range(_transcript_path_meta, start_time, end_time)
@@ -1127,48 +1131,68 @@ if st.session_state.transcription_done:
                         else:
                             model_for_meta = ollama_model if 'ollama_model' in locals() and ollama_model else "llama3"
                             meta_res = core.analyzer.generate_viral_cut_metadata(snippet_text, model=model_for_meta)
-                            st.session_state["meta_title"] = meta_res.get("titulo_principal", "Corte Selecionado")
+                            
+                            # Atualiza diretamente os estados dos widgets do Streamlit
+                            st.session_state["input_cut_title"] = meta_res.get("titulo_principal", "Corte Selecionado")
+                            st.session_state["input_cut_desc"] = meta_res.get("descricao", "")
+                            st.session_state["input_cut_hashtags"] = " ".join(meta_res.get("hashtags", ["#shorts", "#viral", "#cortes"]))
+                            st.session_state["input_cut_tags_seo"] = meta_res.get("tags_seo", "")
                             st.session_state["meta_alt_titles"] = meta_res.get("titulos_alternativos", [])
-                            st.session_state["meta_desc"] = meta_res.get("descricao", "")
-                            st.session_state["meta_hashtags"] = meta_res.get("hashtags", [])
-                            st.session_state["meta_tags_seo"] = meta_res.get("tags_seo", "")
+                            st.session_state["meta_generated"] = True
                             st.rerun()
 
+        with col_meta_status:
+            if st.session_state.get("meta_generated"):
+                st.success("✅ **Textos Gerados pela IA!** Conteúdo contextual pronto para postagem.")
+            else:
+                st.info("ℹ️ Clique no botão ao lado para gerar textos específicos com base no áudio.")
+
+        # Sinalização visual no título de cada campo
+        is_gen = st.session_state.get("meta_generated", False)
+        badge_title = "🟢 [GERADO POR IA]" if is_gen else "⚪ [PADRÃO - CLIQUE ACIMA PARA GERAR]"
+        badge_desc = "🟢 [GERADA POR IA COM CTA]" if is_gen else "⚪ [PADRÃO]"
+        badge_tags = "🟢 [TAGS CONTEXTUAIS]" if is_gen else "⚪ [PADRÃO]"
+
         cut_title_val = st.text_input(
-            "🏷️ Título do Corte (usado no nome da pasta, do arquivo e na postagem):",
-            value=st.session_state.get("meta_title", "Corte Selecionado"),
+            f"🏷️ Título do Corte {badge_title}:",
+            value=st.session_state.get("input_cut_title", "Corte Selecionado"),
             key="input_cut_title"
         )
         
+        # Prévia do nome da pasta e do arquivo de vídeo gerados
+        from core.export_kit import build_cut_folder_name
+        _v_id_cur = get_video_id(video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or "video") or "video"
+        _preview_folder = build_cut_folder_name(selected_aspect, cut_title_val)
+        st.caption(f"📁 **Pasta a ser criada:** `data/{_v_id_cur}/{_preview_folder}/`  |  🎬 **Arquivo:** `{_preview_folder}.mp4`")
+
         # Se houver títulos alternativos sugeridos pela IA, exibe botões rápidos de troca
         alt_titles = st.session_state.get("meta_alt_titles", [])
         if alt_titles:
-            st.caption("💡 Ou escolha uma variação de título sugerida pela IA:")
+            st.markdown("💡 **Variações de Título Sugeridas pela IA (Clique para aplicar):**")
             col_alts = st.columns(len(alt_titles))
             for idx_alt, alt_t in enumerate(alt_titles):
                 with col_alts[idx_alt]:
                     if st.button(f"📌 {alt_t}", key=f"btn_alt_title_{idx_alt}", use_container_width=True):
-                        st.session_state["meta_title"] = alt_t
+                        st.session_state["input_cut_title"] = alt_t
                         st.rerun()
 
         col_desc, col_tags = st.columns([1.5, 1])
         with col_desc:
             cut_desc_val = st.text_area(
-                "📝 Descrição / Legenda (Instagram Reels, TikTok, Shorts):",
-                value=st.session_state.get("meta_desc", "Confira a declaração e participe do debate nos comentários!"),
+                f"📝 Descrição / Legenda {badge_desc}:",
+                value=st.session_state.get("input_cut_desc", "Confira a declaração e participe do debate nos comentários!"),
                 height=110,
                 key="input_cut_desc"
             )
         with col_tags:
-            cut_hashtags_default = " ".join(st.session_state.get("meta_hashtags", ["#shorts", "#viral", "#cortes", "#reels"]))
             cut_hashtags_val = st.text_input(
-                "🏷️ Hashtags:",
-                value=cut_hashtags_default,
+                f"🏷️ Hashtags {badge_tags}:",
+                value=st.session_state.get("input_cut_hashtags", "#shorts #viral #cortes #reels"),
                 key="input_cut_hashtags"
             )
             cut_tags_seo_val = st.text_input(
-                "🔍 Tags SEO (separadas por vírgula):",
-                value=st.session_state.get("meta_tags_seo", "cortes, viral, shorts, podcast, debate"),
+                f"🔍 Tags SEO {badge_tags}:",
+                value=st.session_state.get("input_cut_tags_seo", "cortes, viral, shorts, podcast, debate"),
                 key="input_cut_tags_seo"
             )
 
