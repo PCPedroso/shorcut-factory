@@ -60,15 +60,26 @@ def transcribe_audio(audio_path: str, model_size: str = "small", device: str = "
     try:
         compute_type = "float32" if device == "cuda" else "int8"
         model = WhisperModel(model_size, device=device, compute_type=compute_type)
-        segments, info = model.transcribe(audio_path, beam_size=5)
+        # word_timestamps=True: salva timestamps por palavra para legendas dinâmicas (Fase 2)
+        segments, info = model.transcribe(audio_path, beam_size=5, word_timestamps=True)
         
         transcript_data = []
         full_text = ""
         for segment in segments:
+            # Extrai lista de palavras com timestamps individuais
+            words_data = []
+            if segment.words:
+                for w in segment.words:
+                    words_data.append({
+                        "word": w.word,
+                        "start": round(w.start, 3),
+                        "end": round(w.end, 3),
+                    })
             transcript_data.append({
                 "start": segment.start,
                 "end": segment.end,
-                "text": segment.text
+                "text": segment.text,
+                "words": words_data,
             })
             full_text += segment.text + " "
             

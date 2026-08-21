@@ -990,6 +990,68 @@ if st.session_state.transcription_done:
                     else:
                         blur_pan_val = 0.0
 
+    # ─────────────────────────────────────────────────────────────────
+    # Legendas Dinâmicas (Fase 2)
+    # ─────────────────────────────────────────────────────────────────
+    subtitle_enabled = False
+    subtitle_highlight_color = "#FFFF00"
+    subtitle_base_color = "#FFFFFF"
+    subtitle_font_size = 55
+
+    with st.expander("📝 Legendas Dinâmicas (Estilo CapCut / Alex Hormozi)", expanded=False):
+        subtitle_enabled = st.toggle(
+            "✨ Ativar Legendas Palavra-a-Palavra",
+            value=False,
+            help="Queima legendas sincronizadas diretamente no vídeo renderizado, com destaque animado na palavra atual."
+        )
+        if subtitle_enabled:
+            # Verifica se a transcrição está disponível com timestamps
+            _vid_id_sub = get_video_id(video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or "")
+            _transcript_path_sub = os.path.join("data", _vid_id_sub, "transcript.json") if _vid_id_sub else ""
+            _has_transcript = os.path.exists(_transcript_path_sub)
+
+            if not _has_transcript:
+                st.warning("⚠️ Transcrição não encontrada. Realize a transcrição na Seção 1 antes de ativar as legendas.")
+                subtitle_enabled = False
+            else:
+                # Verifica se há word_timestamps no transcript salvo
+                import json as _json_sub
+                try:
+                    with open(_transcript_path_sub, encoding="utf-8") as _tf:
+                        _td = _json_sub.load(_tf)
+                    _segs = _td.get("segments", [])
+                    _has_words = any(s.get("words") for s in _segs[:5])
+                    if not _has_words:
+                        st.info("ℹ️ Transcrição sem timestamps por palavra. As legendas usarão distribuição proporcional (recomenda-se retranscrever com Whisper para precisão máxima).")
+                except Exception:
+                    pass
+
+                col_sub1, col_sub2, col_sub3 = st.columns([2, 2, 1])
+                with col_sub1:
+                    subtitle_highlight_color = st.color_picker(
+                        "🎨 Cor do Destaque (Palavra Atual)",
+                        value="#FFFF00",
+                        key="sub_highlight_color",
+                        help="Cor vibrante que pisca na palavra sendo falada."
+                    )
+                with col_sub2:
+                    subtitle_base_color = st.color_picker(
+                        "💤 Cor das Demais Palavras",
+                        value="#FFFFFF",
+                        key="sub_base_color",
+                        help="Cor das palavras da linha atual que ainda não foram ditas."
+                    )
+                with col_sub3:
+                    subtitle_font_size = st.slider(
+                        "🔤 Fonte",
+                        min_value=35,
+                        max_value=85,
+                        value=55,
+                        step=5,
+                        key="sub_font_size"
+                    )
+                st.caption("📌 Legendas no terço inferior da tela • Fonte Montserrat Bold (ou Arial como fallback) • Contorno preto para legibilidade em qualquer fundo")
+
     st.markdown("")
     if st.button("✂️ Gerar Corte no Formato Escolhido", type="primary", use_container_width=True):
         if not start_time or not end_time:
@@ -1043,8 +1105,12 @@ if st.session_state.transcription_done:
                         extra_info = f" (Auto-Zoom Inteligente)"
                     elif selected_aspect == "9:16_split":
                         extra_info = f" (Split Screen + Auto-Switch)" if split_auto_switch else " (Split Screen Fixo)"
+                    if subtitle_enabled:
+                        extra_info += " + 📝 Legendas"
 
                     with st.spinner(f"Renderizando corte [{start_time} → {end_time}] no formato {aspect_option}{extra_info}..."):
+                        # Caminho do transcript para as legendas dinâmicas
+                        _transcript_path_cut = os.path.join(data_dir, "transcript.json")
                         cut_res = cut_video(
                             video_res["path"],
                             start_time,
@@ -1062,13 +1128,26 @@ if st.session_state.transcription_done:
                             split_zoom=split_zoom_val,
                             split_divider_color=split_div_color,
                             split_divider_width=split_div_w,
-                            split_auto_switch=split_auto_switch
+                            split_auto_switch=split_auto_switch,
+                            # Legendas Dinâmicas (Fase 2)
+                            subtitle_enabled=subtitle_enabled,
+                            subtitle_transcript_path=_transcript_path_cut,
+                            subtitle_highlight_color=subtitle_highlight_color,
+                            subtitle_base_color=subtitle_base_color,
+                            subtitle_font_size=subtitle_font_size,
                         )
                         if cut_res.get("error"):
                             st.error(f"Erro ao cortar: {cut_res['error']}")
                         else:
                             out_res = get_video_resolution(corte_output_path)
-                            st.success(f"🎉 Corte gerado com sucesso! Resolução: **{out_res}** | Formato: **{aspect_option}**{extra_info}")
+                            _sub_badge = " 📝 Legendas" if subtitle_enabled and not cut_res.get("subtitle_error") and not cut_res.get("subtitle_warning") else ""
+                            st.success(f"🎉 Corte gerado com sucesso! Resolução: **{out_res}** | Formato: **{aspect_option}**{_sub_badge}")
+                            
+                            # Avisos de legendas (não-fatais — o vídeo ainda foi gerado)
+                            if cut_res.get("subtitle_error"):
+                                st.warning(f"⚠️ Legendas não aplicadas: {cut_res['subtitle_error']}")
+                            elif cut_res.get("subtitle_warning"):
+                                st.info(f"ℹ️ {cut_res['subtitle_warning']}")
                             
                             if "9:16" in selected_aspect:
                                 col_v1, col_v2, col_v3 = st.columns([1, 2, 1])

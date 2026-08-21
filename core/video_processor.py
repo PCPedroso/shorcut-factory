@@ -99,7 +99,13 @@ def cut_video(
     split_zoom: float = 1.15,
     split_divider_color: str = "black",
     split_divider_width: int = 4,
-    split_auto_switch: bool = True
+    split_auto_switch: bool = True,
+    # --- Parâmetros de Legendas Dinâmicas (Fase 2) ---
+    subtitle_enabled: bool = False,
+    subtitle_transcript_path: str = None,
+    subtitle_highlight_color: str = "#FFFF00",
+    subtitle_base_color: str = "#FFFFFF",
+    subtitle_font_size: int = 55,
 ) -> dict:
     """
     Corta e formata o vídeo com alta precisão e velocidade via FFmpeg.
@@ -123,7 +129,7 @@ def cut_video(
         if aspect_ratio_mode == "9:16_smart_face":
             # Pipeline 9:16 com Rastreamento Inteligente de Rosto (MediaPipe BlazeFace + Target Lock + Cinematic Panning)
             from core.face_tracker import crop_video_with_smart_face_tracking
-            return crop_video_with_smart_face_tracking(
+            result = crop_video_with_smart_face_tracking(
                 input_video_path=input_path,
                 start_time_str=start_time_str,
                 end_time_str=end_time_str,
@@ -132,11 +138,15 @@ def cut_video(
                 margin_ratio=face_margin_ratio,
                 person_preference=person_preference
             )
+            return _apply_subtitles_if_needed(
+                result, output_path, subtitle_enabled, subtitle_transcript_path,
+                start_time_str, end_time_str, subtitle_highlight_color, subtitle_base_color, subtitle_font_size
+            )
 
         elif aspect_ratio_mode == "9:16_split":
             # Pipeline 9:16 Split Screen com Transição Dinâmica Inteligente
             from core.face_tracker import crop_video_with_dynamic_auto_switch
-            return crop_video_with_dynamic_auto_switch(
+            result = crop_video_with_dynamic_auto_switch(
                 input_video_path=input_path,
                 start_time_str=start_time_str,
                 end_time_str=end_time_str,
@@ -147,6 +157,10 @@ def cut_video(
                 divider_color=split_divider_color,
                 divider_width=split_divider_width,
                 auto_switch_enabled=split_auto_switch
+            )
+            return _apply_subtitles_if_needed(
+                result, output_path, subtitle_enabled, subtitle_transcript_path,
+                start_time_str, end_time_str, subtitle_highlight_color, subtitle_base_color, subtitle_font_size
             )
 
         elif aspect_ratio_mode == "9:16_blur":
@@ -223,7 +237,11 @@ def cut_video(
         result = subprocess.run(cmd, capture_output=True, text=True)
 
         if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            return {"path": output_path, "error": None}
+            return _apply_subtitles_if_needed(
+                {"path": output_path, "error": None}, output_path,
+                subtitle_enabled, subtitle_transcript_path,
+                start_time_str, end_time_str, subtitle_highlight_color, subtitle_base_color, subtitle_font_size
+            )
 
         # Fallback MoviePy se FFmpeg direto retornar erro
         start_s = parse_time_to_seconds(start_time_str)
@@ -242,7 +260,54 @@ def cut_video(
                 logger=None
             )
 
-        return {"path": output_path, "error": None}
+        return _apply_subtitles_if_needed(
+            {"path": output_path, "error": None}, output_path,
+            subtitle_enabled, subtitle_transcript_path,
+            start_time_str, end_time_str, subtitle_highlight_color, subtitle_base_color, subtitle_font_size
+        )
     except Exception as e:
         return {"path": None, "error": str(e)}
 
+
+def _apply_subtitles_if_needed(
+    result: dict,
+    output_path: str,
+    subtitle_enabled: bool,
+    subtitle_transcript_path: str,
+    start_time_str: str,
+    end_time_str: str,
+    subtitle_highlight_color: str,
+    subtitle_base_color: str,
+    subtitle_font_size: int,
+) -> dict:
+    """
+    Helper interno: aplica legendas dinâmicas como pass-2 se habilitado.
+    Recebe o resultado do pipeline de vídeo e, se bem-sucedido e legendas ativadas,
+    chama burn_subtitles() sobre o arquivo gerado.
+    """
+    if not subtitle_enabled:
+        return result
+    if result.get("error") or not result.get("path"):
+        return result
+    if not subtitle_transcript_path or not os.path.exists(subtitle_transcript_path):
+        result["subtitle_warning"] = "transcript.json não encontrado — legendas ignoradas."
+        return result
+
+    from core.subtitle_burner import burn_subtitles
+    sub_result = burn_subtitles(
+        input_video_path=result["path"],
+        output_video_path=output_path,
+        transcript_path=subtitle_transcript_path,
+        start_time_str=start_time_str,
+        end_time_str=end_time_str,
+        highlight_color=subtitle_highlight_color,
+        base_color=subtitle_base_color,
+        font_size=subtitle_font_size,
+    )
+    if sub_result.get("error"):
+        result["subtitle_error"] = sub_result["error"]
+    elif sub_result.get("warning"):
+        result["subtitle_warning"] = sub_result["warning"]
+    else:
+        result["path"] = sub_result["path"]
+    return result
