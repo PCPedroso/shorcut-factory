@@ -311,32 +311,43 @@ def burn_subtitles(
 
         # 6. Executa pass-2 FFmpeg via arquivo temporário
         tmp_output = output_video_path + "._subs_tmp.mp4"
-        vf_chain = ",".join(drawtext_filters)
+        vf_chain = ",\n".join(drawtext_filters)
 
-        cmd = [
-            FFMPEG_EXE, "-y",
-            "-i", input_video_path,
-            "-vf", vf_chain,
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "20",
-            "-c:a", "copy",
-            "-pix_fmt", "yuv420p",
-            tmp_output
-        ]
+        # IMPORTANTE: A cadeia de filtros drawtext pode ser muito longa para a linha de comando
+        # do Windows (limite ~32767 chars). Usamos -filter_script:v para ler o filtro de arquivo.
+        filter_script_path = output_video_path + "._filter.txt"
+        try:
+            with open(filter_script_path, "w", encoding="utf-8") as f:
+                f.write(vf_chain)
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+            cmd = [
+                FFMPEG_EXE, "-y",
+                "-i", input_video_path,
+                "-filter_script:v", filter_script_path,
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "20",
+                "-c:a", "copy",
+                "-pix_fmt", "yuv420p",
+                tmp_output
+            ]
 
-        if result.returncode == 0 and os.path.exists(tmp_output) and os.path.getsize(tmp_output) > 0:
-            if os.path.exists(output_video_path):
-                os.remove(output_video_path)
-            os.rename(tmp_output, output_video_path)
-            return {"path": output_video_path, "error": None}
-        else:
-            if os.path.exists(tmp_output):
-                os.remove(tmp_output)
-            err_detail = result.stderr[-2000:] if result.stderr else "Erro desconhecido"
-            return {"path": None, "error": f"FFmpeg subtitle pass-2 falhou:\n{err_detail}"}
+            result = subprocess.run(cmd, capture_output=True, text=True)
+
+            if result.returncode == 0 and os.path.exists(tmp_output) and os.path.getsize(tmp_output) > 0:
+                if os.path.exists(output_video_path):
+                    os.remove(output_video_path)
+                os.rename(tmp_output, output_video_path)
+                return {"path": output_video_path, "error": None}
+            else:
+                if os.path.exists(tmp_output):
+                    os.remove(tmp_output)
+                err_detail = result.stderr[-2000:] if result.stderr else "Erro desconhecido"
+                return {"path": None, "error": f"FFmpeg subtitle pass-2 falhou:\n{err_detail}"}
+        finally:
+            # Limpa o arquivo de filtro temporário
+            if os.path.exists(filter_script_path):
+                os.remove(filter_script_path)
 
     except Exception as e:
         return {"path": None, "error": str(e)}
