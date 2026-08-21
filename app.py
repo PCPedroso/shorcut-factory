@@ -11,8 +11,8 @@ import core.analyzer
 import core.video_processor
 import core.face_tracker
 import core.library_manager
-
 import core.config_manager
+import core.export_kit
 
 importlib.reload(core.extractor)
 importlib.reload(core.transcriber)
@@ -21,6 +21,7 @@ importlib.reload(core.video_processor)
 importlib.reload(core.face_tracker)
 importlib.reload(core.library_manager)
 importlib.reload(core.config_manager)
+importlib.reload(core.export_kit)
 
 from core.extractor import download_audio, get_video_metadata
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
@@ -28,6 +29,7 @@ from core.analyzer import analyze_transcript
 from core.video_processor import download_full_video, cut_video, get_video_resolution
 from core.library_manager import get_library, add_or_update_video_in_library, remove_video_from_library
 from core.config_manager import load_settings, save_all_settings
+from core.export_kit import build_cut_folder_name, create_viral_package
 
 # Carrega todas as configurações persistentes salvas
 _cfg = load_settings()
