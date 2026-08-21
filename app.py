@@ -1053,6 +1053,75 @@ if st.session_state.transcription_done:
                     )
                 st.caption("📌 Legendas no terço inferior da tela • Fonte Montserrat Bold (ou Arial como fallback) • Contorno preto para legibilidade em qualquer fundo")
 
+    # ─────────────────────────────────────────────────────────────────
+    # Kit de Publicação Viral & Título (IA)
+    # ─────────────────────────────────────────────────────────────────
+    with st.expander("🚀 Kit de Publicação Viral (Título, Descrição & Tags para Redes)", expanded=True):
+        col_meta_btn, col_meta_info = st.columns([1.5, 2.5])
+        with col_meta_btn:
+            if st.button("✨ Gerar Título e Textos com IA", use_container_width=True, help="Analisa o trecho exato do corte e gera Título Viral, Descrição com CTA e Hashtags estratégicas via Llama 3."):
+                _vid_id_meta = get_video_id(video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or "")
+                _transcript_path_meta = os.path.join("data", _vid_id_meta, "transcript.json") if _vid_id_meta else ""
+                if not os.path.exists(_transcript_path_meta):
+                    st.warning("⚠️ Transcrição não encontrada. Transcreva o vídeo na Seção 1 primeiro.")
+                elif not start_time or not end_time:
+                    st.warning("⚠️ Defina o tempo inicial e final do corte primeiro.")
+                else:
+                    with st.spinner("Analisando o corte e gerando título magnético, descrição persuasiva e tags virais..."):
+                        import core.analyzer
+                        from core.subtitle_burner import extract_words_in_range
+                        words_meta = extract_words_in_range(_transcript_path_meta, start_time, end_time)
+                        snippet_text = " ".join(w["word"] for w in words_meta)
+                        if not snippet_text:
+                            st.warning("Nenhuma fala encontrada no intervalo selecionado.")
+                        else:
+                            model_for_meta = selected_model if 'selected_model' in locals() and selected_model else "llama3:latest"
+                            meta_res = core.analyzer.generate_viral_cut_metadata(snippet_text, model=model_for_meta)
+                            st.session_state["meta_title"] = meta_res.get("titulo_principal", "Corte Viral")
+                            st.session_state["meta_alt_titles"] = meta_res.get("titulos_alternativos", [])
+                            st.session_state["meta_desc"] = meta_res.get("descricao", "")
+                            st.session_state["meta_hashtags"] = meta_res.get("hashtags", [])
+                            st.session_state["meta_tags_seo"] = meta_res.get("tags_seo", "")
+                            st.rerun()
+
+        cut_title_val = st.text_input(
+            "🏷️ Título do Corte (usado no nome do arquivo e na postagem):",
+            value=st.session_state.get("meta_title", "Corte Viral"),
+            key="input_cut_title"
+        )
+        
+        # Se houver títulos alternativos sugeridos pela IA, exibe botões rápidos de troca
+        alt_titles = st.session_state.get("meta_alt_titles", [])
+        if alt_titles:
+            st.caption("💡 Ou escolha uma variação de título sugerida pela IA:")
+            col_alts = st.columns(len(alt_titles))
+            for idx_alt, alt_t in enumerate(alt_titles):
+                with col_alts[idx_alt]:
+                    if st.button(f"📌 {alt_t}", key=f"btn_alt_title_{idx_alt}", use_container_width=True):
+                        st.session_state["meta_title"] = alt_t
+                        st.rerun()
+
+        col_desc, col_tags = st.columns([1.5, 1])
+        with col_desc:
+            cut_desc_val = st.text_area(
+                "📝 Descrição / Legenda (Instagram Reels, TikTok, Shorts):",
+                value=st.session_state.get("meta_desc", "Confira este momento imperdível! Curta e compartilhe sua opinião."),
+                height=110,
+                key="input_cut_desc"
+            )
+        with col_tags:
+            cut_hashtags_default = " ".join(st.session_state.get("meta_hashtags", ["#shorts", "#viral", "#cortes"]))
+            cut_hashtags_val = st.text_input(
+                "🏷️ Hashtags:",
+                value=cut_hashtags_default,
+                key="input_cut_hashtags"
+            )
+            cut_tags_seo_val = st.text_input(
+                "🔍 Tags SEO (separadas por vírgula):",
+                value=st.session_state.get("meta_tags_seo", "cortes, viral, shorts, podcast"),
+                key="input_cut_tags_seo"
+            )
+
     st.markdown("")
     if st.button("✂️ Gerar Corte no Formato Escolhido", type="primary", use_container_width=True):
         if not start_time or not end_time:
@@ -1160,13 +1229,44 @@ if st.session_state.transcription_done:
                             else:
                                 st.video(corte_output_path)
                             
-                            with open(corte_output_path, "rb") as file:
-                                st.download_button(
-                                    label=f"💾 Baixar Vídeo ({out_res})",
-                                    data=file,
-                                    file_name=f"corte_{selected_aspect}.mp4",
-                                    mime="video/mp4",
-                                    use_container_width=True
-                                )
+                            # Criação do Pacote Viral com pasta e ZIP
+                            import core.export_kit
+                            package_res = core.export_kit.create_viral_package(
+                                video_path=corte_output_path,
+                                title=cut_title_val,
+                                description=cut_desc_val,
+                                hashtags=cut_hashtags_val.split(),
+                                tags_seo=cut_tags_seo_val,
+                                output_base_dir=data_dir
+                            )
+
+                            col_dl1, col_dl2 = st.columns(2)
+                            with col_dl1:
+                                with open(package_res["video_dest_path"], "rb") as vf:
+                                    st.download_button(
+                                        label=f"💾 Baixar Vídeo ({package_res['video_filename']})",
+                                        data=vf,
+                                        file_name=package_res["video_filename"],
+                                        mime="video/mp4",
+                                        type="primary",
+                                        use_container_width=True
+                                    )
+                            with col_dl2:
+                                if package_res.get("zip_path") and os.path.exists(package_res["zip_path"]):
+                                    with open(package_res["zip_path"], "rb") as zf:
+                                        st.download_button(
+                                            label="📦 Baixar Pacote Completo (.ZIP)",
+                                            data=zf,
+                                            file_name=os.path.basename(package_res["zip_path"]),
+                                            mime="application/zip",
+                                            use_container_width=True,
+                                            help="Inclui o vídeo MP4 renomeado + info_publicacao.txt + descricao.txt + tags.txt"
+                                        )
+
+                            with st.expander(f"📁 Pasta de Publicação Salva em: data/{video_id}/cortes/{package_res['safe_title']}/", expanded=False):
+                                st.markdown(f"**Título:** `{cut_title_val}`")
+                                st.markdown(f"**Legenda:**\n```\n{cut_desc_val}\n```")
+                                st.markdown(f"**Hashtags:** `{cut_hashtags_val}`")
+                                st.markdown(f"**Tags SEO:** `{cut_tags_seo_val}`")
 
 

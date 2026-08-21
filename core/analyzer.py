@@ -517,3 +517,90 @@ def analyze_transcript(
             "raw": str(exc),
             "error": str(exc)
         }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Geração de Metadados Virais para Cortes Individuais (Kit de Publicação)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def generate_viral_cut_metadata(transcript_snippet: str, model: str = "llama3:latest") -> dict:
+    """
+    Analisa o texto exato de um corte e gera um pacote de publicação de alta viralização:
+    - Título principal magnético com alto CTR
+    - 2 títulos alternativos (curiosidade / confronto)
+    - Descrição/legenda persuasiva com gancho e Call To Action (CTA)
+    - Hashtags e tags de SEO estratégicas
+    """
+    snippet_clean = transcript_snippet.strip()
+    if not snippet_clean:
+        return {
+            "titulo_principal": "Corte Viral",
+            "titulos_alternativos": [],
+            "descricao": "Confira este momento imperdível! Curta e compartilhe.",
+            "hashtags": ["#shorts", "#viral", "#reels", "#tiktok", "#cortes"],
+            "tags_seo": "cortes, viral, shorts, podcast, entrevista",
+            "error": "Texto da transcrição vazio."
+        }
+
+    # Limita o tamanho do texto para o prompt se o corte for muito longo
+    snippet_prompt = snippet_clean[:3000]
+
+    prompt = f"""Você é um estrategista de conteúdo viral especialista em YouTube Shorts, TikTok e Instagram Reels.
+Analise a transcrição de um corte de vídeo abaixo e gere um pacote completo de publicação de alta viralização em Português.
+
+Transcrição do corte:
+"{snippet_prompt}"
+
+Responda ESTRITAMENTE em formato JSON com as seguintes chaves (sem texto introdutório ou conclusivo):
+{{
+  "titulo_principal": "Título magnético e viral curto (máx 60 caracteres)",
+  "titulos_alternativos": [
+    "Opção 1 com curiosidade",
+    "Opção 2 com pergunta provocativa"
+  ],
+  "descricao": "Texto de legenda persuasivo para redes sociais com 2 a 3 frases instigantes e uma Chamada para Ação (CTA) ao final.",
+  "hashtags": ["#hashtag1", "#hashtag2", "#hashtag3", "#hashtag4", "#hashtag5"],
+  "tags_seo": "tag1, tag2, tag3, tag4, tag5"
+}}
+"""
+
+    try:
+        res = ollama.chat(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            options={"temperature": 0.7}
+        )
+        raw_out = res.get("message", {}).get("content", "")
+
+        # Tenta extrair JSON
+        match = re.search(r'\{[\s\S]*\}', raw_out)
+        if match:
+            parsed = json.loads(match.group(0))
+            return {
+                "titulo_principal": _clean_ai_title(parsed.get("titulo_principal", "Momento Imperdível")),
+                "titulos_alternativos": [_clean_ai_title(t) for t in parsed.get("titulos_alternativos", []) if t],
+                "descricao": parsed.get("descricao", "Confira este corte incrível! Compartilhe sua opinião nos comentários."),
+                "hashtags": parsed.get("hashtags", ["#shorts", "#viral", "#cortes"]),
+                "tags_seo": parsed.get("tags_seo", "shorts, cortes, viral, entrevista"),
+                "error": None
+            }
+        else:
+            first_line = raw_out.strip().split('\n')[0]
+            return {
+                "titulo_principal": _clean_ai_title(first_line[:60]) if first_line else "Momento Imperdível",
+                "titulos_alternativos": [],
+                "descricao": raw_out[:300],
+                "hashtags": ["#shorts", "#viral", "#cortes"],
+                "tags_seo": "shorts, cortes, viral",
+                "error": None
+            }
+
+    except Exception as exc:
+        return {
+            "titulo_principal": "Corte Selecionado",
+            "titulos_alternativos": [],
+            "descricao": "Confira este momento imperdível! Deixe seu like e comente o que achou.",
+            "hashtags": ["#shorts", "#viral", "#cortes", "#reels"],
+            "tags_seo": "shorts, cortes, viral",
+            "error": str(exc)
+        }
