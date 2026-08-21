@@ -588,35 +588,68 @@ Responda ESTRITAMENTE em formato JSON com as seguintes chaves (sem texto introdu
         res = ollama.chat(
             model=matched_model,
             messages=[{"role": "user", "content": prompt}],
+            format="json",
             options={"temperature": 0.7}
         )
-        raw_out = res.get("message", {}).get("content", "")
+        raw_out = res.get("message", {}).get("content", "").strip()
 
-        # Tenta extrair JSON
-        match = re.search(r'\{[\s\S]*\}', raw_out)
-        if match:
-            parsed = json.loads(match.group(0))
-            return {
-                "titulo_principal": _clean_ai_title(parsed.get("titulo_principal", "Momento em Destaque")),
-                "titulos_alternativos": [_clean_ai_title(t) for t in parsed.get("titulos_alternativos", []) if t],
-                "descricao": parsed.get("descricao", "Confira a declaração e participe do debate nos comentários."),
-                "hashtags": parsed.get("hashtags", ["#shorts", "#viral", "#cortes", "#reels"]),
-                "tags_seo": parsed.get("tags_seo", "shorts, cortes, viral, debate"),
-                "error": None
-            }
-        else:
-            first_line = raw_out.strip().split('\n')[0]
-            return {
-                "titulo_principal": _clean_ai_title(first_line[:65]) if first_line else "Momento em Destaque",
-                "titulos_alternativos": [],
-                "descricao": raw_out[:350],
-                "hashtags": ["#shorts", "#viral", "#cortes", "#reels"],
-                "tags_seo": "shorts, cortes, viral",
-                "error": None
-            }
+        # Estratégia 1: Parse direto como JSON
+        parsed = {}
+        try:
+            match = re.search(r'\{[\s\S]*\}', raw_out)
+            if match:
+                parsed = json.loads(match.group(0))
+        except Exception:
+            pass
+
+        # Estratégia 2: Extração por regex caso o JSON contenha aspas não-escapadas
+        t_princ = parsed.get("titulo_principal")
+        if not t_princ:
+            m_t = re.search(r'"titulo_principal"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', raw_out)
+            if not m_t:
+                m_t = re.search(r'"titulo_principal"\s*:\s*"(.*?)"\s*,\s*"', raw_out, re.DOTALL)
+            t_princ = m_t.group(1) if m_t else ""
+
+        desc_val = parsed.get("descricao")
+        if not desc_val:
+            m_d = re.search(r'"descricao"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', raw_out)
+            if not m_d:
+                m_d = re.search(r'"descricao"\s*:\s*"(.*?)"\s*,\s*"', raw_out, re.DOTALL)
+            desc_val = m_d.group(1) if m_d else ""
+
+        alts_val = parsed.get("titulos_alternativos", [])
+        if not alts_val:
+            m_alt_block = re.search(r'"titulos_alternativos"\s*:\s*\[(.*?)\]', raw_out, re.DOTALL)
+            if m_alt_block:
+                alts_val = re.findall(r'"([^"]{5,80})"', m_alt_block.group(1))
+
+        tags_val = parsed.get("tags_seo")
+        if not tags_val:
+            m_tags = re.search(r'"tags_seo"\s*:\s*"([^"]+)"', raw_out)
+            tags_val = m_tags.group(1) if m_tags else "cortes, viral, shorts, podcast, debate"
+
+        hashtags_val = parsed.get("hashtags", [])
+        if not hashtags_val:
+            hashtags_val = re.findall(r'#[\w\d_]+', raw_out)
+            if not hashtags_val:
+                hashtags_val = ["#shorts", "#viral", "#cortes", "#reels"]
+
+        # Limpeza final e sanitização
+        t_princ_clean = _clean_ai_title(t_princ).strip(" \t\n\r{}[]\"'")
+        if not t_princ_clean or len(t_princ_clean) < 5 or t_princ_clean.startswith("{"):
+            words_preview = snippet_clean.split()
+            t_princ_clean = " ".join(words_preview[:7]) if words_preview else "Declaração em Destaque"
+
+        return {
+            "titulo_principal": t_princ_clean,
+            "titulos_alternativos": [_clean_ai_title(t).strip(" \t\n\r{}[]\"'") for t in alts_val if len(t) > 5 and not t.startswith("{")],
+            "descricao": desc_val if desc_val and not desc_val.startswith("{") else f"Confira este momento importante da entrevista. Compartilhe sua opinião nos comentários!",
+            "hashtags": hashtags_val if hashtags_val else ["#shorts", "#viral", "#cortes", "#reels"],
+            "tags_seo": tags_val if tags_val else "cortes, viral, shorts, podcast, debate",
+            "error": None
+        }
 
     except Exception as exc:
-        # Fallback inteligente se o Ollama estiver offline: extrai as primeiras palavras significativas da fala
         words_preview = snippet_clean.split()
         fallback_title = " ".join(words_preview[:7]) if words_preview else "Declaração em Destaque"
         return {
