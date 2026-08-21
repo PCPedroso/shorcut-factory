@@ -1,7 +1,7 @@
 """
-subtitle_burner.py — Legendas Dinâmicas Estilo CapCut / Alex Hormozi
+subtitle_burner.py — Legendas Dinâmicas Estilo CapCut / Alex Hormozi (ASS / libass)
 Queima legendas sincronizadas palavra-a-palavra diretamente no vídeo renderizado,
-com destaque visual animado (highlight da palavra atual em cor vibrante).
+utilizando o formato padrão de indústria ASS (Advanced SubStation Alpha) e o renderizador nativo libass do FFmpeg.
 """
 
 import os
@@ -28,55 +28,57 @@ def _ensure_font():
         import urllib.request
         urllib.request.urlretrieve(_FONT_URL, _FONT_BOLD_PATH)
     except Exception:
-        pass  # Fallback para Arial se o download falhar
-
-def _get_font_path() -> str:
-    """Retorna o caminho da fonte disponível (bundled > fallback Arial)."""
-    _ensure_font()
-    if os.path.exists(_FONT_BOLD_PATH):
-        # FFmpeg no Windows precisa de barras e escape no separador de drive
-        return _FONT_BOLD_PATH.replace("\\", "/").replace(":", "\\:")
-    return "Arial"
+        pass
 
 
-def parse_time_to_seconds(time_str: str) -> float:
-    """Converte HH:MM:SS ou MM:SS para segundos float."""
-    parts = time_str.strip().split(":")
-    if len(parts) == 3:
-        return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
-    elif len(parts) == 2:
-        return float(parts[0]) * 60 + float(parts[1])
-    return float(time_str)
+def _time_str_to_seconds(t_str: str) -> float:
+    """Converte 'MM:SS', 'HH:MM:SS' ou 'SS' para float de segundos."""
+    try:
+        parts = t_str.strip().split(":")
+        if len(parts) == 3:
+            return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+        elif len(parts) == 2:
+            return float(parts[0]) * 60 + float(parts[1])
+        elif len(parts) == 1:
+            return float(parts[0])
+    except Exception:
+        pass
+    return 0.0
 
 
-def _distribute_words_proportionally(text: str, seg_start: float, seg_end: float) -> list:
+def _format_ass_time(seconds: float) -> str:
+    """Converte segundos em float para o formato de tempo do ASS: H:MM:SS.cs"""
+    if seconds < 0:
+        seconds = 0.0
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    cs = int(round((seconds - int(seconds)) * 100))
+    if cs >= 100:
+        cs = 99
+    return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+
+def _hex_to_ass_color(hex_color: str, alpha: float = 0.0) -> str:
     """
-    Fallback para segmentos sem timestamps por palavra (ex: transcrição do YouTube).
-    Distribui as palavras proporcionalmente no intervalo de tempo do segmento.
+    Converte cor hexadecimal (#RRGGBB) para o formato ASS (&HAABBGGRR&).
+    No ASS: Alpha 0 = totalmente opaco, Alpha 255 = transparente.
+    A ordem dos canais é Blue, Green, Red (BGR).
     """
-    words = text.strip().split()
-    if not words:
-        return []
-    duration = max(seg_end - seg_start, 0.1)
-    word_dur = duration / len(words)
-    result = []
-    for i, w in enumerate(words):
-        result.append({
-            "word": w,
-            "start": round(seg_start + i * word_dur, 3),
-            "end": round(seg_start + (i + 1) * word_dur, 3),
-        })
-    return result
+    hex_color = hex_color.lstrip("#")
+    if len(hex_color) == 6:
+        r, g, b = hex_color[0:2], hex_color[2:4], hex_color[4:6]
+    else:
+        r, g, b = "FF", "FF", "FF"
+    a_val = int(alpha * 255)
+    a_hex = format(a_val, "02X")
+    return f"&H{a_hex}{b.upper()}{g.upper()}{r.upper()}&"
 
 
-def extract_words_in_range(transcript_path: str, start_s: float, end_s: float) -> list:
+def extract_words_in_range(transcript_path: str, start_time_str: str, end_time_str: str) -> list:
     """
-    Lê o transcript.json e retorna lista de palavras com timestamps
-    ajustados relativos ao início do corte (t' = t - start_s).
-
-    Suporta dois formatos de transcript.json:
-    1. Com word_timestamps (Whisper): segmentos têm campo 'words'
-    2. Sem word_timestamps (YouTube ASR / Whisper básico): distribui proporcionalmente
+    Lê o transcript.json e extrai todas as palavras que ocorrem dentro do intervalo do corte.
+    Ajusta os timestamps para serem relativos ao início do corte (t = 0).
     """
     if not os.path.exists(transcript_path):
         return []
@@ -87,196 +89,194 @@ def extract_words_in_range(transcript_path: str, start_s: float, end_s: float) -
     except Exception:
         return []
 
+    cut_start = _time_str_to_seconds(start_time_str)
+    cut_end = _time_str_to_seconds(end_time_str)
+
+    if cut_end <= cut_start:
+        return []
+
     segments = data.get("segments", [])
-    word_list = []
+    extracted_words = []
 
     for seg in segments:
         seg_start = seg.get("start", 0.0)
-        seg_end = seg.get("end", seg_start + 2.0)
+        seg_end = seg.get("end", 0.0)
 
-        # Filtra segmentos fora do intervalo do corte
-        if seg_end < start_s or seg_start > end_s:
+        # Segmento completamente fora do corte
+        if seg_end < cut_start or seg_start > cut_end:
             continue
 
-        # Caminho 1: segmento tem timestamps por palavra (Whisper com word_timestamps=True)
-        words_data = seg.get("words", [])
-        if words_data:
-            for w in words_data:
+        # Prioridade: word_timestamps gerados pelo Whisper
+        if "words" in seg and seg["words"]:
+            for w in seg["words"]:
                 w_start = w.get("start", seg_start)
-                w_end = w.get("end", w_start + 0.3)
-                if w_end < start_s or w_start > end_s:
-                    continue
+                w_end = w.get("end", seg_end)
                 word_text = w.get("word", "").strip()
+
                 if not word_text:
                     continue
-                word_list.append({
-                    "word": word_text,
-                    "start": max(0.0, round(w_start - start_s, 3)),
-                    "end": max(0.0, round(w_end - start_s, 3)),
-                })
+
+                if w_end >= cut_start and w_start <= cut_end:
+                    rel_start = max(0.0, w_start - cut_start)
+                    rel_end = min(cut_end - cut_start, w_end - cut_start)
+                    if rel_end > rel_start:
+                        extracted_words.append({
+                            "word": word_text,
+                            "start": rel_start,
+                            "end": rel_end
+                        })
         else:
-            # Caminho 2: fallback proporcional
+            # Fallback: distribuição linear proporcional
             text = seg.get("text", "").strip()
-            if not text:
+            raw_words = text.split()
+            if not raw_words:
                 continue
-            clipped_start = max(seg_start, start_s)
-            clipped_end = min(seg_end, end_s)
-            if clipped_end <= clipped_start:
-                continue
-            for w in _distribute_words_proportionally(text, clipped_start, clipped_end):
-                word_list.append({
-                    "word": w["word"],
-                    "start": max(0.0, round(w["start"] - start_s, 3)),
-                    "end": max(0.0, round(w["end"] - start_s, 3)),
-                })
 
-    return word_list
+            seg_duration = max(0.1, seg_end - seg_start)
+            word_duration = seg_duration / len(raw_words)
+
+            for i, word_text in enumerate(raw_words):
+                w_start = seg_start + i * word_duration
+                w_end = w_start + word_duration
+
+                if w_end >= cut_start and w_start <= cut_end:
+                    rel_start = max(0.0, w_start - cut_start)
+                    rel_end = min(cut_end - cut_start, w_end - cut_start)
+                    if rel_end > rel_start:
+                        extracted_words.append({
+                            "word": word_text,
+                            "start": rel_start,
+                            "end": rel_end
+                        })
+
+    return extracted_words
 
 
-def group_words_into_lines(words: list, max_words_per_line: int = 4) -> list:
+def group_words_into_lines(words: list, max_words_per_line: int = 4, max_gap_seconds: float = 1.2) -> list:
     """
-    Agrupa as palavras em linhas de até `max_words_per_line` palavras.
-    Cada linha contém: words, line_start, line_end, text.
+    Agrupa palavras em blocos/linhas curtas para exibição dinâmica estilo CapCut.
+    Quebra de linha ocorre quando atinge max_words_per_line ou há uma pausa longa.
     """
     if not words:
         return []
+
     lines = []
-    for i in range(0, len(words), max_words_per_line):
-        chunk = words[i: i + max_words_per_line]
+    current_line_words = []
+
+    for i, w in enumerate(words):
+        if not current_line_words:
+            current_line_words.append(w)
+            continue
+
+        prev_w = current_line_words[-1]
+        gap = w["start"] - prev_w["end"]
+
+        # Se atingiu o limite de palavras ou houve pausa relevante, fecha a linha
+        if len(current_line_words) >= max_words_per_line or gap > max_gap_seconds:
+            line_start = current_line_words[0]["start"]
+            line_end = current_line_words[-1]["end"]
+            lines.append({
+                "words": list(current_line_words),
+                "line_start": line_start,
+                "line_end": line_end,
+                "text": " ".join(item["word"] for item in current_line_words)
+            })
+            current_line_words = [w]
+        else:
+            current_line_words.append(w)
+
+    if current_line_words:
+        line_start = current_line_words[0]["start"]
+        line_end = current_line_words[-1]["end"]
         lines.append({
-            "words": chunk,
-            "line_start": chunk[0]["start"],
-            "line_end": chunk[-1]["end"],
-            "text": " ".join(w["word"] for w in chunk),
+            "words": list(current_line_words),
+            "line_start": line_start,
+            "line_end": line_end,
+            "text": " ".join(item["word"] for item in current_line_words)
         })
+
     return lines
 
 
-def _escape_ffmpeg_text(text: str) -> str:
-    """Escapa caracteres especiais para o filtro drawtext do FFmpeg."""
-    text = text.replace("\\", "\\\\")
-    text = text.replace("'", "\u2019")   # substitui aspas por caractere Unicode similar
-    text = text.replace(":", "\\:")
-    text = text.replace("[", "\\[")
-    text = text.replace("]", "\\]")
-    return text
-
-
-def _hex_to_ffmpeg_color(hex_color: str, alpha: float = 1.0) -> str:
-    """Converte cor hex (#RRGGBB) para formato FFmpeg 0xRRGGBBAA."""
-    hex_color = hex_color.lstrip("#")
-    if len(hex_color) == 6:
-        r, g, b = hex_color[0:2], hex_color[2:4], hex_color[4:6]
-    else:
-        r, g, b = "FF", "FF", "FF"
-    alpha_hex = format(int(alpha * 255), "02x").upper()
-    return f"0x{r.upper()}{g.upper()}{b.upper()}{alpha_hex}"
-
-
-def build_drawtext_filters(
+def generate_ass_file(
     lines: list,
+    output_ass_path: str,
     video_width: int = 1080,
     video_height: int = 1920,
     font_size: int = 55,
     highlight_color: str = "#FFFF00",
     base_color: str = "#FFFFFF",
     outline_color: str = "#000000",
-    outline_width: int = 3,
-    shadow_offset: int = 2,
-) -> list:
+    outline_width: int = 5,
+    shadow_depth: int = 2,
+) -> bool:
     """
-    Gera lista de filtros drawtext do FFmpeg para legendas palavra-a-palavra.
-
-    Estratégia: cada palavra é renderizada individualmente na sua posição X calculada.
-    Cada palavra tem dois estados *mutuamente exclusivos*:
-      - BASE: visível quando a linha está ativa E a palavra NÃO é a atual
-              enable='between(t,LINE_START,LINE_END)*not(between(t,W_START,W_END))'
-      - HIGHLIGHT: visível apenas no intervalo da própria palavra
-              enable='between(t,W_START,W_END)'
-    Isso elimina qualquer sobreposição entre camadas.
+    Gera arquivo de legendas .ass completo com estilos e eventos karaokê palavra-a-palavra.
     """
-    filters = []
-    font_path = _get_font_path()
+    _ensure_font()
 
-    # Posição Y: 78% da altura (terço inferior)
-    y_pos = int(video_height * 0.78)
+    ass_base_color = _hex_to_ass_color(base_color, alpha=0.0)
+    ass_highlight_color = _hex_to_ass_color(highlight_color, alpha=0.0)
+    ass_outline_color = _hex_to_ass_color(outline_color, alpha=0.0)
+    ass_shadow_color = "&H80000000&"  # Sombra preta 50%
 
-    # Métricas aproximadas para Montserrat ExtraBold (calibrado empiricamente)
-    # Largura média de caractere: ~0.60 * font_size
-    # Largura do espaço entre palavras: ~0.30 * font_size
-    CHAR_W = 0.60
-    SPACE_W = 0.30
+    # Margem vertical inferior (aproximadamente 22% a partir do fundo = posição no terço inferior)
+    margin_v = int(video_height * 0.22)
+    margin_lr = int(video_width * 0.05)
 
-    highlight_ffmpeg = _hex_to_ffmpeg_color(highlight_color, alpha=1.0)
-    base_ffmpeg = _hex_to_ffmpeg_color(base_color, alpha=0.70)
-    outline_ffmpeg = _hex_to_ffmpeg_color(outline_color, alpha=0.88)
-    shadow_ffmpeg = _hex_to_ffmpeg_color("000000", alpha=0.55)
+    # Monta cabeçalho do script ASS
+    content = [
+        "[Script Info]",
+        "ScriptType: v4.00+",
+        f"PlayResX: {video_width}",
+        f"PlayResY: {video_height}",
+        "ScaledBorderAndShadow: yes",
+        "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
+        "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+        "Alignment, MarginL, MarginR, MarginV, Encoding",
+        f"Style: Default,Montserrat ExtraBold,{font_size},{ass_base_color},&H000000FF&,{ass_outline_color},{ass_shadow_color},"
+        f"-1,0,0,0,100,100,0,0,1,{outline_width},{shadow_depth},2,{margin_lr},{margin_lr},{margin_v},1",
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
 
     for line in lines:
-        line_start = line["line_start"]
-        line_end = line["line_end"]
         words = line["words"]
+        n_words = len(words)
 
-        # 1. Estima a largura de cada palavra em pixels
-        word_widths = []
-        for w in words:
-            text = w["word"]
-            est_px = int(len(text) * CHAR_W * font_size + SPACE_W * font_size)
-            word_widths.append(est_px)
+        for i, curr_w in enumerate(words):
+            event_start = curr_w["start"]
+            # O evento dura até o início da próxima palavra, ou até o fim da palavra atual + 0.15s
+            if i < n_words - 1:
+                event_end = max(curr_w["end"], words[i + 1]["start"])
+            else:
+                event_end = curr_w["end"] + 0.20
 
-        total_line_width = sum(word_widths)
-        # Garante que a linha não saia da tela
-        start_x = max(10, (video_width - total_line_width) // 2)
+            # Monta a linha com a palavra ativa destacada com tag de cor
+            line_parts = []
+            for j, w in enumerate(words):
+                w_text = w["word"]
+                if j == i:
+                    # Palavra atual em destaque
+                    line_parts.append(f"{{\\c{ass_highlight_color}}}{w_text}{{\\c{ass_base_color}}}")
+                else:
+                    line_parts.append(w_text)
 
-        # 2. Para cada palavra: renderiza base + highlight com enable exclusivos
-        x_cursor = start_x
-        for word_data, w_px in zip(words, word_widths):
-            word_text = _escape_ffmpeg_text(word_data["word"])
-            w_start = word_data["start"]
-            w_end = word_data["end"]
-            wx = x_cursor
+            dialogue_text = " ".join(line_parts)
+            start_str = _format_ass_time(event_start)
+            end_str = _format_ass_time(event_end)
 
-            # BASE: palavra em cor apagada, visível quando a linha está ativa
-            # mas ESTA palavra não está sendo falada
-            base_enable = (
-                f"between(t,{line_start:.3f},{line_end:.3f})"
-                f"*not(between(t,{w_start:.3f},{w_end:.3f}))"
-            )
-            base_filter = (
-                f"drawtext=fontfile='{font_path}'"
-                f":text='{word_text}'"
-                f":fontsize={font_size}"
-                f":fontcolor={base_ffmpeg}"
-                f":borderw={outline_width}"
-                f":bordercolor={outline_ffmpeg}"
-                f":shadowx={shadow_offset}:shadowy={shadow_offset}"
-                f":shadowcolor={shadow_ffmpeg}"
-                f":x={wx}:y={y_pos}"
-                f":enable='{base_enable}'"
-            )
-            filters.append(base_filter)
+            content.append(f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{dialogue_text}")
 
-            # HIGHLIGHT: palavra em cor vibrante, visível só no seu próprio intervalo
-            hl_font_size = int(font_size * 1.06)
-            # Ajuste Y para centralizar o tamanho maior
-            hl_y = y_pos - int((hl_font_size - font_size) * 0.5)
-            highlight_filter = (
-                f"drawtext=fontfile='{font_path}'"
-                f":text='{word_text}'"
-                f":fontsize={hl_font_size}"
-                f":fontcolor={highlight_ffmpeg}"
-                f":borderw={outline_width + 1}"
-                f":bordercolor={outline_ffmpeg}"
-                f":shadowx={shadow_offset}:shadowy={shadow_offset}"
-                f":shadowcolor={shadow_ffmpeg}"
-                f":x={wx}:y={hl_y}"
-                f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
-            )
-            filters.append(highlight_filter)
-
-            x_cursor += w_px
-
-    return filters
+    try:
+        with open(output_ass_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(content) + "\n")
+        return True
+    except Exception:
+        return False
 
 
 def burn_subtitles(
@@ -291,30 +291,29 @@ def burn_subtitles(
     max_words_per_line: int = 4,
 ) -> dict:
     """
-    Pipeline principal: extrai palavras → agrupa em linhas → queima legendas (pass-2 FFmpeg).
-
-    O arquivo de saída pode ser o mesmo que o de entrada (sobrescreve via temp file).
-    Retorna dict com 'path' e 'error'.
+    Aplica legendas dinâmicas palavra-a-palavra queimadas via pass-2 FFmpeg com motor libass.
+    Retorna dicionário com {'path': str, 'error': str|None, 'warning': str|None}.
     """
+    if not os.path.exists(input_video_path):
+        return {"path": None, "error": f"Arquivo de vídeo de entrada não encontrado: {input_video_path}"}
+
+    if not os.path.exists(transcript_path):
+        return {"path": input_video_path, "error": None, "warning": "Transcrição não encontrada. Legendas não aplicadas."}
+
     try:
-        # 1. Parseia timestamps absolutos do vídeo original
-        start_s = parse_time_to_seconds(start_time_str)
-        end_s = parse_time_to_seconds(end_time_str)
-
-        # 2. Extrai palavras com timestamps relativos ao corte
-        words = extract_words_in_range(transcript_path, start_s, end_s)
+        # 1. Extrai palavras dentro do intervalo do corte
+        words = extract_words_in_range(transcript_path, start_time_str, end_time_str)
         if not words:
-            return {
-                "path": input_video_path,
-                "error": None,
-                "warning": "Sem timestamps de palavras no transcript — legendas não aplicadas.",
-            }
+            return {"path": input_video_path, "error": None, "warning": "Nenhuma palavra encontrada no intervalo selecionado."}
 
-        # 3. Agrupa em linhas
+        # 2. Agrupa em linhas curtas (3-4 palavras)
         lines = group_words_into_lines(words, max_words_per_line=max_words_per_line)
+        if not lines:
+            return {"path": input_video_path, "error": None, "warning": "Não foi possível agrupar as palavras em linhas."}
 
-        # 4. Detecta resolução do vídeo via ffprobe
-        video_width, video_height = 1080, 1920  # default 9:16
+        # 3. Detecta resolução real do vídeo
+        video_width = 1080
+        video_height = 1920
         ffprobe_exe = FFMPEG_EXE.replace("ffmpeg.exe", "ffprobe.exe").replace("ffmpeg", "ffprobe")
         if os.path.exists(ffprobe_exe):
             try:
@@ -330,9 +329,15 @@ def burn_subtitles(
             except Exception:
                 pass
 
-        # 5. Monta filtros drawtext
-        drawtext_filters = build_drawtext_filters(
+        # 4. Cria arquivo .ass
+        _hash = hashlib.md5(output_video_path.encode()).hexdigest()[:10]
+        _tmp_dir = os.path.dirname(output_video_path) or "."
+        ass_path = os.path.join(_tmp_dir, f"_sub_{_hash}.ass")
+        tmp_output = os.path.join(_tmp_dir, f"_subs_tmp_{_hash}.mp4")
+
+        success = generate_ass_file(
             lines=lines,
+            output_ass_path=ass_path,
             video_width=video_width,
             video_height=video_height,
             font_size=font_size,
@@ -340,27 +345,21 @@ def burn_subtitles(
             base_color=base_color,
         )
 
-        if not drawtext_filters:
-            return {"path": input_video_path, "error": None, "warning": "Nenhum filtro de legenda gerado."}
+        if not success or not os.path.exists(ass_path):
+            return {"path": input_video_path, "error": None, "warning": "Falha ao gerar arquivo de legendas .ass."}
 
-        # 6. Executa pass-2 FFmpeg via arquivo temporário
-        # Usa caminhos seguros baseados em hash para evitar colonos (':') no Windows
-        # que seriam interpretados como Alternate Data Streams e corromperiam os arquivos.
-        _hash = hashlib.md5(output_video_path.encode()).hexdigest()[:10]
-        _tmp_dir = os.path.dirname(output_video_path) or "."
-        tmp_output = os.path.join(_tmp_dir, f"_subs_tmp_{_hash}.mp4")
-        filter_script_path = os.path.join(_tmp_dir, f"_filter_{_hash}.txt")
-        # IMPORTANTE: A cadeia de filtros pode ser muito longa para a linha de comando do Windows
-        # (limite ~32767 chars). Usamos -filter_script:v para ler o filtro de um arquivo.
-        vf_chain = ",\n".join(drawtext_filters)
         try:
-            with open(filter_script_path, "w", encoding="utf-8") as f:
-                f.write(vf_chain)
+            # 5. Prepara caminhos para o filtro FFmpeg
+            # Para máxima compatibilidade no Windows, usamos caminhos relativos normalizados com barras
+            rel_ass = os.path.relpath(ass_path, start=".").replace("\\", "/")
+            rel_fonts = os.path.relpath(_FONTS_DIR, start=".").replace("\\", "/")
+
+            vf_filter = f"ass={rel_ass}:fontsdir={rel_fonts}"
 
             cmd = [
                 FFMPEG_EXE, "-y",
                 "-i", input_video_path,
-                "-filter_script:v", filter_script_path,
+                "-vf", vf_filter,
                 "-c:v", "libx264",
                 "-preset", "veryfast",
                 "-crf", "20",
@@ -380,11 +379,12 @@ def burn_subtitles(
                 if os.path.exists(tmp_output):
                     os.remove(tmp_output)
                 err_detail = result.stderr[-2000:] if result.stderr else "Erro desconhecido"
-                return {"path": None, "error": f"FFmpeg subtitle pass-2 falhou:\n{err_detail}"}
+                return {"path": None, "error": f"FFmpeg libass subtitle pass-2 falhou:\n{err_detail}"}
+
         finally:
-            # Limpa o arquivo de filtro temporário
-            if os.path.exists(filter_script_path):
-                os.remove(filter_script_path)
+            # Limpa arquivo .ass temporário
+            if os.path.exists(ass_path):
+                os.remove(ass_path)
 
     except Exception as e:
         return {"path": None, "error": str(e)}
