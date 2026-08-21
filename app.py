@@ -674,7 +674,7 @@ if st.session_state.transcription_done:
             st.markdown(f"### 🎬 Pequenos Cortes Gerados ({len(st.session_state.shorts)}):")
             for idx, s in enumerate(st.session_state.shorts):
                 with st.container():
-                    col_chk, col_info, col_btn = st.columns([0.4, 3.6, 1.2])
+                    col_chk, col_info = st.columns([0.3, 4.7])
                     with col_chk:
                         chk_val = st.checkbox("Fila", key=f"chk_short_{idx}", label_visibility="collapsed")
                         if chk_val:
@@ -686,13 +686,6 @@ if st.session_state.transcription_done:
                         st.caption(f"⏱️ Duração: **{s.get('duration_label', '')}**")
                         if s.get('snippet'):
                             st.markdown(f"💬 *\"{s['snippet']}\"*")
-                    with col_btn:
-                        if st.button("✂️ Usar na Fábrica", key=f"btn_use_short_{idx}", use_container_width=True):
-                            st.session_state.final_start_time = s['start']
-                            st.session_state.final_end_time = s['end']
-                            st.session_state.final_corte_title = s['title']
-                            st.session_state.cut_ready_banner = f"✅ Short selecionado: [{s['start']} → {s['end']}] ({s['title']})"
-                            st.rerun()
                     st.divider()
 
             # ── PAINEL DA FILA DE PRODUÇÃO EM LOTE ────────────────────────────
@@ -1335,11 +1328,13 @@ if st.session_state.transcription_done:
     if existing_inst and os.path.exists(existing_inst.get("video_path", "")):
         st.markdown(f"#### 🎬 Prévia da Instância Pronta ({aspect_option})")
         if "9:16" in selected_aspect:
-            col_pv1, col_pv2, col_pv3 = st.columns([1, 2, 1])
+            col_pv1, col_pv2, col_pv3 = st.columns([1.6, 1.2, 1.6])
             with col_pv2:
                 st.video(existing_inst["video_path"])
         else:
-            st.video(existing_inst["video_path"])
+            col_pv1, col_pv2, col_pv3 = st.columns([1, 2, 1])
+            with col_pv2:
+                st.video(existing_inst["video_path"])
 
         with open(existing_inst["video_path"], "rb") as vf_cached:
             st.download_button(
@@ -1454,11 +1449,13 @@ if st.session_state.transcription_done:
                                 st.info(f"ℹ️ {cut_res['subtitle_warning']}")
                             
                             if "9:16" in selected_aspect:
-                                col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
+                                col_v1, col_v2, col_v3 = st.columns([1.6, 1.2, 1.6])
                                 with col_v2:
                                     st.video(corte_output_path)
                             else:
-                                st.video(corte_output_path)
+                                col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
+                                with col_v2:
+                                    st.video(corte_output_path)
                             
                             # Carrega metadados do vídeo original
                             _meta_file = os.path.join(data_dir, "metadata.json")
@@ -1558,7 +1555,16 @@ if st.session_state.transcription_done:
                     # Instâncias de formatos renderizadas para esta minutagem
                     formats_dict = cut_item.get("formats", {})
                     if formats_dict:
-                        f_cols = st.columns(len(formats_dict))
+                        num_fmt = len(formats_dict)
+                        if num_fmt == 1:
+                            f_cols = st.columns([1.3, 2.7])
+                        elif num_fmt == 2:
+                            f_cols = st.columns([1.3, 1.3, 1.4])
+                        elif num_fmt == 3:
+                            f_cols = st.columns([1.1, 1.1, 1.1, 0.7])
+                        else:
+                            f_cols = st.columns(num_fmt)
+
                         for f_idx, (fmt_key, fmt_data) in enumerate(formats_dict.items()):
                             with f_cols[f_idx]:
                                 fmt_badge = {
