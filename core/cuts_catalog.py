@@ -209,3 +209,37 @@ def update_cut_texts_only(
 
     save_cuts_catalog(video_id, catalog)
     return {"entry": entry, "error": None}
+
+
+def delete_format_instance(video_id: str, start_time: str, end_time: str, aspect_mode: str, delete_folder: bool = True) -> bool:
+    """Remove uma instância de formato específica do catálogo e opcionalmente apaga a pasta do disco."""
+    catalog = load_cuts_catalog(video_id)
+    key = make_time_key(start_time, end_time)
+    if key in catalog and aspect_mode in catalog[key].get("formats", {}):
+        inst = catalog[key]["formats"].pop(aspect_mode)
+        if delete_folder:
+            f_path = inst.get("folder_path")
+            if f_path and os.path.exists(f_path):
+                shutil.rmtree(f_path, ignore_errors=True)
+        # Se não restou nenhum formato, remove a entrada inteira
+        if not catalog[key]["formats"]:
+            catalog.pop(key, None)
+        save_cuts_catalog(video_id, catalog)
+        return True
+    return False
+
+
+def delete_entire_cut(video_id: str, start_time: str, end_time: str, delete_folders: bool = True) -> bool:
+    """Remove todos os formatos daquela minutagem e apaga as respectivas pastas do disco."""
+    catalog = load_cuts_catalog(video_id)
+    key = make_time_key(start_time, end_time)
+    if key in catalog:
+        entry = catalog.pop(key)
+        if delete_folders:
+            for inst in entry.get("formats", {}).values():
+                f_path = inst.get("folder_path")
+                if f_path and os.path.exists(f_path):
+                    shutil.rmtree(f_path, ignore_errors=True)
+        save_cuts_catalog(video_id, catalog)
+        return True
+    return False

@@ -14,6 +14,7 @@ import core.library_manager
 import core.config_manager
 import core.export_kit
 import core.cuts_catalog
+import core.batch_processor
 
 importlib.reload(core.extractor)
 importlib.reload(core.transcriber)
@@ -24,6 +25,7 @@ importlib.reload(core.library_manager)
 importlib.reload(core.config_manager)
 importlib.reload(core.export_kit)
 importlib.reload(core.cuts_catalog)
+importlib.reload(core.batch_processor)
 
 from core.extractor import download_audio, get_video_metadata
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
@@ -32,7 +34,8 @@ from core.video_processor import download_full_video, cut_video, get_video_resol
 from core.library_manager import get_library, add_or_update_video_in_library, remove_video_from_library
 from core.config_manager import load_settings, save_all_settings
 from core.export_kit import build_cut_folder_name, create_viral_package
-from core.cuts_catalog import get_cut_entry, get_format_instance, register_cut_instance, update_cut_texts_only
+from core.cuts_catalog import get_cut_entry, get_format_instance, register_cut_instance, update_cut_texts_only, delete_entire_cut, load_cuts_catalog
+from core.batch_processor import process_batch_cuts
 
 # Carrega todas as configurações persistentes salvas
 _cfg = load_settings()
@@ -651,23 +654,112 @@ if st.session_state.transcription_done:
                     st.rerun()
 
         if 'shorts' in st.session_state and st.session_state.shorts:
+            if "batch_short_selected" not in st.session_state:
+                st.session_state["batch_short_selected"] = {}
+
+            col_bk1, col_bk2, _ = st.columns([1.5, 1.5, 2])
+            with col_bk1:
+                if st.button("⚡ Selecionar Todos para Lote", key="btn_sel_all_shorts", use_container_width=True):
+                    for s_i, s_item in enumerate(st.session_state.shorts):
+                        st.session_state[f"chk_short_{s_i}"] = True
+                        st.session_state["batch_short_selected"][s_i] = s_item
+                    st.rerun()
+            with col_bk2:
+                if st.button("⬜ Limpar Seleção", key="btn_clear_shorts_batch", use_container_width=True):
+                    for s_i in range(len(st.session_state.shorts)):
+                        st.session_state[f"chk_short_{s_i}"] = False
+                    st.session_state["batch_short_selected"] = {}
+                    st.rerun()
+
             st.markdown(f"### 🎬 Pequenos Cortes Gerados ({len(st.session_state.shorts)}):")
             for idx, s in enumerate(st.session_state.shorts):
                 with st.container():
-                    col_info, col_btn = st.columns([4, 1.2])
+                    col_chk, col_info, col_btn = st.columns([0.4, 3.6, 1.2])
+                    with col_chk:
+                        chk_val = st.checkbox("Fila", key=f"chk_short_{idx}", label_visibility="collapsed")
+                        if chk_val:
+                            st.session_state["batch_short_selected"][idx] = s
+                        else:
+                            st.session_state["batch_short_selected"].pop(idx, None)
                     with col_info:
                         st.markdown(f"**{s.get('type', 'Corte')}** | `[{s['start']} → {s['end']}]` **{s['title']}**")
                         st.caption(f"⏱️ Duração: **{s.get('duration_label', '')}**")
                         if s.get('snippet'):
                             st.markdown(f"💬 *\"{s['snippet']}\"*")
                     with col_btn:
-                        if st.button("✂️ Usar este Corte", key=f"btn_use_short_{idx}", use_container_width=True):
+                        if st.button("✂️ Usar na Fábrica", key=f"btn_use_short_{idx}", use_container_width=True):
                             st.session_state.final_start_time = s['start']
                             st.session_state.final_end_time = s['end']
                             st.session_state.final_corte_title = s['title']
                             st.session_state.cut_ready_banner = f"✅ Short selecionado: [{s['start']} → {s['end']}] ({s['title']})"
                             st.rerun()
                     st.divider()
+
+            # ── PAINEL DA FILA DE PRODUÇÃO EM LOTE ────────────────────────────
+            selected_items = list(st.session_state["batch_short_selected"].values())
+            if selected_items:
+                with st.container():
+                    st.markdown("---")
+                    st.markdown(f"### 📦 Fila de Produção em Lote (**{len(selected_items)}** cortes selecionados)")
+                    
+                    col_bp1, col_bp2 = st.columns(2)
+                    with col_bp1:
+                        batch_aspect_choice = st.selectbox(
+                            "📐 Enquadramento para o Lote:",
+                            [
+                                "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)",
+                                "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen)",
+                                "📱 Vertical 9:16 (Fundo Desfocado / Blur)",
+                                "📱 Vertical 9:16 (Corte Central 100% Tela)",
+                                "💻 Horizontal 16:9 (Original 1080p Full HD)"
+                            ],
+                            key="batch_aspect_select"
+                        )
+                        b_aspect_map = {
+                            "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)": "9:16_smart_face",
+                            "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen)": "9:16_split",
+                            "📱 Vertical 9:16 (Fundo Desfocado / Blur)": "9:16_blur",
+                            "📱 Vertical 9:16 (Corte Central 100% Tela)": "9:16_crop",
+                            "💻 Horizontal 16:9 (Original 1080p Full HD)": "16:9"
+                        }
+                        batch_aspect_mode = b_aspect_map[batch_aspect_choice]
+
+                    with col_bp2:
+                        batch_sub_enabled = st.toggle("✨ Ativar Legendas Dinâmicas em Todos", value=_cfg.get("subtitle_enabled", True), key="batch_sub_toggle")
+                        st.caption(f"Fontes e cores configuradas: {_cfg.get('subtitle_font_size', 80)}px • Destaque {_cfg.get('subtitle_highlight_color', '#FFFF00')}")
+
+                    if st.button(f"⚡ Iniciar Renderização em Lote ({len(selected_items)} Cortes)", type="primary", use_container_width=True, key="btn_start_batch"):
+                        _active_u_batch = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                        _vid_id_batch = get_video_id(_active_u_batch)
+                        if not _vid_id_batch:
+                            st.error("URL do vídeo do YouTube não identificada.")
+                        else:
+                            prog_bar = st.progress(0)
+                            status_box = st.empty()
+
+                            def _batch_cb(cur, tot, msg):
+                                pct = int((cur / max(tot, 1)) * 100)
+                                prog_bar.progress(min(pct, 100))
+                                status_box.info(f"**Progresso ({cur}/{tot}):** {msg}")
+
+                            batch_res = process_batch_cuts(
+                                video_id=_vid_id_batch,
+                                active_url=_active_u_batch,
+                                cut_items=selected_items,
+                                aspect_ratio_mode=batch_aspect_mode,
+                                subtitle_enabled=batch_sub_enabled,
+                                subtitle_highlight_color=_cfg.get("subtitle_highlight_color", "#FFFF00"),
+                                subtitle_base_color=_cfg.get("subtitle_base_color", "#FFFFFF"),
+                                subtitle_font_size=_cfg.get("subtitle_font_size", 80),
+                                ollama_model=ollama_model,
+                                aspect_params=_cfg,
+                                progress_callback=_batch_cb
+                            )
+
+                            prog_bar.progress(100)
+                            status_box.success(f"🎉 **{len(batch_res)} cortes renderizados e empacotados com sucesso!** Verifique a Galeria abaixo.")
+                            st.session_state["batch_short_selected"] = {}
+                            st.rerun()
 
     # ── TAB 4: SELEÇÃO MANUAL ────────────────────────────────────────────────
     with tab_manual:
@@ -1433,5 +1525,72 @@ if st.session_state.transcription_done:
                                 st.divider()
                                 st.markdown("##### 📺 Dados do Vídeo Original Salvos no `info_publicacao.txt`:")
                                 st.markdown(f"• **Título Original:** {orig_info.get('title')}\n• **Canal:** {orig_info.get('channel')}\n• **Lançamento:** {orig_info.get('upload_date')}\n• **Link:** {orig_info.get('url')}")
+
+
+    # ─────────────────────────────────────────────────────────────────
+    # SEÇÃO 4: GALERIA DE CORTES PRODUZIDOS
+    # ─────────────────────────────────────────────────────────────────
+    _active_u_gal = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+    _vid_id_gal = get_video_id(_active_u_gal) or ""
+
+    if _vid_id_gal:
+        st.markdown("---")
+        st.header("4. 🎬 Galeria de Cortes Produzidos")
+        st.markdown("Visualize, reproduza e baixe todos os cortes finalizados para este vídeo.")
+
+        catalog_gal = load_cuts_catalog(_vid_id_gal)
+        if not catalog_gal:
+            st.info("Nenhum corte registrado nesta galeria ainda. Gere cortes individuais na **Seção 3** ou use a **Renderização em Lote** na **Seção 2**!")
+        else:
+            st.caption(f"📁 Total de **{len(catalog_gal)}** minutagens e instâncias registradas no catálogo.")
+            for c_idx, (t_key, cut_item) in enumerate(catalog_gal.items()):
+                with st.container():
+                    col_g_head, col_g_del = st.columns([4, 1])
+                    with col_g_head:
+                        st.subheader(f"📌 {cut_item.get('title', 'Corte sem título')}")
+                        st.caption(f"⏱️ Trecho: `[{cut_item.get('start_time')} → {cut_item.get('end_time')}]` • Atualizado em: `{cut_item.get('updated_at', 'N/D')}`")
+                    with col_g_del:
+                        if st.button("🗑️ Excluir Corte", key=f"btn_del_cut_gal_{c_idx}", use_container_width=True):
+                            delete_entire_cut(_vid_id_gal, cut_item.get('start_time'), cut_item.get('end_time'))
+                            st.success("Corte e pastas excluídos.")
+                            st.rerun()
+
+                    # Instâncias de formatos renderizadas para esta minutagem
+                    formats_dict = cut_item.get("formats", {})
+                    if formats_dict:
+                        f_cols = st.columns(len(formats_dict))
+                        for f_idx, (fmt_key, fmt_data) in enumerate(formats_dict.items()):
+                            with f_cols[f_idx]:
+                                fmt_badge = {
+                                    "9:16_smart_face": "📱 9:16 Smart Face (VRIRA)",
+                                    "9:16_split": "📱 9:16 Split Screen (VLDSS)",
+                                    "9:16_blur": "📱 9:16 Blur (VFDBS)",
+                                    "9:16_crop": "📱 9:16 Crop (VCCFT)",
+                                    "16:9": "💻 16:9 Original (HOFHD)"
+                                }.get(fmt_key, fmt_key)
+                                
+                                st.markdown(f"**{fmt_badge}**")
+                                v_file = fmt_data.get("video_path")
+                                if v_file and os.path.exists(v_file):
+                                    st.video(v_file)
+                                    with open(v_file, "rb") as vf_gal:
+                                        st.download_button(
+                                            label=f"💾 Baixar ({fmt_data.get('resolution', 'HD')})",
+                                            data=vf_gal,
+                                            file_name=fmt_data.get("video_filename", f"{fmt_key}.mp4"),
+                                            mime="video/mp4",
+                                            key=f"dl_gal_{c_idx}_{f_idx}",
+                                            use_container_width=True
+                                        )
+                                    st.caption(f"📁 `{fmt_data.get('folder_name')}`")
+                                else:
+                                    st.warning("Arquivo de vídeo não encontrado no disco.")
+
+                    with st.expander("📝 Visualizar Textos e Tags de Publicação"):
+                        st.markdown(f"**Legenda:**\n```\n{cut_item.get('description', '')}\n```")
+                        st.markdown(f"**Hashtags:** `{' '.join(cut_item.get('hashtags', []))}`")
+                        st.markdown(f"**Tags SEO:** `{cut_item.get('tags_seo', '')}`")
+
+                    st.divider()
 
 
