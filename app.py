@@ -1071,7 +1071,10 @@ if st.session_state.transcription_done:
                 data_dir = os.path.join("data", video_id)
                 os.makedirs(data_dir, exist_ok=True)
                 video_full_path = os.path.join(data_dir, "video_full.mp4")
-                corte_output_path = os.path.join(data_dir, f"corte_{selected_aspect}.mp4")
+                # Normaliza o aspect ratio para nome de arquivo seguro no Windows
+                # (substituindo ':' por '-' para evitar Alternate Data Streams)
+                safe_aspect_name = selected_aspect.replace(":", "-")
+                corte_output_path = os.path.join(data_dir, f"corte_{safe_aspect_name}.mp4")
                 
                 # Detecta se o vídeo no cache é de baixa resolução (< 720p) e força o download em 1080p
                 need_download = not os.path.exists(video_full_path)

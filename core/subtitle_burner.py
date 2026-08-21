@@ -6,6 +6,7 @@ com destaque visual animado (highlight da palavra atual em cor vibrante).
 
 import os
 import json
+import hashlib
 import subprocess
 import imageio_ffmpeg
 
@@ -310,12 +311,15 @@ def burn_subtitles(
             return {"path": input_video_path, "error": None, "warning": "Nenhum filtro de legenda gerado."}
 
         # 6. Executa pass-2 FFmpeg via arquivo temporário
-        tmp_output = output_video_path + "._subs_tmp.mp4"
+        # Usa caminhos seguros baseados em hash para evitar colonos (':') no Windows
+        # que seriam interpretados como Alternate Data Streams e corromperiam os arquivos.
+        _hash = hashlib.md5(output_video_path.encode()).hexdigest()[:10]
+        _tmp_dir = os.path.dirname(output_video_path) or "."
+        tmp_output = os.path.join(_tmp_dir, f"_subs_tmp_{_hash}.mp4")
+        filter_script_path = os.path.join(_tmp_dir, f"_filter_{_hash}.txt")
+        # IMPORTANTE: A cadeia de filtros pode ser muito longa para a linha de comando do Windows
+        # (limite ~32767 chars). Usamos -filter_script:v para ler o filtro de um arquivo.
         vf_chain = ",\n".join(drawtext_filters)
-
-        # IMPORTANTE: A cadeia de filtros drawtext pode ser muito longa para a linha de comando
-        # do Windows (limite ~32767 chars). Usamos -filter_script:v para ler o filtro de arquivo.
-        filter_script_path = output_video_path + "._filter.txt"
         try:
             with open(filter_script_path, "w", encoding="utf-8") as f:
                 f.write(vf_chain)
