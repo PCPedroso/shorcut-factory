@@ -352,13 +352,13 @@ def crop_video_with_smart_face_tracking(
         detector = vision.FaceDetector.create_from_options(options)
 
         # Configura o FFmpeg process pipe para renderização em 1080x1920 com áudio original
-        temp_audio_cut = output_video_path + ".temp_audio.aac"
+        temp_audio_cut = output_video_path + ".temp_audio.m4a"
         cmd_extract_audio = [
             FFMPEG_EXE, "-y",
             "-ss", start_time_str,
             "-to", end_time_str,
             "-i", input_video_path,
-            "-vn", "-c:a", "copy",
+            "-vn", "-c:a", "aac", "-b:a", "192k",
             temp_audio_cut
         ]
         subprocess.run(cmd_extract_audio, capture_output=True)
@@ -652,7 +652,7 @@ def crop_video_with_dynamic_auto_switch(
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
 
-        temp_audio_cut = os.path.join(out_dir, "temp_dyn_audio.aac") if out_dir else "temp_dyn_audio.aac"
+        temp_audio_cut = os.path.join(out_dir, "temp_dyn_audio.m4a") if out_dir else "temp_dyn_audio.m4a"
         temp_video_raw = os.path.join(out_dir, "temp_dyn_raw.mp4") if out_dir else "temp_dyn_raw.mp4"
 
         # Extrai áudio sincronizado
