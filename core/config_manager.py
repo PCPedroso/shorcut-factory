@@ -46,6 +46,30 @@ DEFAULT_SETTINGS = {
     "subtitle_base_color": "#FFFFFF",
     "subtitle_font_size": 80,
 
+    # Headline de Retenção Superior (Fase 3)
+    "headline_enabled": False,
+    "headline_preset": "yellow_black",
+    "headline_text_color": "#000000",
+    "headline_bg_color": "#FFE600",
+    "headline_font_size": 46,
+    "headline_margin_top": 120,
+
+    # Efeitos Visuais & Retenção (Fase 3)
+    "emojis_enabled": False,
+    "zoom_punch_enabled": False,
+
+    # Trilha Sonora & Audio Ducking (Fase 3)
+    "bg_music_enabled": False,
+    "bg_music_track_id": "lofi_chill",
+    "bg_music_volume": 0.15,
+    "ducking_preset": "medio",
+
+    # Integrações & Exportação Direta (Fase 3)
+    "webhook_url": "",
+    "webhook_auth_header": "",
+    "youtube_client_secrets_path": "data/client_secrets.json",
+    "youtube_privacy_status": "unlisted",
+
     # Última URL aberta
     "last_video_url": ""
 }

@@ -150,6 +150,20 @@ def process_batch_cuts(
             subtitle_highlight_color=subtitle_highlight_color,
             subtitle_base_color=subtitle_base_color,
             subtitle_font_size=subtitle_font_size,
+            # Fase 3: Retenção & Áudio Ducking
+            headline_enabled=params.get("headline_enabled", False),
+            headline_text=cut_title,
+            headline_preset=params.get("headline_preset", "yellow_black"),
+            headline_text_color=params.get("headline_text_color", "#000000"),
+            headline_bg_color=params.get("headline_bg_color", "#FFE600"),
+            headline_font_size=params.get("headline_font_size", 46),
+            headline_margin_top=params.get("headline_margin_top", 120),
+            emojis_enabled=params.get("emojis_enabled", False),
+            zoom_punch_enabled=params.get("zoom_punch_enabled", False),
+            bg_music_enabled=params.get("bg_music_enabled", False),
+            bg_music_track_path=params.get("bg_music_track_path"),
+            bg_music_volume=params.get("bg_music_volume", 0.15),
+            ducking_preset=params.get("ducking_preset", "medio"),
         )
 
         if cut_res.get("error"):

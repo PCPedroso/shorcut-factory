@@ -25,22 +25,29 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 
 ```
 shorcut-factory/
-├── app.py                     # Interface Web Streamlit (4 seções principais)
+├── app.py                     # Interface Web Streamlit (4 seções + Integrações)
+├── assets/
+│   └── audio/                 # Trilhas sonoras royalty-free categorizadas (.wav / .mp3)
 ├── core/
 │   ├── extractor.py           # Extração de áudio, canais e metadados via yt-dlp
 │   ├── transcriber.py         # Transcrição faster-whisper (CUDA) + fallback ASR YouTube
 │   ├── analyzer.py            # Análise Q&A/Temática e geração do Kit Viral com IA
-│   ├── video_processor.py     # Pipeline FFmpeg para os 5 formatos de enquadramento
+│   ├── video_processor.py     # Pipeline FFmpeg para os 5 formatos de enquadramento + efeitos
 │   ├── face_tracker.py        # Detecção facial MediaPipe e Split Screen Auto-Switch
-│   ├── subtitle_burner.py     # Geração de legendas dinâmicas em ASS (karaokê palavra-a-palavra)
+│   ├── subtitle_burner.py     # Geração de legendas dinâmicas em ASS + Headlines + Emojis
+│   ├── headline_drawer.py     # Estilização de Headlines magnéticas de topo (Amarelo, Red, Dark, Custom)
+│   ├── audio_mixer.py         # Mixagem de áudio com Ducking dinâmico via sidechaincompress FFmpeg
+│   ├── retention_effects.py   # Filtro Zoom Punch e emojis/stickers contextuais
+│   ├── integrations.py        # Upload YouTube Shorts API v3 e despachante de Webhooks
 │   ├── export_kit.py          # Nomenclatura estrita (VLDSS, VRIRA...) e pastas de publicação
 │   ├── cuts_catalog.py        # Catálogo e cache inteligente multi-instância (cuts_catalog.json)
-│   ├── batch_processor.py     # Processamento sequencial em lote com Smart Skip
+│   ├── batch_processor.py     # Processamento sequencial em lote com Smart Skip e Phase 3
 │   ├── library_manager.py     # Catálogo global de vídeos processados (library.json)
 │   └── config_manager.py      # Persistência contínua de preferências (app_settings.json)
 ├── data/
 │   ├── library.json           # Biblioteca geral de vídeos
 │   ├── app_settings.json      # Configurações do usuário persistidas
+│   ├── youtube_token.json     # Token de autorização OAuth do YouTube Shorts
 │   └── <video_id>/
 │       ├── audio.mp3          # Cache do áudio extraído
 │       ├── transcript.json    # Transcrição com timestamps por palavra
@@ -80,14 +87,37 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 
 ---
 
-## 📝 Legendas Dinâmicas (Estilo CapCut / Alex Hormozi)
+## 📝 Legendas Dinâmicas & Headlines de Retenção (Fase 2 & 3)
 
 - **Padrão SSA/ASS nativo via `libass` no FFmpeg**: Renderização em alta performance com nitidez absoluta.
 - **Efeito Karaokê Palavra-a-Palavra**: A palavra sendo pronunciada fica em destaque (cor vibrante) enquanto o restante da frase permanece com menor opacidade.
-- **Customização Total na UI**:
-  - Seletor de cor da palavra ativa (Destaque) e palavras em espera (Base).
-  - Controle de tamanho de fonte (40px a 160px).
-  - Tratamento de sobreposição de falas e limpeza de ruídos (`>>`, `[Música]`).
+- **🏷️ Headline / Título Fixo de Retenção no Topo**:
+  - Caixa de destaque superior estilo viral TikTok/Reels com presets pré-definidos (`Amarelo Vibrante`, `Alerta Vermelho`, `Dark Box`, `Box Branco`, `Flutuante Bold` ou `Personalizado`).
+  - Margem superior ajustável para Safe Zone de interfaces móveis e quebra de linhas inteligente.
+- **😃 Emojis & Stickers Contextuais**:
+  - Mapeamento dinâmico de termos de impacto (dinheiro, fogo, segredo, foco, etc.) com inserção de emojis visuais nas falas.
+- **🔍 Zoom Punch Dinâmico**:
+  - Aplicação de pulsos suaves de aproximação (1.07x) a cada ~8s para quebra de padrão visual.
+
+---
+
+## 🎵 Trilha Sonora de Fundo & Audio Ducking Inteligente
+
+- **Biblioteca de Trilhas Categorizadas (`assets/audio/`)**:
+  - `🧘 Lo-Fi Chill / Relax`, `⚡ Dinâmica / Ritmo`, `🔥 Tensão / Suspense`, `✨ Inspiracional / Motivacional` + Suporte a MP3s customizados.
+- **Audio Ducking via FFmpeg**:
+  - O volume da música é atenuado de forma fluida quando a voz está ativa (sidechain compression) e sobe sutilmente nos silêncios.
+  - Presets de intensidade: `Suave (-12dB)`, `Médio / Padrão (-18dB)`, `Intenso (-24dB)`.
+
+---
+
+## 🌐 Exportação Direta & Integrações
+
+- **🔴 Upload Direto para o YouTube Shorts (YouTube Data API v3)**:
+  - Autenticação OAuth2 integrada.
+  - Envio com 1 clique direto na Seção 3 e na Galeria, com seleção de privacidade (`Rascunho / Não Listado / Público`).
+- **📡 Webhooks HTTP (n8n / Make / Zapier / Automações)**:
+  - Disparo de payload estruturado contendo caminho do MP4, metadados do kit viral, hashtags, tags SEO e minutagens.
 
 ---
 
@@ -96,7 +126,7 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 Para cada corte gerado, a aplicação cria automaticamente uma pasta estruturada:
 - **Nome da Pasta**: `[PREFIXO]_[Palavras_Completas]` (onde `[PREFIXO]` são as 5 letras do formato e o nome contém as primeiras palavras completas do título com limite estrito de 25 caracteres).
 - **Conteúdo da Pasta**:
-  - 🎬 `[PREFIXO]_[Palavras_Completas].mp4` (Vídeo renderizado com legendas e enquadramento)
+  - 🎬 `[PREFIXO]_[Palavras_Completas].mp4` (Vídeo renderizado com legendas, headline, áudio e enquadramento)
   - 📌 `info_publicacao.txt` (Contém: Título Viral, Legenda para Redes, Hashtags, Tags SEO, Nome do Vídeo gerado e Seção com Metadados do Vídeo Original: Título, Canal, Data e Link)
   - 📝 `descricao.txt` (Legenda pronta para copiar e colar)
   - 🏷️ `tags.txt` (Hashtags e Tags SEO separadas)
@@ -118,21 +148,4 @@ Para cada corte gerado, a aplicação cria automaticamente uma pasta estruturada
 - **Smart Skip**: Pula automaticamente cortes que já foram gerados naquele formato, processando apenas novidades (com opção de forçar re-renderização se desejado).
 - **Galeria de Cortes Produzidos (Seção 4)**:
   - Players de vídeo 9:16 compactos e elegantes dispostos lado a lado.
-  - Botão de download direto e botão individual de exclusão `🗑️` com confirmação (*Apenas Vídeo* vs *Pasta Completa*).
-
----
-
-## 🗺️ Roadmap de Evolução (Fase 3 & Futuro)
-
-### 🚀 Objetivos da Fase 3:
-1. **🏷️ Headline / Título Fixo de Retenção no Topo (9:16)**:
-   - Inserção de caixa de chamada magnética superior (estilo headline de retenção para TikTok/Reels) com fundo contrastante customizável e posicionamento inteligente que não colide com os rostos.
-2. **🎵 Trilha Sonora de Fundo & Audio Ducking Inteligente**:
-   - Biblioteca de trilhas de fundo categorizadas (Tensão, Lo-Fi, Dinâmica).
-   - Efeito de **Audio Ducking via FFmpeg**: volume da música reduz suavemente durante as falas e ganha presença nos silêncios.
-3. **🖼️ B-Roll / Overlays Visuais & Efeitos de Retenção (Zoom Punch)**:
-   - Efeito de *Zoom Punch* sutil em palavras de alta ênfase para quebra de padrão visual e retenção de feed.
-   - Inserção de emojis e ilustrações contextuais sobre as falas.
-4. **🌐 Exportação Direta & Integrações**:
-   - Upload automático de rascunhos para o YouTube Shorts via YouTube Data API v3.
-   - Envio de pacotes prontos para Google Drive ou Webhooks (Make / n8n).
+  - Botão de download direto, botões de publicação direta no YouTube Shorts e Webhook, e botão de exclusão individual `🗑️` com confirmação (*Apenas Vídeo* vs *Pasta Completa*).

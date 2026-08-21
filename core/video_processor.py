@@ -106,9 +106,23 @@ def cut_video(
     subtitle_highlight_color: str = "#FFFF00",
     subtitle_base_color: str = "#FFFFFF",
     subtitle_font_size: int = 55,
+    # --- Parâmetros da Fase 3: Retenção & Áudio ---
+    headline_enabled: bool = False,
+    headline_text: str = "",
+    headline_preset: str = "yellow_black",
+    headline_text_color: str = "#000000",
+    headline_bg_color: str = "#FFE600",
+    headline_font_size: int = 46,
+    headline_margin_top: int = 120,
+    emojis_enabled: bool = False,
+    zoom_punch_enabled: bool = False,
+    bg_music_enabled: bool = False,
+    bg_music_track_path: str = None,
+    bg_music_volume: float = 0.15,
+    ducking_preset: str = "medio",
 ) -> dict:
     """
-    Corta e formata o vídeo com alta precisão e velocidade via FFmpeg.
+    Corta e formata o vídeo com alta precisão e esteira completa de pós-produção via FFmpeg.
     
     Parâmetros:
     - aspect_ratio_mode:
@@ -138,9 +152,11 @@ def cut_video(
                 margin_ratio=face_margin_ratio,
                 person_preference=person_preference
             )
-            return _apply_subtitles_if_needed(
-                result, output_path, subtitle_enabled, subtitle_transcript_path,
-                start_time_str, end_time_str, subtitle_highlight_color, subtitle_base_color, subtitle_font_size
+            return _apply_all_post_processing(
+                result, output_path, start_time_str, end_time_str,
+                subtitle_enabled, subtitle_transcript_path, subtitle_highlight_color, subtitle_base_color, subtitle_font_size,
+                headline_enabled, headline_text, headline_preset, headline_text_color, headline_bg_color, headline_font_size, headline_margin_top,
+                emojis_enabled, zoom_punch_enabled, bg_music_enabled, bg_music_track_path, bg_music_volume, ducking_preset
             )
 
         elif aspect_ratio_mode == "9:16_split":
@@ -158,9 +174,11 @@ def cut_video(
                 divider_width=split_divider_width,
                 auto_switch_enabled=split_auto_switch
             )
-            return _apply_subtitles_if_needed(
-                result, output_path, subtitle_enabled, subtitle_transcript_path,
-                start_time_str, end_time_str, subtitle_highlight_color, subtitle_base_color, subtitle_font_size
+            return _apply_all_post_processing(
+                result, output_path, start_time_str, end_time_str,
+                subtitle_enabled, subtitle_transcript_path, subtitle_highlight_color, subtitle_base_color, subtitle_font_size,
+                headline_enabled, headline_text, headline_preset, headline_text_color, headline_bg_color, headline_font_size, headline_margin_top,
+                emojis_enabled, zoom_punch_enabled, bg_music_enabled, bg_music_track_path, bg_music_volume, ducking_preset
             )
 
         elif aspect_ratio_mode == "9:16_blur":
@@ -237,10 +255,11 @@ def cut_video(
         result = subprocess.run(cmd, capture_output=True, text=True)
 
         if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            return _apply_subtitles_if_needed(
-                {"path": output_path, "error": None}, output_path,
-                subtitle_enabled, subtitle_transcript_path,
-                start_time_str, end_time_str, subtitle_highlight_color, subtitle_base_color, subtitle_font_size
+            return _apply_all_post_processing(
+                {"path": output_path, "error": None}, output_path, start_time_str, end_time_str,
+                subtitle_enabled, subtitle_transcript_path, subtitle_highlight_color, subtitle_base_color, subtitle_font_size,
+                headline_enabled, headline_text, headline_preset, headline_text_color, headline_bg_color, headline_font_size, headline_margin_top,
+                emojis_enabled, zoom_punch_enabled, bg_music_enabled, bg_music_track_path, bg_music_volume, ducking_preset
             )
 
         # Fallback MoviePy se FFmpeg direto retornar erro
@@ -260,57 +279,130 @@ def cut_video(
                 logger=None
             )
 
-        return _apply_subtitles_if_needed(
-            {"path": output_path, "error": None}, output_path,
-            subtitle_enabled, subtitle_transcript_path,
-            start_time_str, end_time_str, subtitle_highlight_color, subtitle_base_color, subtitle_font_size
+        return _apply_all_post_processing(
+            {"path": output_path, "error": None}, output_path, start_time_str, end_time_str,
+            subtitle_enabled, subtitle_transcript_path, subtitle_highlight_color, subtitle_base_color, subtitle_font_size,
+            headline_enabled, headline_text, headline_preset, headline_text_color, headline_bg_color, headline_font_size, headline_margin_top,
+            emojis_enabled, zoom_punch_enabled, bg_music_enabled, bg_music_track_path, bg_music_volume, ducking_preset
         )
     except Exception as e:
         return {"path": None, "error": str(e)}
 
 
-def _apply_subtitles_if_needed(
+def _apply_all_post_processing(
     result: dict,
     output_path: str,
-    subtitle_enabled: bool,
-    subtitle_transcript_path: str,
     start_time_str: str,
     end_time_str: str,
+    subtitle_enabled: bool,
+    subtitle_transcript_path: str,
     subtitle_highlight_color: str,
     subtitle_base_color: str,
     subtitle_font_size: int,
+    headline_enabled: bool,
+    headline_text: str,
+    headline_preset: str,
+    headline_text_color: str,
+    headline_bg_color: str,
+    headline_font_size: int,
+    headline_margin_top: int,
+    emojis_enabled: bool,
+    zoom_punch_enabled: bool,
+    bg_music_enabled: bool,
+    bg_music_track_path: str,
+    bg_music_volume: float,
+    ducking_preset: str,
 ) -> dict:
     """
-    Helper interno: aplica legendas dinâmicas como pass-2 se habilitado.
-    Recebe o resultado do pipeline de vídeo e, se bem-sucedido e legendas ativadas,
-    chama burn_subtitles() sobre o arquivo gerado.
+    Esteira unificada de pós-processamento:
+    1. Aplica Zoom Punch dinâmico (se ativado e corte vertical).
+    2. Aplica Legendas Dinâmicas e/ou Headline fixa no topo via ASS.
+    3. Aplica Trilha Sonora de fundo com Audio Ducking inteligente via FFmpeg.
     """
-    if not subtitle_enabled:
-        return result
     if result.get("error") or not result.get("path"):
         return result
-    if not subtitle_transcript_path or not os.path.exists(subtitle_transcript_path):
-        result["subtitle_warning"] = "transcript.json não encontrado — legendas ignoradas."
-        return result
 
-    import importlib
-    import core.subtitle_burner
-    importlib.reload(core.subtitle_burner)
-    from core.subtitle_burner import burn_subtitles
-    sub_result = burn_subtitles(
-        input_video_path=result["path"],
-        output_video_path=output_path,
-        transcript_path=subtitle_transcript_path,
-        start_time_str=start_time_str,
-        end_time_str=end_time_str,
-        highlight_color=subtitle_highlight_color,
-        base_color=subtitle_base_color,
-        font_size=subtitle_font_size,
-    )
-    if sub_result.get("error"):
-        result["subtitle_error"] = sub_result["error"]
-    elif sub_result.get("warning"):
-        result["subtitle_warning"] = sub_result["warning"]
-    else:
-        result["path"] = sub_result["path"]
+    curr_path = result["path"]
+    start_s = parse_time_to_seconds(start_time_str)
+    end_s = parse_time_to_seconds(end_time_str)
+    duration_s = max(1.0, float(end_s - start_s))
+
+    # --- 1. Zoom Punch de Retenção Visual ---
+    if zoom_punch_enabled and duration_s >= 7.0:
+        try:
+            from core.retention_effects import generate_zoom_punch_filter
+            punch_filter = generate_zoom_punch_filter(duration=duration_s, interval=8.5, zoom_factor=1.07)
+            if punch_filter:
+                tmp_punch = output_path.replace(".mp4", "_punch_tmp.mp4")
+                if tmp_punch == output_path:
+                    tmp_punch = output_path + ".p_tmp.mp4"
+                
+                cmd = [
+                    FFMPEG_EXE, "-y",
+                    "-i", curr_path,
+                    "-vf", punch_filter,
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-crf", "20",
+                    "-c:a", "copy",
+                    tmp_punch
+                ]
+                p_res = subprocess.run(cmd, capture_output=True, text=True)
+                if p_res.returncode == 0 and os.path.exists(tmp_punch) and os.path.getsize(tmp_punch) > 0:
+                    if os.path.exists(output_path):
+                        os.remove(output_path)
+                    os.rename(tmp_punch, output_path)
+                    curr_path = output_path
+                else:
+                    if os.path.exists(tmp_punch):
+                        os.remove(tmp_punch)
+        except Exception:
+            pass
+
+    # --- 2. Legendas Dinâmicas & Headline de Topo ---
+    if subtitle_enabled or (headline_enabled and headline_text):
+        from core.subtitle_burner import burn_subtitles
+        sub_result = burn_subtitles(
+            input_video_path=curr_path,
+            output_video_path=output_path,
+            transcript_path=subtitle_transcript_path,
+            start_time_str=start_time_str,
+            end_time_str=end_time_str,
+            highlight_color=subtitle_highlight_color,
+            base_color=subtitle_base_color,
+            font_size=subtitle_font_size,
+            headline_enabled=headline_enabled,
+            headline_text=headline_text,
+            headline_preset=headline_preset,
+            headline_text_color=headline_text_color,
+            headline_bg_color=headline_bg_color,
+            headline_font_size=headline_font_size,
+            headline_margin_top=headline_margin_top,
+            emojis_enabled=emojis_enabled,
+        )
+        if sub_result.get("error"):
+            result["subtitle_error"] = sub_result["error"]
+        elif sub_result.get("warning"):
+            result["subtitle_warning"] = sub_result["warning"]
+        else:
+            curr_path = sub_result["path"]
+            result["path"] = curr_path
+
+    # --- 3. Trilha Sonora de Fundo & Audio Ducking Inteligente ---
+    if bg_music_enabled and bg_music_track_path and os.path.exists(bg_music_track_path):
+        from core.audio_mixer import apply_audio_ducking
+        duck_result = apply_audio_ducking(
+            input_video_path=curr_path,
+            output_video_path=output_path,
+            music_track_path=bg_music_track_path,
+            music_volume=bg_music_volume,
+            ducking_preset=ducking_preset,
+        )
+        if duck_result.get("warning"):
+            result["audio_warning"] = duck_result["warning"]
+        elif duck_result.get("path"):
+            curr_path = duck_result["path"]
+            result["path"] = curr_path
+
     return result
+

@@ -290,12 +290,23 @@ def generate_ass_file(
     outline_color: str = "#000000",
     outline_width: int = None,
     shadow_depth: int = None,
+    # --- Parâmetros de Headline Superior (Fase 3) ---
+    headline_enabled: bool = False,
+    headline_text: str = "",
+    headline_preset: str = "yellow_black",
+    headline_text_color: str = "#000000",
+    headline_bg_color: str = "#FFE600",
+    headline_font_size: int = 46,
+    headline_margin_top: int = 120,
+    total_duration: float = 0.0,
 ) -> bool:
     """
-    Gera arquivo de legendas .ass completo com estilos e eventos karaokê palavra-a-palavra.
-    Garante transições perfeitas sem nunca sobrepor duas falas ou linhas simultâneas.
+    Gera arquivo de legendas .ass completo com estilos e eventos karaokê palavra-a-palavra
+    e suporte opcional a Headline de Retenção fixa no Topo (estilo TikTok/Reels/Shorts).
     """
     _ensure_font()
+
+    from core.headline_drawer import build_ass_headline_style, format_headline_text
 
     ass_base_color = _hex_to_ass_color(base_color, alpha=0.0)
     ass_highlight_color = _hex_to_ass_color(highlight_color, alpha=0.0)
@@ -313,6 +324,28 @@ def generate_ass_file(
         shadow_depth = max(2, int(font_size * 0.035))
 
     # Monta cabeçalho do script ASS
+    styles_section = [
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
+        "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+        "Alignment, MarginL, MarginR, MarginV, Encoding",
+        f"Style: Default,Montserrat ExtraBold,{font_size},{ass_base_color},&H000000FF&,{ass_outline_color},{ass_shadow_color},"
+        f"-1,0,0,0,100,100,0,0,1,{outline_width},{shadow_depth},2,{margin_lr},{margin_lr},{margin_v},1"
+    ]
+
+    # Adiciona estilo de Headline se habilitado
+    if headline_enabled and headline_text:
+        h_style = build_ass_headline_style(
+            preset_key=headline_preset,
+            custom_text_color=headline_text_color,
+            custom_bg_color=headline_bg_color,
+            font_size=headline_font_size,
+            video_width=video_width,
+            video_height=video_height,
+            margin_top=headline_margin_top,
+        )
+        styles_section.append(h_style)
+
     content = [
         "[Script Info]",
         "ScriptType: v4.00+",
@@ -320,19 +353,23 @@ def generate_ass_file(
         f"PlayResY: {video_height}",
         "ScaledBorderAndShadow: yes",
         "",
-        "[V4+ Styles]",
-        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
-        "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
-        "Alignment, MarginL, MarginR, MarginV, Encoding",
-        f"Style: Default,Montserrat ExtraBold,{font_size},{ass_base_color},&H000000FF&,{ass_outline_color},{ass_shadow_color},"
-        f"-1,0,0,0,100,100,0,0,1,{outline_width},{shadow_depth},2,{margin_lr},{margin_lr},{margin_v},1",
+        *styles_section,
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
 
+    # Evento de Headline fixo no topo cobrindo toda a extensão do corte
+    if headline_enabled and headline_text:
+        formatted_h = format_headline_text(headline_text)
+        if formatted_h:
+            h_end_time = max(total_duration, 3600.0)
+            h_start_str = "0:00:00.00"
+            h_end_str = _format_ass_time(h_end_time)
+            content.append(f"Dialogue: 1,{h_start_str},{h_end_str},Headline,,0,0,0,,{formatted_h}")
+
     for line_idx, line in enumerate(lines):
-        words = line["words"]
+        words = line.get("words", [])
         n_words = len(words)
 
         # Se houver uma próxima linha, a linha atual não deve invadir o tempo de início da próxima
@@ -383,35 +420,57 @@ def generate_ass_file(
 def burn_subtitles(
     input_video_path: str,
     output_video_path: str,
-    transcript_path: str,
-    start_time_str: str,
-    end_time_str: str,
+    transcript_path: str = None,
+    start_time_str: str = "00:00",
+    end_time_str: str = "01:00",
     highlight_color: str = "#FFFF00",
     base_color: str = "#FFFFFF",
     font_size: int = 55,
     max_words_per_line: int = 4,
+    # --- Parâmetros de Headline & Efeitos (Fase 3) ---
+    headline_enabled: bool = False,
+    headline_text: str = "",
+    headline_preset: str = "yellow_black",
+    headline_text_color: str = "#000000",
+    headline_bg_color: str = "#FFE600",
+    headline_font_size: int = 46,
+    headline_margin_top: int = 120,
+    emojis_enabled: bool = False,
 ) -> dict:
     """
-    Aplica legendas dinâmicas palavra-a-palavra queimadas via pass-2 FFmpeg com motor libass.
+    Aplica legendas dinâmicas palavra-a-palavra e/ou headline de retenção superior
+    queimadas via pass-2 FFmpeg com motor libass.
     Retorna dicionário com {'path': str, 'error': str|None, 'warning': str|None}.
     """
     if not os.path.exists(input_video_path):
         return {"path": None, "error": f"Arquivo de vídeo de entrada não encontrado: {input_video_path}"}
 
-    if not os.path.exists(transcript_path):
-        return {"path": input_video_path, "error": None, "warning": "Transcrição não encontrada. Legendas não aplicadas."}
+    from core.retention_effects import attach_contextual_emojis_to_words
+
+    cut_start = _time_str_to_seconds(start_time_str)
+    cut_end = _time_str_to_seconds(end_time_str)
+    cut_duration = max(1.0, cut_end - cut_start)
+
+    lines = []
+    if transcript_path and os.path.exists(transcript_path):
+        try:
+            # 1. Extrai palavras dentro do intervalo do corte (limpas e sequenciais)
+            words = extract_words_in_range(transcript_path, start_time_str, end_time_str)
+            
+            # Aplica emojis contextuais se habilitado
+            if emojis_enabled and words:
+                words = attach_contextual_emojis_to_words(words)
+                
+            if words:
+                lines = group_words_into_lines(words, max_words_per_line=max_words_per_line)
+        except Exception:
+            lines = []
+
+    # Se não temos legendas e nem headline habilitada, não há nada a queimar
+    if not lines and not (headline_enabled and headline_text):
+        return {"path": input_video_path, "error": None, "warning": "Nenhuma legenda ou headline para queimar."}
 
     try:
-        # 1. Extrai palavras dentro do intervalo do corte (limpas e sequenciais)
-        words = extract_words_in_range(transcript_path, start_time_str, end_time_str)
-        if not words:
-            return {"path": input_video_path, "error": None, "warning": "Nenhuma palavra encontrada no intervalo selecionado."}
-
-        # 2. Agrupa em linhas curtas (3-4 palavras)
-        lines = group_words_into_lines(words, max_words_per_line=max_words_per_line)
-        if not lines:
-            return {"path": input_video_path, "error": None, "warning": "Não foi possível agrupar as palavras em linhas."}
-
         # 3. Detecta resolução real do vídeo
         video_width = 1080
         video_height = 1920
@@ -444,6 +503,14 @@ def burn_subtitles(
             font_size=font_size,
             highlight_color=highlight_color,
             base_color=base_color,
+            headline_enabled=headline_enabled,
+            headline_text=headline_text,
+            headline_preset=headline_preset,
+            headline_text_color=headline_text_color,
+            headline_bg_color=headline_bg_color,
+            headline_font_size=headline_font_size,
+            headline_margin_top=headline_margin_top,
+            total_duration=cut_duration,
         )
 
         if not success or not os.path.exists(ass_path):
@@ -451,7 +518,6 @@ def burn_subtitles(
 
         try:
             # 5. Prepara caminhos para o filtro FFmpeg
-            # Para máxima compatibilidade no Windows, usamos caminhos relativos normalizados com barras
             rel_ass = os.path.relpath(ass_path, start=".").replace("\\", "/")
             rel_fonts = os.path.relpath(_FONTS_DIR, start=".").replace("\\", "/")
 
@@ -483,9 +549,9 @@ def burn_subtitles(
                 return {"path": None, "error": f"FFmpeg libass subtitle pass-2 falhou:\n{err_detail}"}
 
         finally:
-            # Limpa arquivo .ass temporário
             if os.path.exists(ass_path):
                 os.remove(ass_path)
+
 
     except Exception as e:
         return {"path": None, "error": str(e)}

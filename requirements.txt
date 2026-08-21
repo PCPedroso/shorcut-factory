@@ -7,4 +7,8 @@ ollama
 youtube-transcript-api
 opencv-python
 mediapipe
+requests
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
 

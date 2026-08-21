@@ -15,6 +15,10 @@ import core.config_manager
 import core.export_kit
 import core.cuts_catalog
 import core.batch_processor
+import core.headline_drawer
+import core.audio_mixer
+import core.retention_effects
+import core.integrations
 
 importlib.reload(core.extractor)
 importlib.reload(core.transcriber)
@@ -26,16 +30,23 @@ importlib.reload(core.config_manager)
 importlib.reload(core.export_kit)
 importlib.reload(core.cuts_catalog)
 importlib.reload(core.batch_processor)
+importlib.reload(core.headline_drawer)
+importlib.reload(core.audio_mixer)
+importlib.reload(core.retention_effects)
+importlib.reload(core.integrations)
 
 from core.extractor import download_audio, get_video_metadata
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
 from core.analyzer import analyze_transcript
 from core.video_processor import download_full_video, cut_video, get_video_resolution
 from core.library_manager import get_library, add_or_update_video_in_library, remove_video_from_library
-from core.config_manager import load_settings, save_all_settings
+from core.config_manager import load_settings, save_all_settings, save_setting
 from core.export_kit import build_cut_folder_name, create_viral_package
-from core.cuts_catalog import get_cut_entry, get_format_instance, register_cut_instance, update_cut_texts_only, delete_entire_cut, load_cuts_catalog
+from core.cuts_catalog import get_cut_entry, get_format_instance, register_cut_instance, update_cut_texts_only, delete_entire_cut, delete_format_instance, load_cuts_catalog
 from core.batch_processor import process_batch_cuts
+from core.headline_drawer import HEADLINE_PRESETS
+from core.audio_mixer import list_available_tracks, DUCKING_PRESETS
+from core.integrations import get_youtube_auth_status, authenticate_youtube_oauth, upload_to_youtube_shorts, send_to_webhook
 
 # Carrega todas as configurações persistentes salvas
 _cfg = load_settings()
@@ -185,6 +196,61 @@ ollama_model = st.sidebar.selectbox(
     index=_om_idx,
     help="Para usar mistral ou qwen2.5 rode: ollama pull mistral"
 )
+
+# 🌐 Integrações & Exportação Direta (Fase 3)
+st.sidebar.markdown("---")
+with st.sidebar.expander("🌐 Integrações & Webhooks (Fase 3)", expanded=False):
+    st.markdown("##### 🔴 YouTube Shorts API")
+    yt_secrets_path = st.text_input(
+        "Caminho do client_secrets.json:",
+        value=_cfg.get("youtube_client_secrets_path", "data/client_secrets.json"),
+        help="Arquivo de credenciais baixado do Google Cloud Console para envio direto ao YouTube Shorts."
+    )
+    auth_status = get_youtube_auth_status(yt_secrets_path)
+    if auth_status.get("authenticated"):
+        st.success(f"✅ {auth_status['message']}")
+    else:
+        st.info(f"ℹ️ {auth_status['message']}")
+        if os.path.exists(yt_secrets_path):
+            if st.button("🔑 Conectar Conta Google / YouTube", key="btn_auth_yt_side", use_container_width=True):
+                with st.spinner("Abrindo autenticação Google no navegador..."):
+                    auth_res = authenticate_youtube_oauth(yt_secrets_path)
+                    if auth_res.get("success"):
+                        st.success("🎉 Conectado com sucesso ao YouTube!")
+                        st.rerun()
+                    else:
+                        st.error(f"Erro na autenticação: {auth_res.get('error')}")
+
+    st.markdown("##### 📡 Webhook (n8n / Make / Zapier)")
+    sb_webhook_url = st.text_input(
+        "URL do Webhook:",
+        value=_cfg.get("webhook_url", ""),
+        placeholder="https://sua-instancia-n8n.com/webhook/cortes",
+        help="Endpoint HTTP para disparo de automação quando um corte for concluído."
+    )
+    sb_webhook_auth = st.text_input(
+        "Header de Autorização (Opcional):",
+        value=_cfg.get("webhook_auth_header", ""),
+        placeholder="Bearer seu_token_aqui",
+        type="password"
+    )
+    if sb_webhook_url:
+        if st.button("🧪 Testar Webhook", key="btn_test_webhook", use_container_width=True):
+            with st.spinner("Enviando payload de teste..."):
+                test_res = send_to_webhook(
+                    sb_webhook_url,
+                    {"event": "test_ping", "message": "Conexão com ViralCut testada com sucesso!"},
+                    auth_header=sb_webhook_auth
+                )
+                if test_res.get("success"):
+                    st.success(f"✅ Conexão OK! HTTP {test_res.get('status_code')}")
+                else:
+                    st.error(f"❌ Falha: {test_res.get('error')}")
+
+    save_setting("youtube_client_secrets_path", yt_secrets_path)
+    save_setting("webhook_url", sb_webhook_url)
+    save_setting("webhook_auth_header", sb_webhook_auth)
+
 
 # Estado da sessão
 if 'transcription_done' not in st.session_state:
@@ -1171,9 +1237,114 @@ if st.session_state.transcription_done:
                         key="sub_font_size",
                         help="Tamanho da fonte das legendas (recomendado entre 75 e 110 para cortes 9:16 estilo Alex Hormozi)."
                     )
-                st.caption("📌 Legendas no terço inferior da tela • Fonte Montserrat Bold (ou Arial como fallback) • Contorno preto para legibilidade em qualquer fundo")
+                st.caption("📌 Legendas no terço inferior da tela • Fonte Montserrat Bold • Contorno preto para legibilidade em qualquer fundo")
 
-    # Salva continuamente as configurações ativas
+    # ─────────────────────────────────────────────────────────────────
+    # 🏷️ Headline / Título Fixo de Retenção no Topo (Fase 3)
+    # ─────────────────────────────────────────────────────────────────
+    headline_enabled = _cfg.get("headline_enabled", False)
+    headline_preset = _cfg.get("headline_preset", "yellow_black")
+    headline_text_color = _cfg.get("headline_text_color", "#000000")
+    headline_bg_color = _cfg.get("headline_bg_color", "#FFE600")
+    headline_font_size = _cfg.get("headline_font_size", 46)
+    headline_margin_top = _cfg.get("headline_margin_top", 120)
+
+    with st.expander("🏷️ Headline / Título Fixo de Retenção no Topo (9:16 - Fase 3)", expanded=headline_enabled):
+        headline_enabled = st.toggle(
+            "📌 Fixar Título Chamativo no Topo do Vídeo",
+            value=headline_enabled,
+            help="Adiciona uma caixa de headline magnética na parte superior do corte 9:16 (estilo vídeos virais de TikTok/Reels) que segura a atenção nos primeiros segundos."
+        )
+        if headline_enabled:
+            col_hp1, col_hp2, col_hp3 = st.columns([2, 1.2, 1.2])
+            with col_hp1:
+                preset_keys = list(HEADLINE_PRESETS.keys()) + ["custom"]
+                preset_labels = [HEADLINE_PRESETS[k]["name"] for k in HEADLINE_PRESETS] + ["🎨 Cores Personalizadas"]
+                cur_preset_idx = preset_keys.index(headline_preset) if headline_preset in preset_keys else 0
+                sel_preset_label = st.selectbox("Estilo Visual da Headline:", preset_labels, index=cur_preset_idx)
+                headline_preset = preset_keys[preset_labels.index(sel_preset_label)]
+
+            with col_hp2:
+                headline_font_size = st.slider("Tamanho da Fonte:", 28, 70, headline_font_size, 2, key="hl_font_sz")
+
+            with col_hp3:
+                headline_margin_top = st.slider("Margem do Topo:", 60, 240, headline_margin_top, 10, key="hl_margin_tp", help="Distância da borda superior para não cobrir elementos da interface do TikTok/Shorts.")
+
+            if headline_preset == "custom":
+                col_c1, col_c2 = st.columns(2)
+                with col_c1:
+                    headline_text_color = st.color_picker("Cor do Texto:", headline_text_color, key="hl_txt_col")
+                with col_c2:
+                    headline_bg_color = st.color_picker("Cor da Caixa de Fundo:", headline_bg_color, key="hl_bg_col")
+
+            st.caption("💡 O texto da Headline puxará automaticamente o Título Viral gerado pela IA ou digitado no Kit de Publicação abaixo.")
+
+    # ─────────────────────────────────────────────────────────────────
+    # 🖼️ Efeitos Visuais & Retenção de Feed (Fase 3)
+    # ─────────────────────────────────────────────────────────────────
+    zoom_punch_enabled = _cfg.get("zoom_punch_enabled", False)
+    emojis_enabled = _cfg.get("emojis_enabled", False)
+
+    with st.expander("🖼️ Efeitos de Retenção Visual (Zoom Punch & Emojis - Fase 3)", expanded=(zoom_punch_enabled or emojis_enabled)):
+        col_ef1, col_ef2 = st.columns(2)
+        with col_ef1:
+            zoom_punch_enabled = st.toggle(
+                "🔍 Zoom Punch Dinâmico",
+                value=zoom_punch_enabled,
+                help="Aplica pulsos suaves de aproximação (1.07x) a cada ~8 segundos para quebrar a monotonia visual e elevar a retenção de feed."
+            )
+        with col_ef2:
+            emojis_enabled = st.toggle(
+                "😃 Emojis Contextuais nas Legendas",
+                value=emojis_enabled,
+                help="Insere automaticamente stickers e emojis (💰, 🔥, 🚀, 🧠, ⚠️) ao lado de palavras de alta carga emocional."
+            )
+
+    # ─────────────────────────────────────────────────────────────────
+    # 🎵 Trilha Sonora de Fundo & Audio Ducking Inteligente (Fase 3)
+    # ─────────────────────────────────────────────────────────────────
+    bg_music_enabled = _cfg.get("bg_music_enabled", False)
+    bg_music_track_id = _cfg.get("bg_music_track_id", "lofi_chill")
+    bg_music_volume = float(_cfg.get("bg_music_volume", 0.15))
+    ducking_preset = _cfg.get("ducking_preset", "medio")
+
+    available_tracks = list_available_tracks()
+    track_ids = [t["id"] for t in available_tracks]
+    track_labels = [f"{t['title']} — {t['description']}" for t in available_tracks]
+    cur_track_idx = track_ids.index(bg_music_track_id) if bg_music_track_id in track_ids else 0
+
+    with st.expander("🎵 Trilha Sonora & Audio Ducking Inteligente (Fase 3)", expanded=bg_music_enabled):
+        bg_music_enabled = st.toggle(
+            "🎶 Adicionar Música de Fundo com Audio Ducking",
+            value=bg_music_enabled,
+            help="A música toca no fundo e reduz suavemente de volume sempre que alguém estiver falando (via sidechaincompress FFmpeg)."
+        )
+        bg_music_track_path = None
+        if bg_music_enabled and available_tracks:
+            col_m1, col_m2 = st.columns([2, 1.2])
+            with col_m1:
+                sel_track_label = st.selectbox("Escolha a Trilha Sonora:", track_labels, index=cur_track_idx)
+                selected_track_obj = available_tracks[track_labels.index(sel_track_label)]
+                bg_music_track_id = selected_track_obj["id"]
+                bg_music_track_path = selected_track_obj["path"]
+
+                # Player de áudio para prévia da música
+                if os.path.exists(bg_music_track_path):
+                    with open(bg_music_track_path, "rb") as af_prev:
+                        st.audio(af_prev.read(), format="audio/wav")
+
+            with col_m2:
+                bg_music_volume = st.slider("Volume da Música:", 0.05, 0.40, bg_music_volume, 0.02, format="%.2f", help="Volume base da música quando não houver fala.")
+                duck_keys = list(DUCKING_PRESETS.keys())
+                duck_labels = [DUCKING_PRESETS[k]["name"] for k in duck_keys]
+                cur_duck_idx = duck_keys.index(ducking_preset) if ducking_preset in duck_keys else 1
+                sel_duck_label = st.selectbox("Atenuação na Fala (Ducking):", duck_labels, index=cur_duck_idx)
+                ducking_preset = duck_keys[duck_labels.index(sel_duck_label)]
+
+        elif not available_tracks:
+            st.info("Nenhuma trilha encontrada em assets/audio.")
+
+    # Salva continuamente todas as configurações ativas
     save_all_settings({
         "device_option": device_option,
         "model_size": model_size,
@@ -1194,6 +1365,18 @@ if st.session_state.transcription_done:
         "subtitle_highlight_color": subtitle_highlight_color,
         "subtitle_base_color": subtitle_base_color,
         "subtitle_font_size": subtitle_font_size,
+        "headline_enabled": headline_enabled,
+        "headline_preset": headline_preset,
+        "headline_text_color": headline_text_color,
+        "headline_bg_color": headline_bg_color,
+        "headline_font_size": headline_font_size,
+        "headline_margin_top": headline_margin_top,
+        "zoom_punch_enabled": zoom_punch_enabled,
+        "emojis_enabled": emojis_enabled,
+        "bg_music_enabled": bg_music_enabled,
+        "bg_music_track_id": bg_music_track_id,
+        "bg_music_volume": bg_music_volume,
+        "ducking_preset": ducking_preset,
     })
 
     # ─────────────────────────────────────────────────────────────────
@@ -1413,9 +1596,12 @@ if st.session_state.transcription_done:
                         extra_info = f" (Split Screen + Auto-Switch)" if split_auto_switch else " (Split Screen Fixo)"
                     if subtitle_enabled:
                         extra_info += " + 📝 Legendas"
+                    if headline_enabled:
+                        extra_info += " + 🏷️ Headline"
+                    if bg_music_enabled:
+                        extra_info += " + 🎵 Música/Ducking"
 
                     with st.spinner(f"Renderizando corte [{start_time} → {end_time}] no formato {aspect_option}{extra_info}..."):
-                        # Caminho do transcript para as legendas dinâmicas
                         _transcript_path_cut = os.path.join(data_dir, "transcript.json")
                         cut_res = cut_video(
                             video_res["path"],
@@ -1441,19 +1627,37 @@ if st.session_state.transcription_done:
                             subtitle_highlight_color=subtitle_highlight_color,
                             subtitle_base_color=subtitle_base_color,
                             subtitle_font_size=subtitle_font_size,
+                            # Fase 3: Retenção & Áudio
+                            headline_enabled=headline_enabled,
+                            headline_text=cut_title_val,
+                            headline_preset=headline_preset,
+                            headline_text_color=headline_text_color,
+                            headline_bg_color=headline_bg_color,
+                            headline_font_size=headline_font_size,
+                            headline_margin_top=headline_margin_top,
+                            emojis_enabled=emojis_enabled,
+                            zoom_punch_enabled=zoom_punch_enabled,
+                            bg_music_enabled=bg_music_enabled,
+                            bg_music_track_path=bg_music_track_path,
+                            bg_music_volume=bg_music_volume,
+                            ducking_preset=ducking_preset,
                         )
                         if cut_res.get("error"):
                             st.error(f"Erro ao cortar: {cut_res['error']}")
                         else:
                             out_res = get_video_resolution(corte_output_path)
                             _sub_badge = " 📝 Legendas" if subtitle_enabled and not cut_res.get("subtitle_error") and not cut_res.get("subtitle_warning") else ""
-                            st.success(f"🎉 Corte gerado com sucesso! Resolução: **{out_res}** | Formato: **{aspect_option}**{_sub_badge}")
+                            _hl_badge = " 🏷️ Headline" if headline_enabled else ""
+                            _mus_badge = " 🎵 Ducking" if bg_music_enabled else ""
+                            st.success(f"🎉 Corte gerado com sucesso! Resolução: **{out_res}** | Formato: **{aspect_option}**{_sub_badge}{_hl_badge}{_mus_badge}")
                             
-                            # Avisos de legendas (não-fatais — o vídeo ainda foi gerado)
+                            # Avisos de legendas / áudio
                             if cut_res.get("subtitle_error"):
                                 st.warning(f"⚠️ Legendas não aplicadas: {cut_res['subtitle_error']}")
                             elif cut_res.get("subtitle_warning"):
                                 st.info(f"ℹ️ {cut_res['subtitle_warning']}")
+                            if cut_res.get("audio_warning"):
+                                st.info(f"ℹ️ {cut_res['audio_warning']}")
                             
                             if "9:16" in selected_aspect:
                                 col_v1, col_v2, col_v3 = st.columns([1.6, 1.2, 1.6])
@@ -1510,15 +1714,68 @@ if st.session_state.transcription_done:
                                 resolution=out_res
                             )
 
-                            with open(package_res["video_dest_path"], "rb") as vf:
-                                st.download_button(
-                                    label=f"💾 Baixar Vídeo ({package_res['video_filename']})",
-                                    data=vf,
-                                    file_name=package_res["video_filename"],
-                                    mime="video/mp4",
-                                    type="primary",
-                                    use_container_width=True
-                                )
+                            # Botões de Ação do Corte Renderizado
+                            col_b1, col_b2, col_b3 = st.columns([1.5, 1.2, 1.2])
+                            with col_b1:
+                                with open(package_res["video_dest_path"], "rb") as vf:
+                                    st.download_button(
+                                        label=f"💾 Baixar Vídeo ({package_res['video_filename']})",
+                                        data=vf,
+                                        file_name=package_res["video_filename"],
+                                        mime="video/mp4",
+                                        type="primary",
+                                        use_container_width=True
+                                    )
+                            with col_b2:
+                                with st.popover("🔴 Publicar no Shorts", use_container_width=True):
+                                    st.markdown("##### 🚀 Enviar para o YouTube Shorts")
+                                    yt_priv = st.selectbox(
+                                        "Privacidade:",
+                                        ["unlisted", "private", "public"],
+                                        format_func=lambda x: {"unlisted": "🔗 Não Listado (Recomendado)", "private": "🔒 Privado / Rascunho", "public": "🌍 Público"}[x],
+                                        key="yt_priv_single"
+                                    )
+                                    if st.button("Confirmar Upload", key="btn_conf_yt_single", type="primary", use_container_width=True):
+                                        with st.spinner("Enviando vídeo para o canal do YouTube..."):
+                                            yt_res = upload_to_youtube_shorts(
+                                                video_path=package_res["video_dest_path"],
+                                                title=cut_title_val,
+                                                description=cut_desc_val,
+                                                tags=cut_hashtags_val.split(),
+                                                privacy_status=yt_priv,
+                                                client_secrets_path=_cfg.get("youtube_client_secrets_path")
+                                            )
+                                            if yt_res.get("success"):
+                                                st.success(f"🎉 Publicado com sucesso! [Ver no Shorts]({yt_res.get('url')})")
+                                            else:
+                                                st.error(f"Erro no upload: {yt_res.get('error')}")
+                            with col_b3:
+                                if st.button("📡 Disparar Webhook", key="btn_send_wh_single", use_container_width=True, help="Envia o pacote com vídeo e metadados para seu webhook configurado (n8n, Make, Zapier)"):
+                                    wh_url = _cfg.get("webhook_url", "")
+                                    if not wh_url:
+                                        st.warning("Configure a URL do Webhook na barra lateral primeiro.")
+                                    else:
+                                        with st.spinner("Despachando para o Webhook..."):
+                                            wh_payload = {
+                                                "event": "cut_ready",
+                                                "video_id": video_id,
+                                                "title": cut_title_val,
+                                                "description": cut_desc_val,
+                                                "hashtags": cut_hashtags_val.split(),
+                                                "tags_seo": cut_tags_seo_val,
+                                                "start_time": start_time,
+                                                "end_time": end_time,
+                                                "aspect_mode": selected_aspect,
+                                                "video_path": package_res["video_dest_path"],
+                                                "video_filename": package_res["video_filename"],
+                                                "folder_path": package_res["package_dir"],
+                                                "original_video": orig_info
+                                            }
+                                            wh_res = send_to_webhook(wh_url, wh_payload, auth_header=_cfg.get("webhook_auth_header", ""))
+                                            if wh_res.get("success"):
+                                                st.success(f"✅ Webhook acionado! HTTP {wh_res.get('status_code')}")
+                                            else:
+                                                st.error(f"Falha no webhook: {wh_res.get('error')}")
 
                             with st.expander(f"📁 Pasta de Publicação Criada em: data/{video_id}/{package_res['folder_name']}/", expanded=True):
                                 st.markdown(f"**🎬 Arquivo de Vídeo:** `{package_res['video_filename']}`")
@@ -1581,7 +1838,7 @@ if st.session_state.transcription_done:
                                 if v_file and os.path.exists(v_file):
                                     st.video(v_file)
                                     
-                                    col_b_dl, col_b_del = st.columns([3, 1.2])
+                                    col_b_dl, col_b_yt, col_b_wh, col_b_del = st.columns([2, 1.2, 1.2, 0.8])
                                     with col_b_dl:
                                         with open(v_file, "rb") as vf_gal:
                                             st.download_button(
@@ -1592,6 +1849,55 @@ if st.session_state.transcription_done:
                                                 key=f"dl_gal_{c_idx}_{f_idx}",
                                                 use_container_width=True
                                             )
+                                    with col_b_yt:
+                                        with st.popover("🔴 Shorts", use_container_width=True, help="Publicar no YouTube Shorts"):
+                                            st.markdown(f"##### 🚀 Upload: {cut_item.get('title', 'Corte')[:30]}...")
+                                            g_yt_priv = st.selectbox(
+                                                "Privacidade:",
+                                                ["unlisted", "private", "public"],
+                                                format_func=lambda x: {"unlisted": "🔗 Não Listado", "private": "🔒 Privado", "public": "🌍 Público"}[x],
+                                                key=f"yt_priv_gal_{c_idx}_{f_idx}"
+                                            )
+                                            if st.button("Enviar", key=f"btn_send_yt_gal_{c_idx}_{f_idx}", type="primary", use_container_width=True):
+                                                with st.spinner("Enviando vídeo para o YouTube..."):
+                                                    yt_res = upload_to_youtube_shorts(
+                                                        video_path=v_file,
+                                                        title=cut_item.get('title', 'Corte'),
+                                                        description=cut_item.get('description', ''),
+                                                        tags=cut_item.get('hashtags', []),
+                                                        privacy_status=g_yt_priv,
+                                                        client_secrets_path=_cfg.get("youtube_client_secrets_path")
+                                                    )
+                                                    if yt_res.get("success"):
+                                                        st.success(f"🎉 Publicado! [Ver Shorts]({yt_res.get('url')})")
+                                                    else:
+                                                        st.error(f"Erro: {yt_res.get('error')}")
+                                    with col_b_wh:
+                                        if st.button("📡 Webhook", key=f"btn_wh_gal_{c_idx}_{f_idx}", use_container_width=True, help="Disparar para Webhook (n8n/Make)"):
+                                            wh_url = _cfg.get("webhook_url", "")
+                                            if not wh_url:
+                                                st.warning("Configure o Webhook na barra lateral.")
+                                            else:
+                                                with st.spinner("Enviando..."):
+                                                    wh_payload = {
+                                                        "event": "cut_ready",
+                                                        "video_id": _vid_id_gal,
+                                                        "title": cut_item.get('title', 'Corte'),
+                                                        "description": cut_item.get('description', ''),
+                                                        "hashtags": cut_item.get('hashtags', []),
+                                                        "tags_seo": cut_item.get('tags_seo', ''),
+                                                        "start_time": cut_item.get('start_time'),
+                                                        "end_time": cut_item.get('end_time'),
+                                                        "aspect_mode": fmt_key,
+                                                        "video_path": v_file,
+                                                        "video_filename": fmt_data.get("video_filename"),
+                                                        "folder_path": fmt_data.get("folder_path")
+                                                    }
+                                                    wh_res = send_to_webhook(wh_url, wh_payload, auth_header=_cfg.get("webhook_auth_header", ""))
+                                                    if wh_res.get("success"):
+                                                        st.success(f"✅ OK! HTTP {wh_res.get('status_code')}")
+                                                    else:
+                                                        st.error(f"Falha: {wh_res.get('error')}")
                                     with col_b_del:
                                         with st.popover("🗑️", use_container_width=True, help=f"Excluir este vídeo ({fmt_key})"):
                                             st.markdown(f"⚠️ **Excluir {fmt_badge}?**")

@@ -1,0 +1,20 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Montserrat ExtraBold,75,&H00FFFFFF&,&H000000FF&,&H00000000&,&H80000000&,-1,0,0,0,100,100,0,0,1,6,2,2,54,54,422,1
+Style: Headline,Montserrat ExtraBold,46,&H00000000&,&H000000FF&,&H0000E6FF&,&H0C00E6FF&,-1,0,0,0,100,100,1,0,3,8,2,8,64,64,120,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 1,0:00:00.00,1:00:00.00,Headline,,0,0,0,,SEGREDO MILIONÁRIO
+Dialogue: 0,0:00:00.00,0:00:00.50,Default,,0,0,0,,{\c&H0000FFFF&}esse{\c&H00FFFFFF&} dinheiro 💰 é fogo 🔥 e segredo 🤫
+Dialogue: 0,0:00:00.50,0:00:01.00,Default,,0,0,0,,esse {\c&H0000FFFF&}dinheiro 💰{\c&H00FFFFFF&} é fogo 🔥 e segredo 🤫
+Dialogue: 0,0:00:01.00,0:00:01.20,Default,,0,0,0,,esse dinheiro 💰 {\c&H0000FFFF&}é{\c&H00FFFFFF&} fogo 🔥 e segredo 🤫
+Dialogue: 0,0:00:01.20,0:00:01.70,Default,,0,0,0,,esse dinheiro 💰 é {\c&H0000FFFF&}fogo 🔥{\c&H00FFFFFF&} e segredo 🤫
+Dialogue: 0,0:00:01.70,0:00:01.90,Default,,0,0,0,,esse dinheiro 💰 é fogo 🔥 {\c&H0000FFFF&}e{\c&H00FFFFFF&} segredo 🤫
+Dialogue: 0,0:00:01.90,0:00:02.50,Default,,0,0,0,,esse dinheiro 💰 é fogo 🔥 e {\c&H0000FFFF&}segredo 🤫{\c&H00FFFFFF&}
