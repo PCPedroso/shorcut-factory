@@ -729,6 +729,13 @@ if st.session_state.transcription_done:
                 st.error(fb.get("msg", ""))
 
         if 'shorts' in st.session_state and st.session_state.shorts:
+            # Reseta seleção de checkboxes de forma segura antes da instanciação dos widgets
+            if st.session_state.get("_reset_batch_selection"):
+                st.session_state["_reset_batch_selection"] = False
+                for s_i in range(len(st.session_state.shorts)):
+                    st.session_state[f"chk_short_{s_i}"] = False
+                st.session_state["batch_short_selected"] = {}
+
             if "batch_short_selected" not in st.session_state:
                 st.session_state["batch_short_selected"] = {}
 
@@ -741,9 +748,7 @@ if st.session_state.transcription_done:
                     st.rerun()
             with col_bk2:
                 if st.button("⬜ Limpar Seleção", key="btn_clear_shorts_batch", use_container_width=True):
-                    for s_i in range(len(st.session_state.shorts)):
-                        st.session_state[f"chk_short_{s_i}"] = False
-                    st.session_state["batch_short_selected"] = {}
+                    st.session_state["_reset_batch_selection"] = True
                     st.rerun()
 
             st.markdown(f"### 🎬 Pequenos Cortes Gerados ({len(st.session_state.shorts)}):")
@@ -860,11 +865,8 @@ if st.session_state.transcription_done:
 
                             prog_bar.progress(100)
 
-                            # Limpa os checkboxes no session_state
-                            if 'shorts' in st.session_state:
-                                for s_i in range(len(st.session_state.shorts)):
-                                    st.session_state[f"chk_short_{s_i}"] = False
-                            st.session_state["batch_short_selected"] = {}
+                            # Agenda o reset limpo dos checkboxes para a próxima renderização
+                            st.session_state["_reset_batch_selection"] = True
 
                             success_count = sum(1 for r in batch_res if r.get("success"))
                             error_items = [r for r in batch_res if r.get("error")]
