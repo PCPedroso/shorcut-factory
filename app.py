@@ -1549,31 +1549,9 @@ if st.session_state.transcription_done:
             st.caption(f"📁 Total de **{len(catalog_gal)}** minutagens e instâncias registradas no catálogo.")
             for c_idx, (t_key, cut_item) in enumerate(catalog_gal.items()):
                 with st.container():
-                    col_g_head, col_g_del = st.columns([3.8, 1.2])
-                    with col_g_head:
-                        st.subheader(f"📌 {cut_item.get('title', 'Corte sem título')}")
-                        st.caption(f"⏱️ Trecho: `[{cut_item.get('start_time')} → {cut_item.get('end_time')}]` • Atualizado em: `{cut_item.get('updated_at', 'N/D')}`")
-                    with col_g_del:
-                        with st.popover("🗑️ Excluir", use_container_width=True):
-                            st.markdown("⚠️ **Confirmar Exclusão**")
-                            del_opt = st.radio(
-                                "Escolha o que deseja excluir:",
-                                [
-                                    "🎬 Apenas Vídeos (.mp4)\n*(Mantém o Kit de Publicação .txt)*",
-                                    "💥 Excluir Tudo\n*(Vídeos + Pastas + Kit de Publicação)*"
-                                ],
-                                key=f"rad_del_choice_{c_idx}"
-                            )
-                            st.markdown("")
-                            col_cdel1, col_cdel2 = st.columns(2)
-                            with col_cdel1:
-                                if st.button("✅ Confirmar", key=f"btn_confirm_del_{c_idx}", type="primary", use_container_width=True):
-                                    is_full_delete = "Excluir Tudo" in del_opt
-                                    delete_entire_cut(_vid_id_gal, cut_item.get('start_time'), cut_item.get('end_time'), delete_publication_kit=is_full_delete)
-                                    st.success("Exclusão concluída.")
-                                    st.rerun()
-                            with col_cdel2:
-                                st.button("❌ Fechar", key=f"btn_close_pop_{c_idx}", use_container_width=True)
+                    # Cabeçalho do corte
+                    st.subheader(f"📌 {cut_item.get('title', 'Corte sem título')}")
+                    st.caption(f"⏱️ Trecho: `[{cut_item.get('start_time')} → {cut_item.get('end_time')}]` • Atualizado em: `{cut_item.get('updated_at', 'N/D')}`")
 
                     # Instâncias de formatos renderizadas para esta minutagem
                     formats_dict = cut_item.get("formats", {})
@@ -1602,18 +1580,40 @@ if st.session_state.transcription_done:
                                 v_file = fmt_data.get("video_path")
                                 if v_file and os.path.exists(v_file):
                                     st.video(v_file)
-                                    with open(v_file, "rb") as vf_gal:
-                                        st.download_button(
-                                            label=f"💾 Baixar ({fmt_data.get('resolution', 'HD')})",
-                                            data=vf_gal,
-                                            file_name=fmt_data.get("video_filename", f"{fmt_key}.mp4"),
-                                            mime="video/mp4",
-                                            key=f"dl_gal_{c_idx}_{f_idx}",
-                                            use_container_width=True
-                                        )
+                                    
+                                    col_b_dl, col_b_del = st.columns([3, 1.2])
+                                    with col_b_dl:
+                                        with open(v_file, "rb") as vf_gal:
+                                            st.download_button(
+                                                label=f"💾 Baixar ({fmt_data.get('resolution', 'HD')})",
+                                                data=vf_gal,
+                                                file_name=fmt_data.get("video_filename", f"{fmt_key}.mp4"),
+                                                mime="video/mp4",
+                                                key=f"dl_gal_{c_idx}_{f_idx}",
+                                                use_container_width=True
+                                            )
+                                    with col_b_del:
+                                        with st.popover("🗑️", use_container_width=True, help=f"Excluir este vídeo ({fmt_key})"):
+                                            st.markdown(f"⚠️ **Excluir {fmt_badge}?**")
+                                            del_fmt_choice = st.radio(
+                                                "Opção de exclusão:",
+                                                [
+                                                    "🎬 Apenas este Vídeo (.mp4)\n*(Preserva textos e kit)*",
+                                                    "💥 Pasta e Kit deste formato"
+                                                ],
+                                                key=f"rad_del_fmt_{c_idx}_{f_idx}"
+                                            )
+                                            if st.button("Confirmar", key=f"btn_cnf_fmt_del_{c_idx}_{f_idx}", type="primary", use_container_width=True):
+                                                is_full = "Pasta e Kit" in del_fmt_choice
+                                                delete_format_instance(_vid_id_gal, cut_item.get('start_time'), cut_item.get('end_time'), fmt_key, delete_publication_kit=is_full)
+                                                st.success("Excluído com sucesso.")
+                                                st.rerun()
                                     st.caption(f"📁 `{fmt_data.get('folder_name')}`")
                                 else:
-                                    st.warning("Arquivo de vídeo não encontrado no disco.")
+                                    st.warning("Vídeo excluído / não encontrado.")
+                                    if st.button("🗑️ Remover do Catálogo", key=f"btn_clean_fmt_{c_idx}_{f_idx}"):
+                                        delete_format_instance(_vid_id_gal, cut_item.get('start_time'), cut_item.get('end_time'), fmt_key, delete_publication_kit=True)
+                                        st.rerun()
 
                     with st.expander("📝 Visualizar Textos e Tags de Publicação"):
                         st.markdown(f"**Legenda:**\n```\n{cut_item.get('description', '')}\n```")
