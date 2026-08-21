@@ -126,6 +126,11 @@ def process_batch_cuts(
         if progress_callback:
             progress_callback(idx, total, f"[{idx+1}/{total}] Renderizando '{cut_title[:30]}...' em {aspect_ratio_mode}...")
 
+        resolved_music_path = params.get("bg_music_track_path")
+        if not resolved_music_path and params.get("bg_music_track_id"):
+            from core.audio_mixer import get_track_path_by_id
+            resolved_music_path = get_track_path_by_id(params.get("bg_music_track_id"))
+
         cut_res = core.video_processor.cut_video(
             video_full_path,
             start_t,
@@ -161,7 +166,7 @@ def process_batch_cuts(
             emojis_enabled=params.get("emojis_enabled", False),
             zoom_punch_enabled=params.get("zoom_punch_enabled", False),
             bg_music_enabled=params.get("bg_music_enabled", False),
-            bg_music_track_path=params.get("bg_music_track_path"),
+            bg_music_track_path=resolved_music_path,
             bg_music_volume=params.get("bg_music_volume", 0.15),
             ducking_preset=params.get("ducking_preset", "medio"),
         )

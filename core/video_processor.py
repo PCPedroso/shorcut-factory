@@ -63,13 +63,26 @@ def download_full_video(url: str, output_path: str = "temp_video.mp4") -> dict:
 
 
 def get_video_resolution(video_path: str) -> str:
-    """Retorna a resolução do vídeo (ex: '1920x1080') usando MoviePy."""
+    """Retorna a resolução do vídeo (ex: '1080x1920') instantaneamente."""
+    if not video_path or not os.path.exists(video_path):
+        return "1080x1920"
+    try:
+        import cv2
+        cap = cv2.VideoCapture(video_path)
+        if cap.isOpened():
+            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
+            if w > 0 and h > 0:
+                return f"{w}x{h}"
+    except Exception:
+        pass
     try:
         with VideoFileClip(video_path) as clip:
             w, h = clip.size
             return f"{w}x{h}"
     except Exception:
-        return "Desconhecida"
+        return "1080x1920"
 
 
 def parse_time_to_seconds(time_str: str) -> int:

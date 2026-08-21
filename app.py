@@ -719,6 +719,15 @@ if st.session_state.transcription_done:
                             json.dump(st.session_state.shorts, f, ensure_ascii=False, indent=4)
                     st.rerun()
 
+        if "batch_feedback" in st.session_state:
+            fb = st.session_state.pop("batch_feedback")
+            if fb.get("type") == "success":
+                st.success(fb.get("msg", ""))
+            elif fb.get("type") == "warning":
+                st.warning(fb.get("msg", ""))
+            else:
+                st.error(fb.get("msg", ""))
+
         if 'shorts' in st.session_state and st.session_state.shorts:
             if "batch_short_selected" not in st.session_state:
                 st.session_state["batch_short_selected"] = {}
@@ -784,8 +793,26 @@ if st.session_state.transcription_done:
                         batch_aspect_mode = b_aspect_map[batch_aspect_choice]
 
                     with col_bp2:
-                        batch_sub_enabled = st.toggle("✨ Ativar Legendas Dinâmicas em Todos", value=_cfg.get("subtitle_enabled", True), key="batch_sub_toggle")
+                        batch_sub_enabled = st.toggle("✨ Ativar Legendas Dinâmicas", value=_cfg.get("subtitle_enabled", True), key="batch_sub_toggle")
                         st.caption(f"Fontes e cores: {_cfg.get('subtitle_font_size', 80)}px • Destaque {_cfg.get('subtitle_highlight_color', '#FFFF00')}")
+
+                    with st.expander("⚙️ Personalizações da Fase 3 para o Lote (Headlines, Retenção & Trilha Sonora)", expanded=False):
+                        col_bopt1, col_bopt2 = st.columns(2)
+                        with col_bopt1:
+                            b_hl_on = st.toggle("🏷️ Headline de Retenção no Topo", value=_cfg.get("headline_enabled", False), key="b_hl_toggle")
+                            b_em_on = st.toggle("😃 Emojis Contextuais", value=_cfg.get("emojis_enabled", False), key="b_em_toggle")
+                            b_zp_on = st.toggle("🔍 Zoom Punch Dinâmico", value=_cfg.get("zoom_punch_enabled", False), key="b_zp_toggle")
+                        with col_bopt2:
+                            b_bgm_on = st.toggle("🎵 Trilha Sonora & Ducking", value=_cfg.get("bg_music_enabled", False), key="b_bgm_toggle")
+                            if b_bgm_on:
+                                b_bgm_trk = st.selectbox(
+                                    "Trilha:",
+                                    ["lofi_chill", "dynamic_pulse", "tension_suspense", "inspirational_epic"],
+                                    format_func=lambda x: {"lofi_chill": "🧘 Lo-Fi Chill", "dynamic_pulse": "⚡ Dinâmica", "tension_suspense": "🔥 Tensão", "inspirational_epic": "✨ Inspiracional"}.get(x, x),
+                                    key="b_bgm_trk_sel"
+                                )
+                            else:
+                                b_bgm_trk = _cfg.get("bg_music_track_id", "lofi_chill")
 
                     batch_force_rerender = st.checkbox(
                         "🔄 Forçar Re-renderização de Cortes Já Gerados",
@@ -807,6 +834,15 @@ if st.session_state.transcription_done:
                                 prog_bar.progress(min(pct, 100))
                                 status_box.info(f"**Progresso ({cur}/{tot}):** {msg}")
 
+                            batch_params_merged = dict(_cfg)
+                            batch_params_merged.update({
+                                "headline_enabled": b_hl_on,
+                                "emojis_enabled": b_em_on,
+                                "zoom_punch_enabled": b_zp_on,
+                                "bg_music_enabled": b_bgm_on,
+                                "bg_music_track_id": b_bgm_trk,
+                            })
+
                             batch_res = process_batch_cuts(
                                 video_id=_vid_id_batch,
                                 active_url=_active_u_batch,
@@ -817,14 +853,33 @@ if st.session_state.transcription_done:
                                 subtitle_base_color=_cfg.get("subtitle_base_color", "#FFFFFF"),
                                 subtitle_font_size=_cfg.get("subtitle_font_size", 80),
                                 ollama_model=ollama_model,
-                                aspect_params=_cfg,
+                                aspect_params=batch_params_merged,
                                 force_rerender=batch_force_rerender,
                                 progress_callback=_batch_cb
                             )
 
                             prog_bar.progress(100)
-                            status_box.success(f"🎉 **Processamento em lote concluído!** Verifique a Galeria abaixo.")
+
+                            # Limpa os checkboxes no session_state
+                            if 'shorts' in st.session_state:
+                                for s_i in range(len(st.session_state.shorts)):
+                                    st.session_state[f"chk_short_{s_i}"] = False
                             st.session_state["batch_short_selected"] = {}
+
+                            success_count = sum(1 for r in batch_res if r.get("success"))
+                            error_items = [r for r in batch_res if r.get("error")]
+
+                            if error_items:
+                                err_details = "\n".join([f"- **{e.get('title', 'Corte')}**: {e.get('error')}" for e in error_items])
+                                st.session_state["batch_feedback"] = {
+                                    "type": "warning" if success_count > 0 else "error",
+                                    "msg": f"Processamento concluído com {success_count} sucesso(s) e {len(error_items)} erro(s):\n{err_details}"
+                                }
+                            else:
+                                st.session_state["batch_feedback"] = {
+                                    "type": "success",
+                                    "msg": f"🎉 **Renderização em lote concluída com sucesso!** {success_count} cortes gerados e disponíveis na Galeria (Seção 4)."
+                                }
                             st.rerun()
 
     # ── TAB 4: SELEÇÃO MANUAL ────────────────────────────────────────────────

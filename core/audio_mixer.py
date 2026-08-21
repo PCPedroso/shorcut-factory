@@ -199,6 +199,21 @@ def list_available_tracks() -> list:
     return tracks
 
 
+def get_track_path_by_id(track_id: str) -> str:
+    """Retorna o caminho absoluto do arquivo de áudio dado o seu identificador."""
+    if not track_id:
+        return ""
+    all_tracks = list_available_tracks()
+    for t in all_tracks:
+        if t["id"] == track_id or t.get("filename") == track_id:
+            return t["path"]
+    # Fallback para caminho direto se existir
+    if os.path.exists(track_id):
+        return track_id
+    default_f = os.path.join(ASSETS_AUDIO_DIR, "lofi_chill.wav")
+    return default_f if os.path.exists(default_f) else ""
+
+
 def apply_audio_ducking(
     input_video_path: str,
     output_video_path: str,

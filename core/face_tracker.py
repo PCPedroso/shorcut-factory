@@ -380,8 +380,11 @@ def crop_video_with_smart_face_tracking(
         ]
         ffmpeg_proc = subprocess.Popen(cmd_ffmpeg_in, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
-        # Posiciona no início
-        cap.set(cv2.CAP_PROP_POS_MSEC, start_sec * 1000.0)
+        # Posiciona no frame inicial
+        start_frame = int(start_sec * fps)
+        end_frame = int(end_sec * fps)
+        total_cut_frames = max(1, end_frame - start_frame)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
         current_w = float(base_crop_w)
         current_x = (width - base_crop_w) / 2.0
@@ -393,13 +396,9 @@ def crop_video_with_smart_face_tracking(
         last_tracked_center = None
         frame_idx = 0
 
-        while cap.isOpened():
-            pos_sec = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
-            if pos_sec > end_sec + 0.05:
-                break
-
+        while frame_idx < total_cut_frames:
             ret, frame = cap.read()
-            if not ret:
+            if not ret or frame is None:
                 break
 
             # Executa detecção a cada N frames para economizar CPU
@@ -482,11 +481,13 @@ def crop_video_with_smart_face_tracking(
             ]
         subprocess.run(cmd_merge, capture_output=True)
 
-        # Limpa arquivos temporários
-        if os.path.exists(temp_video_no_audio):
-            os.remove(temp_video_no_audio)
-        if os.path.exists(temp_audio_cut):
-            os.remove(temp_audio_cut)
+        # Limpa arquivos temporários de forma segura
+        for tmp_f in [temp_video_no_audio, temp_audio_cut]:
+            if tmp_f and os.path.exists(tmp_f):
+                try:
+                    os.remove(tmp_f)
+                except Exception:
+                    pass
 
         if os.path.exists(output_video_path) and os.path.getsize(output_video_path) > 0:
             return {"path": output_video_path, "error": None}
@@ -788,10 +789,13 @@ def crop_video_with_dynamic_auto_switch(
             ]
         subprocess.run(cmd_merge, capture_output=True)
 
-        if os.path.exists(temp_video_raw):
-            os.remove(temp_video_raw)
-        if os.path.exists(temp_audio_cut):
-            os.remove(temp_audio_cut)
+        # Limpa arquivos temporários de forma segura
+        for tmp_f in [temp_video_raw, temp_audio_cut]:
+            if tmp_f and os.path.exists(tmp_f):
+                try:
+                    os.remove(tmp_f)
+                except Exception:
+                    pass
 
         if os.path.exists(output_video_path) and os.path.getsize(output_video_path) > 0:
             return {"path": output_video_path, "error": None}
