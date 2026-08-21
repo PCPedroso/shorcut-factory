@@ -1,6 +1,6 @@
 # 📋 Prompt de Contexto — Início da Fase 3: ViralCut / Fábrica de Cortes
 
-Copie o conteúdo abaixo e utilize na abertura do novo chat:
+Copie todo o conteúdo abaixo para abrir o novo chat da Fase 3:
 
 ---
 
@@ -15,9 +15,11 @@ Copie o conteúdo abaixo e utilize na abertura do novo chat:
 
 ### ✅ Fases Anteriores Concluídas e Sincronizadas no GitHub
 
+O projeto possui duas fases 100% concluídas, testadas e commitadas:
+
 #### 🔹 Fase 1 — Estrutura Base, Análise e Enquadramentos 9:16
-- **Interface Streamlit** modular e moderna (`app.py`).
-- **Biblioteca de Vídeos & Download** via `yt-dlp` em até 1080p Full HD com persistência de metadados.
+- **Interface Streamlit** modular (`app.py`).
+- **Biblioteca de Vídeos & Download** via `yt-dlp` em até 1080p Full HD com persistência de metadados e canal.
 - **Transcrição** acelerada por GPU CUDA via `faster-whisper` e fallback automático para ASR do YouTube.
 - **Inteligência Temática Dual** com Ollama (Llama 3 local):
   - Modo `🎙️ Entrevistas & Sabatinas`: Detecção de turnos Q&A com timestamp exato `[INÍCIO → FIM]`.
@@ -39,28 +41,40 @@ Copie o conteúdo abaixo e utilize na abertura do novo chat:
   - Geração automática de Título Magnético, 2 Variações Alternativas, Legenda com CTA e Hashtags/SEO contextuais.
 - **Exportação Padronizada com Nomenclatura Estrita** (`core/export_kit.py`):
   - Prefixos de 5 letras (`VLDSS`, `VRIRA`, `VFDBS`, `VCCFT`, `HOFHD`) + limite de 25 caracteres em palavras completas do título.
-  - Criação da pasta `data/<video_id>/<PREFIXO>_<Palavras>/` contendo:
-    - 🎬 `[PREFIXO]_[Palavras].mp4`
-    - 📌 `info_publicacao.txt` (incluindo dados do vídeo original: título, canal, lançamento e link)
-    - 📝 `descricao.txt`
-    - 🏷️ `tags.txt`
+  - Criação da pasta `data/<video_id>/<PREFIXO>_<Palavras>/` com `.mp4`, `info_publicacao.txt`, `descricao.txt` e `tags.txt`.
 - **Catálogo & Cache Inteligente por Minutagem e Formato** (`core/cuts_catalog.py`):
-  - Rastreamento em `data/<video_id>/cuts_catalog.json` de múltiplas instâncias de enquadramento para a mesma minutagem.
-  - Detecção imediata de cortes existentes com reprodução instantânea (0s de espera) e botão de atualização de textos do kit sem re-renderizar vídeo.
+  - Rastreamento em `data/<video_id>/cuts_catalog.json` de múltiplas instâncias de enquadramento para a mesma minutagem com abertura em 0s.
 - **Esteira de Renderização em Lote (Batch Pipeline)** (`core/batch_processor.py`):
-  - Seleção por checkboxes individuais e botão *"Selecionar Todos para Lote"* na aba de Pequenos Cortes.
-  - Painel de controle da fila em lote com barra de progresso visual em tempo real e Smart Skip (ignora cortes já existentes a menos que forçado).
+  - Seleção por checkboxes unificados e botão *"Selecionar Todos para Lote"*, com barra de progresso visual e Smart Skip de cortes já gerados.
 - **Galeria de Cortes Produzidos (Seção 4)**:
-  - Visualização de todas as minutagens com players verticais 9:16 compactos e elegantes lado a lado.
+  - Visualização de todas as minutagens com players verticais 9:16 compactos e elegantes.
   - Botão de download direto do MP4 e botão de exclusão individual com confirmação granular (*Apenas Vídeo* vs *Pasta Completa*).
 - **Persistência de Configurações** (`data/app_settings.json` via `core/config_manager.py`).
 
 ---
 
-### 🎯 Diretrizes & Regras do Projeto
-1. **Regra de Git**: `git commit` normalmente durante o desenvolvimento, mas **`git push` SOMENTE quando o usuário solicitar explicitamente.**
-2. **Ambiente**: Python em Windows com venv em `d:\Repository\shorcut-factory\venv`. Executar comandos com caminhos absolutos para o python/pip do venv.
+### 🚀 Fase 3 — A IMPLEMENTAR agora
+
+Objetivo: Elevar o nível de **retenção visual, dinamismo sonoro e automação de publicação** dos cortes gerados:
+
+1. **🏷️ Headline / Título Fixo de Retenção no Topo (9:16)**:
+   - Inserção de caixa de chamada magnética superior (estilo headline viral de retenção) com fundo contrastante customizável (amarelo, vermelho, preto, gradiente), fonte bold e posicionamento que não colide com rostos ou legendas.
+2. **🎵 Trilha Sonora de Fundo & Audio Ducking Inteligente**:
+   - Biblioteca de trilhas sonoras de fundo livres de direitos (Lo-Fi, Tensão, Inspiracional, Dinâmica).
+   - Efeito de **Audio Ducking via FFmpeg**: a música diminui suavemente de volume enquanto a pessoa fala e sobe sutilmente nas pausas/silêncios.
+3. **🖼️ B-Roll / Overlays Visuais & Efeitos de Retenção (Zoom Punch / Emojis)**:
+   - Efeito de *Zoom Punch / Jump Cut suave* em palavras de alta ênfase para quebrar monotonia visual no feed do TikTok/Reels/Shorts.
+   - Inserção automática de emojis ou stickers contextuais sobre as falas.
+4. **🌐 Exportação Direta & Integrações**:
+   - Upload de rascunhos direto para o YouTube Shorts via YouTube Data API v3 ou exportação em lote para Google Drive / Webhooks.
 
 ---
 
-**Pode analisar o repositório e aguardar as instruções para os objetivos da Fase 3!**
+### 🎯 Diretrizes & Regras do Projeto
+1. **Documento Mestre Vivo**: `Fábrica de Cortes.md` é a base viva do projeto e deve ser mantida atualizada com novas decisões.
+2. **Regra de Git**: `git commit` normalmente durante o desenvolvimento, mas **`git push` SOMENTE quando o usuário solicitar explicitamente.**
+3. **Ambiente**: Python em Windows com venv em `d:\Repository\shorcut-factory\venv`. Executar comandos com caminhos absolutos para o python/pip do venv.
+
+---
+
+**Pode analisar o repositório e iniciar o planejamento e implementação dos recursos da Fase 3!**

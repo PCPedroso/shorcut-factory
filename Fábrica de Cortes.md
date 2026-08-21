@@ -1,104 +1,138 @@
 # ViralCut — Fábrica de Cortes
 
-## Objetivo
+## 🎯 Objetivo
 
-Automatizar a criação de cortes virais (curtos e médios) a partir de vídeos do YouTube, com foco em retenção real, integridade temática e esteira de múltiplos vídeos interligados.
-
----
-
-## Stack Tecnológica
-
-| Componente | Tecnologia |
-|---|---|
-| Linguagem | Python 3.10+ |
-| Interface | Streamlit (Web UI Local) |
-| Extração | `yt-dlp` (metadados, heatmap, download em até 1080p) |
-| Transcrição | `faster-whisper` (GPU GTX 1650 via CUDA float32) |
-| Inteligência Temática | `Ollama` (Llama 3 local, mistral, qwen2.5) |
-| Processamento de Vídeo | `FFmpeg` + `MoviePy` (corte direto por stream copy) |
+Automatizar a esteira completa de criação, inteligência editorial, recorte e empacotamento de cortes virais (Shorts, Reels, TikTok e vídeos médios de YouTube) a partir de links do YouTube, com foco em retenção máxima, coerência semântica e padrão profissional de edição humana.
 
 ---
 
-## Arquitetura de Módulos
+## 🛠️ Stack Tecnológica
+
+| Componente | Tecnologia | Finalidade |
+|---|---|---|
+| **Linguagem** | Python 3.10+ | Núcleo de processamento e automação |
+| **Interface** | Streamlit | Web UI interativa local e intuitiva |
+| **Extração & Catálogo** | `yt-dlp` | Download de áudio, metadados oficiais e vídeo em 1080p |
+| **Transcrição** | `faster-whisper` + ASR YouTube | Transcrição palavra por palavra acelerada por GPU CUDA |
+| **Visão Computacional** | `MediaPipe` + `OpenCV` | Face tracking, Target Lock e transição dinâmica Split/Full Screen |
+| **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
+| **Processamento de Vídeo** | `FFmpeg` (com `libass`) | Recorte, filtros complexos de vídeo e queima de legendas nativas |
+| **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
+
+---
+
+## 🏗️ Arquitetura de Módulos & Estrutura de Diretórios
 
 ```
 shorcut-factory/
-├── app.py                  # Interface Streamlit principal com cards interativos
+├── app.py                     # Interface Web Streamlit (4 seções principais)
 ├── core/
-│   ├── extractor.py        # yt-dlp: metadados + download de áudio
-│   ├── transcriber.py      # faster-whisper: transcrição com GPU CUDA
-│   ├── analyzer.py         # Ollama: análise semântica + encadeamento de ganchos (>=10 min)
-│   └── video_processor.py  # FFmpeg/MoviePy: download HD (1080p/720p) e corte de vídeo
+│   ├── extractor.py           # Extração de áudio, canais e metadados via yt-dlp
+│   ├── transcriber.py         # Transcrição faster-whisper (CUDA) + fallback ASR YouTube
+│   ├── analyzer.py            # Análise Q&A/Temática e geração do Kit Viral com IA
+│   ├── video_processor.py     # Pipeline FFmpeg para os 5 formatos de enquadramento
+│   ├── face_tracker.py        # Detecção facial MediaPipe e Split Screen Auto-Switch
+│   ├── subtitle_burner.py     # Geração de legendas dinâmicas em ASS (karaokê palavra-a-palavra)
+│   ├── export_kit.py          # Nomenclatura estrita (VLDSS, VRIRA...) e pastas de publicação
+│   ├── cuts_catalog.py        # Catálogo e cache inteligente multi-instância (cuts_catalog.json)
+│   ├── batch_processor.py     # Processamento sequencial em lote com Smart Skip
+│   ├── library_manager.py     # Catálogo global de vídeos processados (library.json)
+│   └── config_manager.py      # Persistência contínua de preferências (app_settings.json)
 ├── data/
+│   ├── library.json           # Biblioteca geral de vídeos
+│   ├── app_settings.json      # Configurações do usuário persistidas
 │   └── <video_id>/
-│       ├── audio.mp3       # Cache do áudio extraído
-│       ├── transcript.json # Cache da transcrição Whisper com timestamps
-│       └── video_full.mp4  # Cache do vídeo completo em alta qualidade
+│       ├── audio.mp3          # Cache do áudio extraído
+│       ├── transcript.json    # Transcrição com timestamps por palavra
+│       ├── video_full.mp4     # Vídeo original Full HD 1080p
+│       ├── cuts_catalog.json  # Catálogo de cortes e formatos gerados para este vídeo
+│       └── <PREFIXO>_<NOME>/  # Pasta final do corte (Vídeo + Kit de Publicação)
 └── requirements.txt
 ```
 
 ---
 
-## Estratégia de Inteligência Temática & Encadeamento
-
-### 1. Blocos Semânticos para YouTube (Mínimo de 10 minutos)
-* **Identificação Semântica**: A IA analisa as transições reais de assunto e perguntas na transcrição com timestamps ancorados nos chunks do Whisper.
-* **Regra de 10+ Minutos & Gancho de Continuação (Cliffhanger)**:
-  - Se um assunto durar **>= 10 minutos**, o corte conclui no fechamento natural daquele assunto.
-  - Se um assunto durar **< 10 minutos** (ex: 6 ou 7 min), o algoritmo **"invade" o início do próximo assunto** até atingir 10+ minutos.
-  - O trecho invadido atua como **Gancho (Teaser)** para o próximo vídeo da série.
-  - A interface marca automaticamente:
-    * `Vídeo 1`: *Tema A (com Gancho para Tema B)*
-    * `Vídeo 2`: *Tema B (com Gancho para Tema C ou Conclusão)*
-
-### 2. Ganchos Virais para Shorts / TikTok (< 60 segundos)
-* Identificação de frases contundentes, momentos polêmicos ou respostas de alto impacto com duração ideal de 45 a 60 segundos.
-
----
-
 ## 📐 Regras de Ouro Editoriais para Cortes e Micro-Cortes (Shorts / Reels)
 
-Para garantir que todos os cortes gerados pela IA possuam padrão profissional de edição humana (com início, meio e fim perfeitos), a aplicação segue estritamente as seguintes 6 diretrizes:
+A esteira de inteligência artificial segue estritamente as seguintes 6 diretrizes editoriais:
 
-### 1. 🎬 Ponto de Entrada Limpo (*Clean Entry & Audio Snapping*)
-* **Regra**: O corte deve iniciar no milissegundo exato da primeira palavra falada (com margem de **100ms a 150ms** de respiro inicial).
-* **Critério**:
-  * Em cortes com pergunta: inicia na saudação ou pergunta do jornalista (`"Simone, boa noite..."` ou `"Candidato..."`).
-  * Em declarações diretas: inicia na primeira frase completa da resposta do entrevistado, sem cortar a primeira sílaba.
-
-### 2. 🏁 Ponto de Saída com Conclusão e Respiro (*Punchline & Breath-out*)
-* **Regra**: O corte termina após o fechamento da última oração do raciocínio, mantendo **200ms a 300ms** de pausa natural antes do corte.
-* **Proibição Estrita**: É terminantemente proibido deixar "vazar" o início da pergunta ou tema seguinte (ex: cortar antes do repórter começar a próxima pauta).
-
-### 3. 🧠 Autonomia Semântica (*Standalone Comprehensibility*)
-* **Regra**: O espectador no feed do Instagram, TikTok ou YouTube Shorts deve compreender 100% da mensagem sem precisar ter assistido à entrevista completa.
-* **Critério**: Cortes não podem começar com pronomes anafóricos soltos sem antecedente (ex: *"Como eu disse antes a respeito dele..."*). Caso falte contexto, a pergunta do jornalista deve ser obrigatoriamente incluída.
-
-### 4. 🗂️ Tipologia dos Pequenos Cortes
-A esteira classifica os cortes em 3 formatos:
-* **🏷️ [Q&A] Pergunta & Resposta Completa [35s a 80s]**: Pergunta rápida do jornalista $\to$ Resposta estruturada $\to$ Conclusão.
-* **🏷️ [Punchline] Declaração / Tese de Impacto [25s a 55s]**: Foco direto na frase mais contundente do entrevistado.
-* **🏷️ [Debate] Confronto & Réplica Rápida [35s a 70s]**: Contestação do entrevistador $\to$ Argumento forte do entrevistado.
-
-### 5. 🚫 Filtro Anti-Vazamento e Isolamento de Pautas
-* **Regra**: Todo corte é estritamente limitado aos limites daquela pauta. Assuntos diferentes nunca são misturados, a não ser quando há conclusão explícita de raciocínio prévio.
-
-### 6. ⏱️ Janela Temporal de Retenção
-* **Duração Mínima**: `20 segundos` (tempo mínimo para desenvolver uma ideia completa).
-* **Duração Máxima para Shorts/Reels**: `60 a 75 segundos` (janela ideal de 100% de retenção).
+1. **🎬 Ponto de Entrada Limpo (*Clean Entry & Audio Snapping*)**: O corte inicia no milissegundo exato da primeira palavra falada (com margem de **100ms a 150ms** de respiro inicial).
+2. **🏁 Ponto de Saída com Conclusão e Respiro (*Punchline & Breath-out*)**: O corte termina após o fechamento da última oração do raciocínio, mantendo **200ms a 300ms** de pausa natural antes do corte. É terminantemente proibido vazar o início da fala ou pauta seguinte.
+3. **🧠 Autonomia Semântica (*Standalone Comprehensibility*)**: O espectador compreende 100% da mensagem sem precisar do contexto do vídeo completo.
+4. **🗂️ Tipologia Editorial dos Cortes**:
+   - `🏷️ [Q&A] Pergunta & Resposta Completa [35s a 80s]`
+   - `🏷️ [Punchline] Declaração / Tese de Impacto [25s a 55s]`
+   - `🏷️ [Debate] Confronto & Réplica Rápida [35s a 70s]`
+5. **🚫 Filtro Anti-Vazamento e Isolamento de Pautas**: Raciocínios e temas diferentes nunca são misturados no mesmo corte curto.
+6. **⏱️ Janela Temporal de Retenção**: Duração ideal de **20 a 75 segundos** para Shorts/Reels/TikTok.
 
 ---
 
-## Fluxo da Aplicação
+## 📐 Formatos de Enquadramento Disponíveis (Seção 3)
 
-1. **Entrada da URL**: Informa o link do YouTube.
-2. **Download & Transcrição Inteligente (com Cache)**:
-   - Metadados oficiais (Título, Data de Lançamento no YouTube, Duração) são registrados na Biblioteca.
-   - Transcrição oficial do YouTube e áudio são salvos em `data/<video_id>/` para reuso instantâneo.
-3. **Seleção de Cortes & Estratégias**:
-   - **Modo Entrevistas, Sabatinas & Podcasts**: Identificação de turnos de diálogo Q&A no segundo exato `[INÍCIO → FIM]`.
-   - **Modo Temático / Aulas & Monólogos**: Mapeamento contínuo de transições de tópicos.
-   - **Modo Ganchos Virais (Shorts / Reels)**: Geração de micro-cortes respeitando as 6 Regras de Ouro.
-4. **Fábrica de Cortes**:
-   - Enquadramentos 9:16 (Auto-Reframing com Face Tracking, Blur com Auto-Zoom, Center Crop) e 16:9 Full HD.
-   - Renderização ultra-rápida via FFmpeg.
+| Formato | Prefixo da Pasta | Descrição |
+|---|---|---|
+| **Layout Dividido (Split Screen)** | `VLDSS` | Estilo Podpah/Flow. Possui **Transição Dinâmica (Auto-Switch)**: se 2+ pessoas visíveis $\to$ Split Screen; se close de 1 pessoa $\to$ 9:16 Full Screen automático com MediaPipe. |
+| **Auto-Reframing Facial** | `VRIRA` | Rastreamento inteligente de rosto com Target Lock e Auto-Zoom suave. |
+| **Fundo Desfocado (Blur)** | `VFDBS` | Vídeo central nítido com fundo desfocado preenchendo a tela 9:16. |
+| **Corte Central (Crop)** | `VCCFT` | Corte centralizado direto em 9:16. |
+| **Horizontal Original 16:9** | `HOFHD` | Mantém o enquadramento original Full HD 1080p. |
+
+---
+
+## 📝 Legendas Dinâmicas (Estilo CapCut / Alex Hormozi)
+
+- **Padrão SSA/ASS nativo via `libass` no FFmpeg**: Renderização em alta performance com nitidez absoluta.
+- **Efeito Karaokê Palavra-a-Palavra**: A palavra sendo pronunciada fica em destaque (cor vibrante) enquanto o restante da frase permanece com menor opacidade.
+- **Customização Total na UI**:
+  - Seletor de cor da palavra ativa (Destaque) e palavras em espera (Base).
+  - Controle de tamanho de fonte (40px a 160px).
+  - Tratamento de sobreposição de falas e limpeza de ruídos (`>>`, `[Música]`).
+
+---
+
+## 📁 Padrão de Exportação & Kit de Publicação Viral
+
+Para cada corte gerado, a aplicação cria automaticamente uma pasta estruturada:
+- **Nome da Pasta**: `[PREFIXO]_[Palavras_Completas]` (onde `[PREFIXO]` são as 5 letras do formato e o nome contém as primeiras palavras completas do título com limite estrito de 25 caracteres).
+- **Conteúdo da Pasta**:
+  - 🎬 `[PREFIXO]_[Palavras_Completas].mp4` (Vídeo renderizado com legendas e enquadramento)
+  - 📌 `info_publicacao.txt` (Contém: Título Viral, Legenda para Redes, Hashtags, Tags SEO, Nome do Vídeo gerado e Seção com Metadados do Vídeo Original: Título, Canal, Data e Link)
+  - 📝 `descricao.txt` (Legenda pronta para copiar e colar)
+  - 🏷️ `tags.txt` (Hashtags e Tags SEO separadas)
+
+---
+
+## ⚡ Catálogo & Cache Inteligente por Minutagem (`cuts_catalog.json`)
+
+- Cada vídeo mantém seu catálogo estruturado em `data/<video_id>/cuts_catalog.json`.
+- **Diferenciação por Formato**: A mesma minutagem pode conter múltiplas instâncias independentes (`VRIRA`, `VLDSS`, `VFDBS`, etc.).
+- **Carregamento Instantâneo**: Se a minutagem já foi gerada no formato escolhido, o player e o botão de download abrem com **0 segundos de espera**.
+- **Atualização sem Re-renderizar**: Botão para atualizar os textos do kit de publicação em **0.1 segundo** sem reprocessar o vídeo no FFmpeg.
+
+---
+
+## 📦 Esteira de Produção em Lote (Batch Render) & Galeria
+
+- **Seleção em Lote**: Checkboxes individuais e botão rápido *"⚡ Selecionar Todos para Lote"* na aba de Ganchos Virais.
+- **Smart Skip**: Pula automaticamente cortes que já foram gerados naquele formato, processando apenas novidades (com opção de forçar re-renderização se desejado).
+- **Galeria de Cortes Produzidos (Seção 4)**:
+  - Players de vídeo 9:16 compactos e elegantes dispostos lado a lado.
+  - Botão de download direto e botão individual de exclusão `🗑️` com confirmação (*Apenas Vídeo* vs *Pasta Completa*).
+
+---
+
+## 🗺️ Roadmap de Evolução (Fase 3 & Futuro)
+
+### 🚀 Objetivos da Fase 3:
+1. **🏷️ Headline / Título Fixo de Retenção no Topo (9:16)**:
+   - Inserção de caixa de chamada magnética superior (estilo headline de retenção para TikTok/Reels) com fundo contrastante customizável e posicionamento inteligente que não colide com os rostos.
+2. **🎵 Trilha Sonora de Fundo & Audio Ducking Inteligente**:
+   - Biblioteca de trilhas de fundo categorizadas (Tensão, Lo-Fi, Dinâmica).
+   - Efeito de **Audio Ducking via FFmpeg**: volume da música reduz suavemente durante as falas e ganha presença nos silêncios.
+3. **🖼️ B-Roll / Overlays Visuais & Efeitos de Retenção (Zoom Punch)**:
+   - Efeito de *Zoom Punch* sutil em palavras de alta ênfase para quebra de padrão visual e retenção de feed.
+   - Inserção de emojis e ilustrações contextuais sobre as falas.
+4. **🌐 Exportação Direta & Integrações**:
+   - Upload automático de rascunhos para o YouTube Shorts via YouTube Data API v3.
+   - Envio de pacotes prontos para Google Drive ou Webhooks (Make / n8n).
