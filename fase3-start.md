@@ -53,20 +53,22 @@ O projeto possui duas fases 100% concluídas, testadas e commitadas:
 
 ---
 
-### 🚀 Fase 3 — A IMPLEMENTAR agora
+### 🚀 Fase 3 — CONCLUÍDA (Em fase de refinamento fino)
 
 Objetivo: Elevar o nível de **retenção visual, dinamismo sonoro e automação de publicação** dos cortes gerados:
 
-1. **🏷️ Headline / Título Fixo de Retenção no Topo (9:16)**:
+1. **🏷️ Headline / Título Fixo de Retenção no Topo (9:16)**: ✅ Implementado
    - Inserção de caixa de chamada magnética superior (estilo headline viral de retenção) com fundo contrastante customizável (amarelo, vermelho, preto, gradiente), fonte bold e posicionamento que não colide com rostos ou legendas.
-2. **🎵 Trilha Sonora de Fundo & Audio Ducking Inteligente**:
+2. **🎵 Trilha Sonora de Fundo & Audio Ducking Inteligente**: ✅ Implementado
    - Biblioteca de trilhas sonoras de fundo livres de direitos (Lo-Fi, Tensão, Inspiracional, Dinâmica).
    - Efeito de **Audio Ducking via FFmpeg**: a música diminui suavemente de volume enquanto a pessoa fala e sobe sutilmente nas pausas/silêncios.
-3. **🖼️ B-Roll / Overlays Visuais & Efeitos de Retenção (Zoom Punch / Emojis)**:
+3. **🖼️ B-Roll / Overlays Visuais & Efeitos de Retenção (Zoom Punch / Emojis)**: ✅ Implementado
    - Efeito de *Zoom Punch / Jump Cut suave* em palavras de alta ênfase para quebrar monotonia visual no feed do TikTok/Reels/Shorts.
    - Inserção automática de emojis ou stickers contextuais sobre as falas.
-4. **🌐 Exportação Direta & Integrações**:
+4. **🌐 Exportação Direta & Integrações**: ✅ Implementado
    - Upload de rascunhos direto para o YouTube Shorts via YouTube Data API v3 ou exportação em lote para Google Drive / Webhooks.
+5. **📋 Painel de Rastreamento & Logs em Tempo Real**: ✅ Implementado
+   - Streaming de logs segundo a segundo durante a esteira em lote, com caixa de texto aberta para cópia rápida e diagnóstico completo.
 
 ---
 
@@ -75,6 +77,3 @@ Objetivo: Elevar o nível de **retenção visual, dinamismo sonoro e automação
 2. **Regra de Git**: `git commit` normalmente durante o desenvolvimento, mas **`git push` SOMENTE quando o usuário solicitar explicitamente.**
 3. **Ambiente**: Python em Windows com venv em `d:\Repository\shorcut-factory\venv`. Executar comandos com caminhos absolutos para o python/pip do venv.
 
----
-
-**Pode analisar o repositório e iniciar o planejamento e implementação dos recursos da Fase 3!**

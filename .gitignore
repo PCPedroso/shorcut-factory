@@ -33,3 +33,6 @@ Thumbs.db
 
 # Fontes bundled (baixadas automaticamente pelo subtitle_burner)
 core/fonts/
+
+# Scratch & testes temporários
+scratch/

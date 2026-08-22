@@ -144,8 +144,12 @@ Para cada corte gerado, a aplicação cria automaticamente uma pasta estruturada
 
 ## 📦 Esteira de Produção em Lote (Batch Render) & Galeria
 
-- **Seleção em Lote**: Checkboxes individuais e botão rápido *"⚡ Selecionar Todos para Lote"* na aba de Ganchos Virais.
+- **Seleção em Lote**: Checkboxes individuais e botão rápido *"⚡ Selecionar Todos para Lote"* na aba de Ganchos Virais, com reset de seleção seguro no Streamlit.
+- **Sincronização de Formatos**: Seleção de enquadramento (Blur, Smart Face, Split Screen, Crop, 16:9) sincronizada com as preferências salvas do usuário.
 - **Smart Skip**: Pula automaticamente cortes que já foram gerados naquele formato, processando apenas novidades (com opção de forçar re-renderização se desejado).
+- **📋 Terminal de Logs em Tempo Real & Diagnóstico**:
+  - Exibição de streaming de logs durante todo o processamento em lote.
+  - Caixa de texto permanente para cópia e envio de logs de diagnóstico (`Ctrl + A` / `Ctrl + C`).
 - **Galeria de Cortes Produzidos (Seção 4)**:
   - Players de vídeo 9:16 compactos e elegantes dispostos lado a lado.
   - Botão de download direto, botões de publicação direta no YouTube Shorts e Webhook, e botão de exclusão individual `🗑️` com confirmação (*Apenas Vídeo* vs *Pasta Completa*).
