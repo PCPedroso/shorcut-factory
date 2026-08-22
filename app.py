@@ -728,17 +728,6 @@ if st.session_state.transcription_done:
             else:
                 st.error(fb.get("msg", ""))
 
-        if st.session_state.get("last_batch_logs"):
-            st.markdown("### 📋 Registro de Execução & Logs do Lote")
-            st.info("💡 **Copie o relatório de logs abaixo:** Clique dentro da caixa de texto, pressione **Ctrl + A** para selecionar tudo e **Ctrl + C** para copiar.")
-            st.text_area("Logs Detalhados do Processamento:", value=st.session_state["last_batch_logs"], height=320, key="txt_last_batch_logs")
-            col_l1, _ = st.columns([2, 4])
-            with col_l1:
-                if st.button("🗑️ Limpar Relatório de Logs", key="btn_clear_logs", use_container_width=True):
-                    st.session_state["last_batch_logs"] = ""
-                    st.rerun()
-            st.markdown("---")
-
         if 'shorts' in st.session_state and st.session_state.shorts:
             # Reseta seleção de checkboxes de forma segura antes da instanciação dos widgets
             if st.session_state.get("_reset_batch_selection"):
@@ -850,8 +839,6 @@ if st.session_state.transcription_done:
                         else:
                             prog_bar = st.progress(0)
                             status_box = st.empty()
-                            st.markdown("##### 📋 Registro de Execução em Tempo Real:")
-                            log_display_box = st.empty()
 
                             live_logs_list = []
 
@@ -862,7 +849,6 @@ if st.session_state.transcription_done:
 
                             def _log_cb(line):
                                 live_logs_list.append(line)
-                                log_display_box.code("\n".join(live_logs_list[-25:]), language="bash")
 
                             batch_params_merged = dict(_cfg)
                             batch_params_merged.update({
