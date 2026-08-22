@@ -353,10 +353,10 @@ def generate_ass_file(
 
     # Adiciona estilo de Callout de Engajamento se habilitado (Fase 4)
     if callout_enabled and callout_text:
-        callout_margin_v = max(55, int(video_height * 0.045))
+        callout_margin_v = max(70, int(video_height * 0.055))
         c_style = (
-            f"Style: CalloutStyle,Montserrat ExtraBold,38,&H00FFFFFF&,&H000000FF&,&H00000000&,&H80000000&,"
-            f"-1,0,0,0,100,100,0,0,3,6,0,2,{margin_lr},{margin_lr},{callout_margin_v},1"
+            f"Style: CalloutStyle,Montserrat ExtraBold,40,&H00FFFFFF&,&H000000FF&,&H00000000&,&H80000000&,"
+            f"-1,0,0,0,100,100,0,0,1,5,2,2,{margin_lr},{margin_lr},{callout_margin_v},1"
         )
         styles_section.append(c_style)
 
