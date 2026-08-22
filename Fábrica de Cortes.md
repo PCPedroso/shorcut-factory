@@ -11,13 +11,14 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 | Componente | Tecnologia | Finalidade |
 |---|---|---|
 | **Linguagem** | Python 3.10+ | Núcleo de processamento e automação |
-| **Interface** | Streamlit | Web UI interativa local e intuitiva |
-| **Extração & Catálogo** | `yt-dlp` | Download de áudio, metadados oficiais e vídeo em 1080p |
-| **Transcrição** | `faster-whisper` + ASR YouTube | Transcrição palavra por palavra acelerada por GPU CUDA |
+| **Interface** | Streamlit | Web UI interativa local, modular e minimalista |
+| **Extração & Download** | `yt-dlp` | Download de áudio, metadados oficiais e vídeo em até 1080p Full HD |
+| **Transcrição** | `faster-whisper` + ASR YouTube | Transcrição com timestamps por palavra acelerada por GPU CUDA |
 | **Visão Computacional** | `MediaPipe` + `OpenCV` | Face tracking, Target Lock e transição dinâmica Split/Full Screen |
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
-| **Processamento de Vídeo** | `FFmpeg` (com `libass`) | Recorte, filtros complexos de vídeo e queima de legendas nativas |
+| **Processamento de Vídeo** | `FFmpeg` (com `libass`) | Recorte, filtros complexos, sidechain compress e queima de legendas nativas |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais |
 
 ---
 
@@ -26,8 +27,18 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 ```
 shorcut-factory/
 ├── app.py                     # Interface Web Streamlit (4 seções + Integrações)
+├── conftest.py                # Configuração de ambiente para pytest
 ├── assets/
 │   └── audio/                 # Trilhas sonoras royalty-free categorizadas (.wav / .mp3)
+├── tests/                     # Suíte de Testes Unitários Automatizados
+│   ├── test_headline_drawer.py   # Testes de headlines, quebras e formato ASS
+│   ├── test_export_kit.py        # Testes de pastas, prefixos e kit viral
+│   ├── test_cuts_catalog.py      # Testes de catálogo, instâncias e exclusão
+│   ├── test_audio_mixer.py       # Testes de trilhas e áudio ducking
+│   ├── test_retention_effects.py # Testes de zoom punch e emojis
+│   ├── test_config_manager.py    # Testes de persistência de configurações
+│   ├── test_integrations.py      # Testes de webhooks e payloads
+│   └── test_analyzer_utils.py    # Testes de conversão de tempo e textos
 ├── core/
 │   ├── extractor.py           # Extração de áudio, canais e metadados via yt-dlp
 │   ├── transcriber.py         # Transcrição faster-whisper (CUDA) + fallback ASR YouTube
@@ -37,7 +48,7 @@ shorcut-factory/
 │   ├── subtitle_burner.py     # Geração de legendas dinâmicas em ASS + Headlines + Emojis
 │   ├── headline_drawer.py     # Estilização de Headlines magnéticas de topo (Amarelo, Red, Dark, Custom)
 │   ├── audio_mixer.py         # Mixagem de áudio com Ducking dinâmico via sidechaincompress FFmpeg
-│   ├── retention_effects.py   # Filtro Zoom Punch e emojis/stickers contextuais
+│   ├── retention_effects.py   # Filtro Zoom Punch e emojis contextuais
 │   ├── integrations.py        # Upload YouTube Shorts API v3 e despachante de Webhooks
 │   ├── export_kit.py          # Nomenclatura estrita (VLDSS, VRIRA...) e pastas de publicação
 │   ├── cuts_catalog.py        # Catálogo e cache inteligente multi-instância (cuts_catalog.json)
@@ -45,7 +56,7 @@ shorcut-factory/
 │   ├── library_manager.py     # Catálogo global de vídeos processados (library.json)
 │   └── config_manager.py      # Persistência contínua de preferências (app_settings.json)
 ├── data/
-│   ├── library.json           # Biblioteca geral de vídeos
+│   ├── library.json           # Biblioteca geral de vídeos processados
 │   ├── app_settings.json      # Configurações do usuário persistidas
 │   ├── youtube_token.json     # Token de autorização OAuth do YouTube Shorts
 │   └── <video_id>/
@@ -87,91 +98,46 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 
 ---
 
-## 📝 Legendas Dinâmicas & Headlines de Retenção (Fase 2 & 3)
+## ✅ Histórico de Fases Concluídas
 
-- **Padrão SSA/ASS nativo via `libass` no FFmpeg**: Renderização em alta performance com nitidez absoluta.
-- **Efeito Karaokê Palavra-a-Palavra**: A palavra sendo pronunciada fica em destaque (cor vibrante) enquanto o restante da frase permanece com menor opacidade.
-- **🏷️ Headline / Título Fixo de Retenção no Topo**:
-  - Caixa de destaque superior estilo viral TikTok/Reels com presets pré-definidos (`Amarelo Vibrante`, `Alerta Vermelho`, `Dark Box`, `Box Branco`, `Flutuante Bold` ou `Personalizado`).
-  - Margem superior ajustável para Safe Zone de interfaces móveis e quebra de linhas inteligente.
-- **😃 Emojis & Stickers Contextuais**:
-  - Mapeamento dinâmico de termos de impacto (dinheiro, fogo, segredo, foco, etc.) com inserção de emojis visuais nas falas.
-- **🔍 Zoom Punch Dinâmico**:
-  - Aplicação de pulsos suaves de aproximação (1.07x) a cada ~8s para quebra de padrão visual.
+### 🔹 Fase 1 — Estrutura Base, Análise e Enquadramentos 9:16
+- **Interface Streamlit** modular (`app.py`).
+- **Biblioteca de Vídeos & Download** via `yt-dlp` em até 1080p Full HD com persistência de metadados e canal.
+- **Transcrição** acelerada por GPU CUDA via `faster-whisper` e fallback automático para ASR do YouTube.
+- **Inteligência Temática Dual** com Ollama (Llama 3 local):
+  - Modo `🎙️ Entrevistas & Sabatinas`: Detecção de turnos Q&A com timestamp exato `[INÍCIO → FIM]`.
+  - Modo `🧠 Temático / Monólogos`: Mapeamento de transições de tópicos e ganchos contínuos (10+ min).
+- **5 Modos de Enquadramento de Vídeo** em `core/video_processor.py`:
+  - Split Screen com Auto-Switch MediaPipe, Auto-Reframing Facial, Blur com Auto-Zoom, Center Crop e 16:9 Full HD.
 
----
-
-## 🎵 Trilha Sonora de Fundo & Audio Ducking Inteligente
-
-- **Biblioteca de Trilhas Categorizadas (`assets/audio/`)**:
-  - `🧘 Lo-Fi Chill / Relax`, `⚡ Dinâmica / Ritmo`, `🔥 Tensão / Suspense`, `✨ Inspiracional / Motivacional` + Suporte a MP3s customizados.
-- **Audio Ducking via FFmpeg**:
-  - O volume da música é atenuado de forma fluida quando a voz está ativa (sidechain compression) e sobe sutilmente nos silêncios.
-  - Presets de intensidade: `Suave (-12dB)`, `Médio / Padrão (-18dB)`, `Intenso (-24dB)`.
-
----
-
-## 🌐 Exportação Direta & Integrações
-
-- **🔴 Upload Direto para o YouTube Shorts (YouTube Data API v3)**:
-  - Autenticação OAuth2 integrada.
-  - Envio com 1 clique direto na Seção 3 e na Galeria, com seleção de privacidade (`Rascunho / Não Listado / Público`).
-- **📡 Webhooks HTTP (n8n / Make / Zapier / Automações)**:
-  - Disparo de payload estruturado contendo caminho do MP4, metadados do kit viral, hashtags, tags SEO e minutagens.
-
----
-
-## 📁 Padrão de Exportação & Kit de Publicação Viral
-
-Para cada corte gerado, a aplicação cria automaticamente uma pasta estruturada:
-- **Nome da Pasta**: `[PREFIXO]_[Palavras_Completas]` (onde `[PREFIXO]` são as 5 letras do formato e o nome contém as primeiras palavras completas do título com limite estrito de 25 caracteres).
-- **Conteúdo da Pasta**:
-  - 🎬 `[PREFIXO]_[Palavras_Completas].mp4` (Vídeo renderizado com legendas, headline, áudio e enquadramento)
-  - 📌 `info_publicacao.txt` (Contém: Título Viral, Legenda para Redes, Hashtags, Tags SEO, Nome do Vídeo gerado e Seção com Metadados do Vídeo Original: Título, Canal, Data e Link)
-  - 📝 `descricao.txt` (Legenda pronta para copiar e colar)
-  - 🏷️ `tags.txt` (Hashtags e Tags SEO separadas)
-
----
-
-## ⚡ Catálogo & Cache Inteligente por Minutagem (`cuts_catalog.json`)
-
-- Cada vídeo mantém seu catálogo estruturado em `data/<video_id>/cuts_catalog.json`.
-- **Diferenciação por Formato**: A mesma minutagem pode conter múltiplas instâncias independentes (`VRIRA`, `VLDSS`, `VFDBS`, etc.).
-- **Carregamento Instantâneo**: Se a minutagem já foi gerada no formato escolhido, o player e o botão de download abrem com **0 segundos de espera**.
-- **Atualização sem Re-renderizar**: Botão para atualizar os textos do kit de publicação em **0.1 segundo** sem reprocessar o vídeo no FFmpeg.
-
----
-
-## 📦 Esteira de Produção em Lote (Batch Render) & Galeria
-
-- **Seleção em Lote**: Checkboxes individuais e botão rápido *"⚡ Selecionar Todos para Lote"* na aba de Ganchos Virais, com reset de seleção seguro no Streamlit.
-- **Sincronização de Formatos**: Seleção de enquadramento (Blur, Smart Face, Split Screen, Crop, 16:9) sincronizada com as preferências salvas do usuário.
-- **Smart Skip**: Pula automaticamente cortes que já foram gerados naquele formato, processando apenas novidades (com opção de forçar re-renderização se desejado).
-- **📋 Terminal de Logs em Tempo Real & Diagnóstico**:
-  - Exibição de streaming de logs durante todo o processamento em lote.
-  - Caixa de texto permanente para cópia e envio de logs de diagnóstico (`Ctrl + A` / `Ctrl + C`).
+### 🔹 Fase 2 — Legendas Dinâmicas, Kit Viral, Lote e Catálogo Inteligente
+- **Legendas Dinâmicas Estilo CapCut / Alex Hormozi** (`core/subtitle_burner.py`):
+  - Renderização nativa em ASS (`libass` do FFmpeg) com efeito karaokê palavra-a-palavra sincronizado com Whisper/YouTube.
+  - Cores configuráveis (Destaque e Base), sliders de fonte (40px a 160px) e contorno nítido.
+- **Kit de Publicação Viral com IA** (`core/analyzer.py`):
+  - Título Magnético, Variações Alternativas, Legenda persuasiva com CTA e Hashtags/SEO contextuais.
+- **Exportação Padronizada com Nomenclatura Estrita** (`core/export_kit.py`):
+  - Prefixos de 5 letras (`VLDSS`, `VRIRA`, `VFDBS`, `VCCFT`, `HOFHD`) + limite de 25 caracteres em palavras completas do título.
+  - Criação da pasta `data/<video_id>/<PREFIXO>_<Palavras>/` com `.mp4`, `info_publicacao.txt`, `descricao.txt` e `tags.txt`.
+- **Catálogo & Cache Inteligente por Minutagem e Formato** (`core/cuts_catalog.py`):
+  - Rastreamento em `data/<video_id>/cuts_catalog.json` de múltiplas instâncias de enquadramento com abertura instantânea (0s).
+- **Esteira de Renderização em Lote (Batch Pipeline)** (`core/batch_processor.py`):
+  - Seleção por checkboxes unificados, botão *"Selecionar Todos para Lote"*, barra de progresso visual e Smart Skip.
 - **Galeria de Cortes Produzidos (Seção 4)**:
-  - Players de vídeo 9:16 compactos e elegantes dispostos lado a lado.
-  - Botão de download direto, botões de publicação direta no YouTube Shorts e Webhook, e botão de exclusão individual `🗑️` com confirmação (*Apenas Vídeo* vs *Pasta Completa*).
+  - Players verticais 9:16 compactos, download direto e exclusão granular.
 
----
-
-## 🧪 Suíte de Testes Unitários Automatizados (`tests/`)
-
-A integridade de todos os módulos centrais da aplicação é validada através de testes unitários contínuos com `pytest`:
-
-```bash
-venv\Scripts\pytest -v tests/
-```
-
-- **`test_headline_drawer.py`**: Formatação de headlines, conversão ASS e higienização inteligente com pensamento completo.
-- **`test_export_kit.py`**: Nomenclatura padronizada (prefixos de 5 letras) e integridade do pacote viral de publicação.
-- **`test_cuts_catalog.py`**: Isolamento multi-formato, cache em disco e remoção granular de cortes.
-- **`test_audio_mixer.py`**: Resolução de trilhas sonoras e presets de Audio Ducking.
-- **`test_retention_effects.py`**: Geração de filtros dinâmicos de Zoom Punch e injeção de emojis contextuais.
-- **`test_config_manager.py`**: Persistência e restauração de preferências em `data/app_settings.json`.
-- **`test_integrations.py`**: Validação de payloads e despacho para Webhooks HTTP.
-- **`test_analyzer_utils.py`**: Conversão de tempo, formatação legível e limpeza de introduções de IA.
+### 🔹 Fase 3 — Retenção de Topo, Áudio Ducking & Integrações
+- **🏷️ Headline / Título Fixo de Retenção no Topo (9:16)** (`core/headline_drawer.py`):
+  - Presets (Amarelo, Red, Dark, Branco, Flutuante, Custom), margem de Safe Zone, IA focada em pensamento completo sem cortes no final e quebra harmoniosa em 2 linhas.
+- **🎵 Trilha Sonora de Fundo & Audio Ducking Inteligente** (`core/audio_mixer.py`):
+  - 4 trilhas royalty-free (`lofi_chill`, `dynamic_pulse`, `tension_suspense`, `inspirational_epic`) + suporte a MP3s customizados.
+  - Atenuação fluida da música enquanto o orador fala via sidechain FFmpeg (`suave`, `medio`, `intenso`).
+- **🔍 Efeitos Visuais de Retenção** (`core/retention_effects.py`):
+  - Zoom Punch periódico sutil (1.08x) a cada ~8.5s e injeção de emojis contextuais nas legendas.
+- **🌐 Exportação Direta & Integrações** (`core/integrations.py`):
+  - Upload para o YouTube Shorts via OAuth2 e disparo estruturado para Webhooks (n8n/Make/Zapier).
+- **🧪 Suíte de 24 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando toda a suíte do `core/` via `pytest`.
 
 ---
 
@@ -186,7 +152,7 @@ O plano de evolução futura da Fábrica de Cortes está dividido em etapas prog
 
 1. **🖼️ Gerador Automático de Capas / Thumbnails 9:16 (`core/thumbnail_generator.py`)**:
    - Detecção do frame mais expressivo do corte via MediaPipe (olhos abertos, boca em articulação clara, nitidez facial).
-   - Composição automática com a Headline magnética de topo, moldura sutil e salvamento de `thumbnail.jpg` na pasta do corte.
+   - Composição automática com a Headline magnética de topo, moldura sutil e salvamento de `thumbnail.jpg` na pasta do corte (`export_kit.py`).
    - Prévia instantânea e botão de download na Seção 3 e na Galeria de Cortes.
 2. **⏳ Barra de Progresso Animada de Retenção (Dynamic Progress Bar)**:
    - Linha minimalista e personalizável no rodapé do vídeo (via FFmpeg) indicando o progresso do corte para reter o espectador até o último segundo.
@@ -217,3 +183,9 @@ O plano de evolução futura da Fábrica de Cortes está dividido em etapas prog
 2. **🤖 Modo Fábrica 100% Autônomo (Zero-Touch Batch)**:
    - Processamento de ponta a ponta a partir de uma lista de URLs do YouTube: download $\to$ análise $\to$ recorte multi-formato $\to$ empacotamento $\to$ disparo sem intervenção manual.
 
+---
+
+### 🎯 Diretrizes & Regras do Projeto
+1. **Documento Mestre Vivo**: `Fábrica de Cortes.md` é a base viva do projeto e deve ser mantida atualizada com novas decisões.
+2. **Regra de Git**: `git commit` normalmente durante o desenvolvimento, mas **`git push` SOMENTE quando o usuário solicitar explicitamente.**
+3. **Ambiente**: Python em Windows com venv em `d:\Repository\shorcut-factory\venv`. Executar comandos com caminhos absolutos para o python/pip do venv.
