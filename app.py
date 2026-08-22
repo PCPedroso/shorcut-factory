@@ -729,12 +729,15 @@ if st.session_state.transcription_done:
                 st.error(fb.get("msg", ""))
 
         if st.session_state.get("last_batch_logs"):
-            with st.expander("📋 Copiar Registro Completo de Logs do Lote (Clique para Expandir)", expanded=False):
-                st.info("💡 Você pode selecionar e copiar o texto abaixo para enviar para análise:")
-                st.text_area("Logs de Execução Detalhados:", value=st.session_state["last_batch_logs"], height=300, key="txt_last_batch_logs")
-                if st.button("🗑️ Limpar Registro de Logs", key="btn_clear_logs"):
+            st.markdown("### 📋 Registro de Execução & Logs do Lote")
+            st.info("💡 **Copie o relatório de logs abaixo:** Clique dentro da caixa de texto, pressione **Ctrl + A** para selecionar tudo e **Ctrl + C** para copiar.")
+            st.text_area("Logs Detalhados do Processamento:", value=st.session_state["last_batch_logs"], height=320, key="txt_last_batch_logs")
+            col_l1, _ = st.columns([2, 4])
+            with col_l1:
+                if st.button("🗑️ Limpar Relatório de Logs", key="btn_clear_logs", use_container_width=True):
                     st.session_state["last_batch_logs"] = ""
                     st.rerun()
+            st.markdown("---")
 
         if 'shorts' in st.session_state and st.session_state.shorts:
             # Reseta seleção de checkboxes de forma segura antes da instanciação dos widgets
@@ -783,27 +786,33 @@ if st.session_state.transcription_done:
                     st.markdown("---")
                     st.markdown(f"### 📦 Fila de Produção em Lote (**{len(selected_items)}** cortes selecionados)")
                     
+                    _batch_aspect_list = [
+                        "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)",
+                        "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)",
+                        "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen - Estilo Podpah & Flow)",
+                        "📱 Vertical 9:16 (Corte Central 100% Tela)",
+                        "💻 Horizontal 16:9 (Original 1080p Full HD)"
+                    ]
+                    _default_b_aspect = _cfg.get("aspect_option", _batch_aspect_list[0])
+                    _b_idx = _batch_aspect_list.index(_default_b_aspect) if _default_b_aspect in _batch_aspect_list else 0
+
                     col_bp1, col_bp2 = st.columns(2)
                     with col_bp1:
                         batch_aspect_choice = st.selectbox(
                             "📐 Enquadramento para o Lote:",
-                            [
-                                "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)",
-                                "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen)",
-                                "📱 Vertical 9:16 (Fundo Desfocado / Blur)",
-                                "📱 Vertical 9:16 (Corte Central 100% Tela)",
-                                "💻 Horizontal 16:9 (Original 1080p Full HD)"
-                            ],
+                            _batch_aspect_list,
+                            index=_b_idx,
                             key="batch_aspect_select"
                         )
                         b_aspect_map = {
+                            "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)": "9:16_blur",
                             "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)": "9:16_smart_face",
-                            "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen)": "9:16_split",
-                            "📱 Vertical 9:16 (Fundo Desfocado / Blur)": "9:16_blur",
+                            "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen - Estilo Podpah & Flow)": "9:16_split",
                             "📱 Vertical 9:16 (Corte Central 100% Tela)": "9:16_crop",
                             "💻 Horizontal 16:9 (Original 1080p Full HD)": "16:9"
                         }
                         batch_aspect_mode = b_aspect_map[batch_aspect_choice]
+                        st.caption(f"🎯 Modo ativo: `{batch_aspect_mode}`")
 
                     with col_bp2:
                         batch_sub_enabled = st.toggle("✨ Ativar Legendas Dinâmicas", value=_cfg.get("subtitle_enabled", True), key="batch_sub_toggle")
