@@ -142,20 +142,23 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Salvamento automático de `thumbnail.jpg` dentro do pacote do corte (`export_kit.py`).
   - Prévia visual e botão de download da thumbnail na **Seção 3** e em cada card da **Galeria (Seção 4)**.
 - **⏳ Barra de Progresso Animada de Retenção (Dynamic Progress Bar)**:
-  - Linha fluida no rodapé do vídeo renderizada via filtros dinâmicos FFmpeg `drawbox` com cores customizáveis (Vermelho, Amarelo, Ciano, Branco, Verde).
+  - Linha fluida no rodapé do vídeo animada dinamicamente quadro a quadro via `overlay` do FFmpeg (`-w + w*(t/duration)`), progredindo de 0% a 100% com cores customizáveis (Vermelho, Amarelo, Ciano, Branco, Verde).
 - **📌 Banner de Chamada / Lower Third Dinâmico (Engagement Callout)**:
-  - Aparição elegante nos últimos 4-5 segundos provocando engajamento (*"💬 O que você acha? Comente!"*, *"🔔 Siga para mais cortes diários"*) em ASS com fade suave `\fad(300,300)`.
-- **🎯 Zoom de Ênfase no Clímax (Climax Punchline Zoom)**:
-  - Aproximação dramática (1.08x a 1.20x) no orador durante os últimos segundos do corte para reforçar a punchline final.
+  - Aparição elegante nos últimos 4-5 segundos provocando engajamento (*"💬 O que você acha? Comente!"*, *"🔔 Siga para mais cortes diários"*) em ASS com contorno de alto contraste (`BorderStyle=1`), sombra suave e fade `\fad(300,300)`.
+- **🎯 Zoom de Ênfase no Clímax & Zoom Punch**:
+  - Zoom dinâmico via camadas `scale + crop + overlay` condicional no FFmpeg para pulsos periódicos de retenção e aproximação dramática na punchline final.
 - **🧪 Suíte de 31 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando toda a suíte do `core/` via `pytest`.
+
+> [!NOTE]
+> Os recursos de **Gerar Capa (Thumbnails 9:16)** e **Zoom de Ênfase no Clímax** estão operacionais e integrados na esteira, com aperfeiçoamentos visuais adicionais mapeados para refinamento contínuo nas fases seguintes.
 
 ---
 
 ## 🔮 Roadmap de Evolução Futura
 
-### 🚀 Fase 5 — Sound FX (SFX) Inteligentes & B-Roll / Overlays de Contexto (Médio a Avançado)
-*Foco: Imersão sonora dinâmica e quebra de padrão visual com materiais visuais de apoio.*
+### 🚀 Fase 5 — Sound FX (SFX) Inteligentes, B-Roll / Overlays de Contexto & Refinamento Visual (Médio a Avançado)
+*Foco: Imersão sonora dinâmica, quebra de padrão visual com materiais visuais de apoio e aperfeiçoamento fino de capas e zooms.*
 
 1. **🔊 Biblioteca de Efeitos Sonoros Inteligentes (SFX Engine)** (`core/sfx_manager.py`):
    - Inserção de efeitos sonoros curtos sincronizados: *Whoosh* no Zoom Punch, *Pop/Ka-ching* ao surgir emojis de dinheiro, *Boom/Alerta* em momentos de tensão.
@@ -163,6 +166,8 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 2. **🎬 B-Roll Inteligente & Split Screen Híbrido** (`core/broll_engine.py`):
    - Detecção de entidades e tópicos visuais na fala (nomes de pessoas, notícias, dados, gráficos).
    - Inserção de imagens/vídeos de apoio na metade superior do Split Screen ou em overlays curtos de 2 a 3 segundos (cutaways).
+3. **🎨 Aperfeiçoamento de Capas 9:16 & Zooms de Retenção**:
+   - Refinamento de presets visuais de capas, templates e ajustes finos de transição de zoom.
 
 ---
 
