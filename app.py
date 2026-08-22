@@ -677,9 +677,49 @@ if st.session_state.transcription_done:
                     st.rerun()
 
         if 'bundles' in st.session_state and st.session_state.bundles:
+            # Reseta seleção de checkboxes de forma segura antes da instanciação dos widgets
+            if st.session_state.get("_reset_bundles_selection"):
+                st.session_state["_reset_bundles_selection"] = False
+                for b_i in range(len(st.session_state.bundles)):
+                    st.session_state[f"chk_bundle_{b_i}"] = False
+                st.session_state["batch_bundle_selected"] = {}
+
+            if "batch_bundle_selected" not in st.session_state:
+                st.session_state["batch_bundle_selected"] = {}
+
+            col_bb1, col_bb2, col_bb3, _ = st.columns([1.4, 1.4, 1.4, 1.8])
+            with col_bb1:
+                if st.button("☑️ Marcar Tudo", key="btn_sel_all_bundles", use_container_width=True):
+                    for b_i, b_item in enumerate(st.session_state.bundles):
+                        st.session_state[f"chk_bundle_{b_i}"] = True
+                        st.session_state["batch_bundle_selected"][b_i] = b_item
+                    st.rerun()
+            with col_bb2:
+                if st.button("⬜ Desmarcar Tudo", key="btn_clear_bundles_batch", use_container_width=True):
+                    st.session_state["_reset_bundles_selection"] = True
+                    st.rerun()
+            with col_bb3:
+                if st.button("🔄 Inverter Seleção", key="btn_invert_bundles_batch", use_container_width=True):
+                    for b_i, b_item in enumerate(st.session_state.bundles):
+                        cur_val = st.session_state.get(f"chk_bundle_{b_i}", False)
+                        new_val = not cur_val
+                        st.session_state[f"chk_bundle_{b_i}"] = new_val
+                        if new_val:
+                            st.session_state["batch_bundle_selected"][b_i] = b_item
+                        else:
+                            st.session_state["batch_bundle_selected"].pop(b_i, None)
+                    st.rerun()
+
+            st.markdown(f"### 📦 Séries Sugeridas ({len(st.session_state.bundles)}):")
             for idx, b in enumerate(st.session_state.bundles):
                 with st.container():
-                    col_info, col_btn = st.columns([4, 1])
+                    col_chk, col_info, col_btn = st.columns([0.3, 3.7, 1])
+                    with col_chk:
+                        chk_val = st.checkbox("Fila", key=f"chk_bundle_{idx}", label_visibility="collapsed")
+                        if chk_val:
+                            st.session_state["batch_bundle_selected"][idx] = b
+                        else:
+                            st.session_state["batch_bundle_selected"].pop(idx, None)
                     with col_info:
                         badge = f"**{b.get('series_label', f'Vídeo {idx+1}')}**"
                         st.markdown(f"{badge}: `[{b['start']} - {b['end']}]` **{b['title']}**")
@@ -692,6 +732,73 @@ if st.session_state.transcription_done:
                             st.session_state.cut_ready_banner = f"✅ Série selecionada: [{b['start']} → {b['end']}] ({b['title']})"
                             st.rerun()
                     st.divider()
+
+            # Painel da Fila de Produção em Lote para Séries
+            selected_bundles = list(st.session_state["batch_bundle_selected"].values())
+            if selected_bundles:
+                with st.container():
+                    st.markdown("---")
+                    st.markdown(f"### 📦 Fila de Produção em Lote para Séries (**{len(selected_bundles)}** séries selecionadas)")
+                    
+                    col_sp1, col_sp2 = st.columns([2, 2])
+                    with col_sp1:
+                        _series_aspect_map = {
+                            "💻 Horizontal 16:9 (Original 1080p Full HD - Recomendado para Séries de 10+ min)": "16:9",
+                            "📱 Vertical 9:16 (Fundo Desfocado / Blur)": "9:16_blur",
+                            "📱 Vertical 9:16 (🎯 Auto-Reframing Facial)": "9:16_smart_face",
+                            "📱 Vertical 9:16 (👥 Split Screen)": "9:16_split",
+                            "📱 Vertical 9:16 (Corte Central 100%)": "9:16_crop"
+                        }
+                        series_aspect_choice = st.selectbox(
+                            "Formato de Enquadramento:",
+                            list(_series_aspect_map.keys()),
+                            index=0,
+                            key="series_aspect_choice"
+                        )
+                        series_aspect_mode = _series_aspect_map[series_aspect_choice]
+                    with col_sp2:
+                        series_sub_enabled = st.toggle("✨ Ativar Legendas Dinâmicas", value=_cfg.get("subtitle_enabled", False), key="series_sub_toggle")
+                        st.caption(f"Fontes e cores: {_cfg.get('subtitle_font_size', 80)}px • Destaque {_cfg.get('subtitle_highlight_color', '#FFFF00')}")
+
+                    if st.button(f"⚡ Iniciar Renderização em Lote ({len(selected_bundles)} Séries)", type="primary", use_container_width=True, key="btn_start_series_batch"):
+                        _active_u_sbatch = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                        _vid_id_sbatch = get_video_id(_active_u_sbatch)
+                        if not _vid_id_sbatch:
+                            st.error("URL do vídeo do YouTube não identificada.")
+                        else:
+                            s_prog_bar = st.progress(0)
+                            s_status_box = st.empty()
+                            s_live_logs = []
+
+                            def _s_batch_cb(cur, tot, msg):
+                                pct = int((cur / max(tot, 1)) * 100)
+                                s_prog_bar.progress(min(pct, 100))
+                                s_status_box.info(f"**Progresso ({cur}/{tot}):** {msg}")
+
+                            def _s_log_cb(line):
+                                s_live_logs.append(line)
+
+                            s_batch_res = process_batch_cuts(
+                                video_id=_vid_id_sbatch,
+                                active_url=_active_u_sbatch,
+                                cut_items=selected_bundles,
+                                aspect_ratio_mode=series_aspect_mode,
+                                subtitle_enabled=series_sub_enabled,
+                                subtitle_highlight_color=_cfg.get("subtitle_highlight_color", "#FFFF00"),
+                                subtitle_base_color=_cfg.get("subtitle_base_color", "#FFFFFF"),
+                                subtitle_font_size=_cfg.get("subtitle_font_size", 80),
+                                ollama_model=ollama_model,
+                                aspect_params=dict(_cfg),
+                                force_rerender=False,
+                                progress_callback=_s_batch_cb,
+                                log_callback=_s_log_cb
+                            )
+                            st.session_state["batch_feedback"] = {
+                                "type": "success" if s_batch_res.get("success") else "error",
+                                "msg": f"🎉 Processamento concluído! Sucessos: {s_batch_res.get('processed_count', 0)} | Pulados: {s_batch_res.get('skipped_count', 0)} | Erros: {len(s_batch_res.get('errors', []))}"
+                            }
+                            st.session_state["_reset_bundles_selection"] = True
+                            st.rerun()
 
     # ── TAB 3: GANCHOS VIRAIS & PEQUENOS CORTES (SHORTS / REELS) ───────────────
     with tab_shorts:
@@ -743,16 +850,27 @@ if st.session_state.transcription_done:
             if "batch_short_selected" not in st.session_state:
                 st.session_state["batch_short_selected"] = {}
 
-            col_bk1, col_bk2, _ = st.columns([1.5, 1.5, 2])
+            col_bk1, col_bk2, col_bk3, _ = st.columns([1.4, 1.4, 1.4, 1.8])
             with col_bk1:
-                if st.button("⚡ Selecionar Todos para Lote", key="btn_sel_all_shorts", use_container_width=True):
+                if st.button("☑️ Marcar Tudo", key="btn_sel_all_shorts", use_container_width=True):
                     for s_i, s_item in enumerate(st.session_state.shorts):
                         st.session_state[f"chk_short_{s_i}"] = True
                         st.session_state["batch_short_selected"][s_i] = s_item
                     st.rerun()
             with col_bk2:
-                if st.button("⬜ Limpar Seleção", key="btn_clear_shorts_batch", use_container_width=True):
+                if st.button("⬜ Desmarcar Tudo", key="btn_clear_shorts_batch", use_container_width=True):
                     st.session_state["_reset_batch_selection"] = True
+                    st.rerun()
+            with col_bk3:
+                if st.button("🔄 Inverter Seleção", key="btn_invert_shorts_batch", use_container_width=True):
+                    for s_i, s_item in enumerate(st.session_state.shorts):
+                        cur_val = st.session_state.get(f"chk_short_{s_i}", False)
+                        new_val = not cur_val
+                        st.session_state[f"chk_short_{s_i}"] = new_val
+                        if new_val:
+                            st.session_state["batch_short_selected"][s_i] = s_item
+                        else:
+                            st.session_state["batch_short_selected"].pop(s_i, None)
                     st.rerun()
 
             st.markdown(f"### 🎬 Pequenos Cortes Gerados ({len(st.session_state.shorts)}):")
