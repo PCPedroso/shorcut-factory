@@ -147,19 +147,23 @@ def process_batch_cuts(
             try:
                 meta_res = core.analyzer.generate_viral_cut_metadata(snippet_text, model=ollama_model)
                 cut_title = meta_res.get("titulo_principal") or base_title
+                cut_headline = meta_res.get("headline_topo") or cut_title
                 cut_desc = meta_res.get("descricao") or "Confira este momento imperdível! Curta e comente."
                 cut_hashtags = meta_res.get("hashtags", ["#shorts", "#viral", "#cortes", "#reels"])
                 cut_tags_seo = meta_res.get("tags_seo", "cortes, viral, shorts, podcast")
                 _log(f"Título IA gerado: '{cut_title}'")
+                _log(f"Headline Concisa do Topo: '{cut_headline}'")
             except Exception as ex_ia:
                 _log(f"Aviso na geração de IA: {ex_ia}. Usando título base.")
                 cut_title = base_title
+                cut_headline = base_title
                 cut_desc = f"Confira este trecho: {base_title}"
                 cut_hashtags = ["#shorts", "#viral", "#cortes"]
                 cut_tags_seo = "shorts, cortes, viral"
         else:
             _log("Transcrição vazia para este intervalo. Usando metadados padrão.")
             cut_title = base_title
+            cut_headline = base_title
             cut_desc = f"Confira este trecho: {base_title}"
             cut_hashtags = ["#shorts", "#viral", "#cortes"]
             cut_tags_seo = "shorts, cortes, viral"
@@ -206,7 +210,7 @@ def process_batch_cuts(
             subtitle_font_size=subtitle_font_size,
             # Fase 3: Retenção & Áudio Ducking
             headline_enabled=params.get("headline_enabled", False),
-            headline_text=cut_title,
+            headline_text=cut_headline,
             headline_preset=params.get("headline_preset", "yellow_black"),
             headline_text_color=params.get("headline_text_color", "#000000"),
             headline_bg_color=params.get("headline_bg_color", "#FFE600"),

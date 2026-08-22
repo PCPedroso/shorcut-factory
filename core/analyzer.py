@@ -556,12 +556,14 @@ Transcrição do trecho do vídeo:
 DIRETRIZES OBRIGATÓRIAS:
 1. NUNCA use títulos genéricos como 'Corte Viral', 'Momento Imperdível' ou 'Declaração Forte'. O título DEVE citar o fato, pergunta ou declaração central real que aconteceu no trecho (ex: 'Como convencer eleitores de 60 anos? Candidato responde com franqueza').
 2. Crie 1 título principal e 2 títulos alternativos com abordagens distintas (uma focada na declaração mais contundente, outra na pergunta/confronto).
-3. A descrição deve contextualizar exatamente o que o entrevistado/personagem disse no trecho, citando o tema abordado e provocando o público com uma pergunta no final para gerar debate nos comentários.
-4. As hashtags devem ser específicas ao tema abordado no vídeo (política, eleições, debate, nomes próprios citados) além de hashtags de formato (#shorts, #reels).
+3. Crie uma 'headline_topo': uma frase de gancho (hook) magnética, ULTRA CONCISA e com PENSAMENTO 100% FECHADO E COMPLETO para o topo do vídeo 9:16 (Shorts/TikTok/Reels). Deve ter entre 4 e 7 palavras (máx 38 caracteres). NUNCA corte no meio de orações ou preposições. Exemplos: 'O BRASIL VAI ENTRAR EM RECESSÃO?', 'VOU PEGAR O PAÍS QUEBRADO!', 'A JUSTIÇA CÍVEL VAI ACABAR?', 'ESTAMOS DESTRUÍDOS POR ELES!'.
+4. A descrição deve contextualizar exatamente o que o entrevistado/personagem disse no trecho, citando o tema abordado e provocando o público com uma pergunta no final para gerar debate nos comentários.
+5. As hashtags devem ser específicas ao tema abordado no vídeo (política, eleições, debate, nomes próprios citados) além de hashtags de formato (#shorts, #reels).
 
 Responda ESTRITAMENTE em formato JSON com as seguintes chaves (sem texto introdutório ou markdown antes/depois):
 {{
   "titulo_principal": "Título magnético baseado no fato real (máx 65 caracteres)",
+  "headline_topo": "Frase magnética curta e 100% completa para o topo (máx 38 caracteres)",
   "titulos_alternativos": [
     "Opção 1 focada na resposta/frase de impacto",
     "Opção 2 focada na polêmica/pergunta"
@@ -610,6 +612,13 @@ Responda ESTRITAMENTE em formato JSON com as seguintes chaves (sem texto introdu
                 m_t = re.search(r'"titulo_principal"\s*:\s*"(.*?)"\s*,\s*"', raw_out, re.DOTALL)
             t_princ = m_t.group(1) if m_t else ""
 
+        hl_top = parsed.get("headline_topo")
+        if not hl_top:
+            m_hl = re.search(r'"headline_topo"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', raw_out)
+            if not m_hl:
+                m_hl = re.search(r'"headline_topo"\s*:\s*"(.*?)"\s*,\s*"', raw_out, re.DOTALL)
+            hl_top = m_hl.group(1) if m_hl else ""
+
         desc_val = parsed.get("descricao")
         if not desc_val:
             m_d = re.search(r'"descricao"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', raw_out)
@@ -635,13 +644,20 @@ Responda ESTRITAMENTE em formato JSON com as seguintes chaves (sem texto introdu
                 hashtags_val = ["#shorts", "#viral", "#cortes", "#reels"]
 
         # Limpeza final e sanitização
+        from core.headline_drawer import clean_and_condense_headline
         t_princ_clean = _clean_ai_title(t_princ).strip(" \t\n\r{}[]\"'")
         if not t_princ_clean or len(t_princ_clean) < 5 or t_princ_clean.startswith("{"):
             words_preview = snippet_clean.split()
             t_princ_clean = " ".join(words_preview[:7]) if words_preview else "Declaração em Destaque"
 
+        if hl_top and len(hl_top.strip()) >= 5 and not hl_top.startswith("{"):
+            hl_top_clean = clean_and_condense_headline(hl_top, max_chars=40)
+        else:
+            hl_top_clean = clean_and_condense_headline(t_princ_clean, max_chars=40)
+
         return {
             "titulo_principal": t_princ_clean,
+            "headline_topo": hl_top_clean,
             "titulos_alternativos": [_clean_ai_title(t).strip(" \t\n\r{}[]\"'") for t in alts_val if len(t) > 5 and not t.startswith("{")],
             "descricao": desc_val if desc_val and not desc_val.startswith("{") else f"Confira este momento importante da entrevista. Compartilhe sua opinião nos comentários!",
             "hashtags": hashtags_val if hashtags_val else ["#shorts", "#viral", "#cortes", "#reels"],
@@ -650,10 +666,12 @@ Responda ESTRITAMENTE em formato JSON com as seguintes chaves (sem texto introdu
         }
 
     except Exception as exc:
+        from core.headline_drawer import clean_and_condense_headline
         words_preview = snippet_clean.split()
         fallback_title = " ".join(words_preview[:7]) if words_preview else "Declaração em Destaque"
         return {
             "titulo_principal": fallback_title[:60],
+            "headline_topo": clean_and_condense_headline(fallback_title, max_chars=38),
             "titulos_alternativos": [],
             "descricao": f"Confira este trecho: '{fallback_title}...'. O que você acha? Deixe sua opinião!",
             "hashtags": ["#shorts", "#viral", "#cortes", "#reels"],

@@ -51,6 +51,15 @@ HEADLINE_PRESETS = {
 }
 
 
+DANGLING_ENDINGS = {
+    'E', 'DE', 'DO', 'DA', 'DOS', 'DAS', 'EM', 'NO', 'NA', 'NOS', 'NAS',
+    'COM', 'POR', 'PARA', 'PRA', 'PELO', 'PELA', 'PELOS', 'PELAS',
+    'QUE', 'SE', 'UM', 'UMA', 'UNS', 'UMAS', 'A', 'O', 'AS', 'OS',
+    'AO', 'AOS', 'MAS', 'OU', 'NEM', 'POIS', 'PORQUE', 'SEU', 'SUA',
+    'SEUS', 'SUAS', 'ESTE', 'ESTA', 'ESSE', 'ESSA', 'AQUELE', 'AQUELA'
+}
+
+
 def hex_to_ass_color(hex_color: str, alpha: float = 0.0) -> str:
     """
     Converte cor hexadecimal (#RRGGBB) para o formato ASS (&HAABBGGRR&).
@@ -68,26 +77,105 @@ def hex_to_ass_color(hex_color: str, alpha: float = 0.0) -> str:
     return f"&H{a_hex}{b.upper()}{g.upper()}{r.upper()}&"
 
 
-def format_headline_text(text: str, max_width_chars: int = 24) -> str:
+def clean_and_condense_headline(text: str, max_chars: int = 42) -> str:
     """
-    Formata e quebra o texto do título em até 2 ou 3 linhas curtas,
-    colocando em caixa alta com formatação ideal para leitura rápida em tela vertical.
+    Higieniza e sintetiza frases longas para criar uma Headline de topo com pensamento 100% COMPLETO.
+    Remove prefixos de orador, prioriza citações diretas e NUNCA deixa preposições ou conjunções cortadas no final.
+    """
+    if not text:
+        return ""
+    
+    cleaned = text.strip().strip('"\'')
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    
+    # 1. Se houver aspas com fala direta expressiva, prioriza a citação
+    quote_match = re.search(r'["\']([^"\']{10,50})["\']', cleaned)
+    if quote_match:
+        cleaned = quote_match.group(1).strip()
+    
+    # 2. Remove prefixos de orador / pauta genérica que ocupam espaço inútil no topo
+    cleaned = re.sub(
+        r'^(?:[A-ZÀ-Úa-zà-ú\s]{2,25}\s+(?:diz|afirma|revela|prevê|alerta|explica|promete|fala|desafia|conta|dispara|comenta|lembra)\s*(?:que|sobre|o|a|os|as)?[:\s\-]*|\b(?:candidato|entrevistado|apresentador|ministro|senador|deputado|orador)\s+(?:diz|afirma|revela|prevê|alerta|explica|promete|fala|desafia|comenta)\s*(?:que|sobre|o|a|os|as)?[:\s\-]*|\b[A-ZÀ-Úa-zà-ú]+(?:\s+[A-ZÀ-Úa-zà-ú]+)?\s*:\s*)',
+        '',
+        cleaned,
+        flags=re.IGNORECASE
+    ).strip()
+
+    # 3. Se ainda estiver longo, verifica se há pontuação forte ( ?, !, :, -, , ) para quebrar num pensamento completo
+    if len(cleaned) > max_chars:
+        for punct in ['?', '!', ':', '-']:
+            if punct in cleaned:
+                parts = cleaned.split(punct)
+                if len(parts[0]) >= 10:
+                    cleaned = parts[0] + (punct if punct in ['?', '!'] else '')
+                    break
+
+    # 4. Se ainda ultrapassar max_chars, corta de forma inteligente por palavras sem deixar preposições penduradas
+    if len(cleaned) > max_chars:
+        words = cleaned.split()
+        cur_phrase = []
+        for w in words:
+            if len(" ".join(cur_phrase + [w])) <= max_chars:
+                cur_phrase.append(w)
+            else:
+                break
+        
+        # Remove palavras penduradas do final (preposições, conjunções, artigos)
+        while cur_phrase and (cur_phrase[-1].upper().rstrip('.,;!?:') in DANGLING_ENDINGS or len(cur_phrase[-1]) <= 1):
+            cur_phrase.pop()
+            
+        if cur_phrase:
+            cleaned = " ".join(cur_phrase)
+        else:
+            cleaned = " ".join(words[:4])
+
+    cleaned = cleaned.strip(' ,;:-').upper()
+    
+    # Se terminar sem pontuação e parecer pergunta, adiciona ?
+    if cleaned and not cleaned[-1] in '?!.':
+        first_word = cleaned.split()[0]
+        if first_word in {'QUEM', 'COMO', 'ONDE', 'QUANDO', 'QUAL', 'QUAIS', 'PORQUE', 'SERÁ', 'VAI', 'VALE', 'É'}:
+            cleaned += '?'
+            
+    return cleaned
+
+
+def format_headline_text(text: str, max_width_chars: int = 22, max_lines: int = 2) -> str:
+    """
+    Formata e quebra o texto da headline em até 2 linhas curtas e harmoniosas,
+    garantindo que a frase seja concisa, em caixa alta e com pensamento 100% completo.
     No ASS, quebras de linha são feitas com \\N.
     """
     if not text:
         return ""
     
-    # Remove aspas extras ou marcadores
-    cleaned = text.strip().strip('"\'').upper()
-    cleaned = re.sub(r'\s+', ' ', cleaned)
-    
-    # Quebra em linhas de até max_width_chars caracteres sem quebrar palavras
-    wrapped_lines = textwrap.wrap(cleaned, width=max_width_chars)
+    condensed = clean_and_condense_headline(text, max_chars=44)
+    if not condensed:
+        condensed = text.strip().upper()[:40]
+        
+    total_len = len(condensed)
+    target_width = max_width_chars
+    if total_len <= 30:
+        target_width = 16
+    elif total_len <= 44:
+        target_width = 22
+    else:
+        target_width = 24
+        
+    wrapped_lines = textwrap.wrap(condensed, width=target_width)
     if not wrapped_lines:
-        return cleaned
-    
-    # Limita a no máximo 3 linhas
-    wrapped_lines = wrapped_lines[:3]
+        return condensed
+        
+    # Limita ao número máximo de linhas configurado (padrão: 2 linhas)
+    if len(wrapped_lines) > max_lines:
+        wrapped_lines = wrapped_lines[:max_lines]
+        # Garante que a última linha não termina com preposição/conjunção cortada
+        last_words = wrapped_lines[-1].split()
+        while last_words and last_words[-1].upper().rstrip('.,;!?:') in DANGLING_ENDINGS:
+            last_words.pop()
+        if last_words:
+            wrapped_lines[-1] = " ".join(last_words)
+
     return r"\N".join(wrapped_lines)
 
 

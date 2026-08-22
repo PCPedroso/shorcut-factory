@@ -1513,6 +1513,7 @@ if st.session_state.transcription_done:
                             meta_res = core.analyzer.generate_viral_cut_metadata(snippet_text, model=model_for_meta)
                             
                             st.session_state["input_cut_title"] = meta_res.get("titulo_principal", "Corte Selecionado")
+                            st.session_state["input_cut_headline"] = meta_res.get("headline_topo") or meta_res.get("titulo_principal", "Corte Selecionado")
                             st.session_state["input_cut_desc"] = meta_res.get("descricao", "")
                             st.session_state["input_cut_hashtags"] = " ".join(meta_res.get("hashtags", ["#shorts", "#viral", "#cortes"]))
                             st.session_state["input_cut_tags_seo"] = meta_res.get("tags_seo", "")
@@ -1537,11 +1538,20 @@ if st.session_state.transcription_done:
         badge_desc = "🟢 [GERADA POR IA COM CTA]" if is_gen else "⚪ [PADRÃO]"
         badge_tags = "🟢 [TAGS CONTEXTUAIS]" if is_gen else "⚪ [PADRÃO]"
 
-        cut_title_val = st.text_input(
-            f"🏷️ Título do Corte {badge_title}:",
-            value=st.session_state.get("input_cut_title", "Corte Selecionado"),
-            key="input_cut_title"
-        )
+        col_t1, col_t2 = st.columns([1.4, 1.0])
+        with col_t1:
+            cut_title_val = st.text_input(
+                f"🏷️ Título do Corte (YouTube/Redes) {badge_title}:",
+                value=st.session_state.get("input_cut_title", "Corte Selecionado"),
+                key="input_cut_title"
+            )
+        with col_t2:
+            cut_headline_val = st.text_input(
+                f"📌 Headline de Topo 9:16 (Curta) {badge_title}:",
+                value=st.session_state.get("input_cut_headline", st.session_state.get("input_cut_title", "Corte Selecionado")),
+                key="input_cut_headline",
+                help="Frase de gancho curta e completa (máx 35-40 caracteres) fixada na caixa magnética no topo do vídeo."
+            )
         
         # Prévia do nome da pasta e do arquivo de vídeo gerados
         _preview_folder = build_cut_folder_name(selected_aspect, cut_title_val)
@@ -1716,7 +1726,7 @@ if st.session_state.transcription_done:
                             subtitle_font_size=subtitle_font_size,
                             # Fase 3: Retenção & Áudio
                             headline_enabled=headline_enabled,
-                            headline_text=cut_title_val,
+                            headline_text=cut_headline_val,
                             headline_preset=headline_preset,
                             headline_text_color=headline_text_color,
                             headline_bg_color=headline_bg_color,
