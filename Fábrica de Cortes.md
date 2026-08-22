@@ -175,19 +175,45 @@ venv\Scripts\pytest -v tests/
 
 ---
 
-## 🔮 Roadmap Futuro & Backlog de Melhorias (Fase 4)
+## 🔮 Roadmap de Evolução por Fases (Do Mais Simples ao Mais Complexo)
 
-Itens mapeados para expansão após a consolidação da versão funcional:
+O plano de evolução futura da Fábrica de Cortes está dividido em etapas progressivas para garantir entregas modulares, testáveis e sem regressões:
 
-1. **🖼️ Gerador Automático de Capas / Miniaturas (Thumbnails 9:16)**:
-   - Extração do frame mais expressivo do corte com detecção facial (olhos abertos, expressão ativa).
-   - Inserção de texto de chamada contrastante e exportação automática de `thumbnail.jpg` dentro do pacote viral.
-2. **🔊 Biblioteca Dinâmica de Efeitos Sonoros (SFX)**:
-   - Inserção de efeitos sonoros rápidos (*Whoosh* em transições de Zoom Punch, *Pop* ao surgir emojis, *Impact/Boom* em declarações polêmicas) sintonizados com o tom emocional do trecho.
-3. **🎬 B-Roll Inteligente & Split Screen Híbrido (Vídeo + Imagem/Vídeo de Contexto)**:
-   - Detecção de termos-chave e entidades na fala (ex: nomes de empresas, gráficos, pessoas públicas) com inserção de imagem/vídeo ilustrativo de apoio no topo ou em overlay de 2 a 3 segundos.
-4. **⏳ Barra de Progresso Animada de Retenção (Dynamic Progress Bar)**:
-   - Barra minimalista animada no rodapé do vídeo para indicar o tempo restante do corte, aumentando a taxa de conclusão (completion rate) no algoritmo do TikTok e Shorts.
-5. **📅 Fila de Agendamento Automático de Postagens**:
-   - Agendamento de publicações com cronograma pré-definido via API e Webhooks.
+---
+
+### 🚀 Fase 4 — Polimento Visual, Thumbnails Inteligentes & Retenção Dinâmica (Simples a Médio)
+*Foco: Elevar o apelo de clique e a taxa de conclusão (completion rate) com recursos visuais leves e diretos.*
+
+1. **🖼️ Gerador Automático de Capas / Thumbnails 9:16 (`core/thumbnail_generator.py`)**:
+   - Detecção do frame mais expressivo do corte via MediaPipe (olhos abertos, boca em articulação clara, nitidez facial).
+   - Composição automática com a Headline magnética de topo, moldura sutil e salvamento de `thumbnail.jpg` na pasta do corte.
+   - Prévia instantânea e botão de download na Seção 3 e na Galeria de Cortes.
+2. **⏳ Barra de Progresso Animada de Retenção (Dynamic Progress Bar)**:
+   - Linha minimalista e personalizável no rodapé do vídeo (via FFmpeg) indicando o progresso do corte para reter o espectador até o último segundo.
+3. **📌 Banner de Chamada / Lower Third Dinâmico (Engagement Callout)**:
+   - Aparição sutil e elegante nos últimos 4-5 segundos provocando engajamento (*"💬 O que você acha? Comente!"* / *"🔔 Siga para mais cortes diários"*).
+4. **🎯 Zoom de Ênfase no Clímax (Climax Punchline Zoom)**:
+   - Aplicação de zoom dramático e focado no rosto do orador no exato segundo da frase de impacto/punchline final.
+
+---
+
+### 🚀 Fase 5 — Sound FX (SFX) Inteligentes & B-Roll / Overlays de Contexto (Médio a Avançado)
+*Foco: Imersão sonora dinâmica e quebra de padrão visual com materiais visuais de apoio.*
+
+1. **🔊 Biblioteca de Efeitos Sonoros Inteligentes (SFX Engine)** (`core/sfx_manager.py`):
+   - Inserção de efeitos sonoros curtos sincronizados: *Whoosh* no Zoom Punch, *Pop/Ka-ching* ao surgir emojis de dinheiro, *Boom/Alerta* em momentos de tensão.
+   - Seleção automática da trilha sonora com base na análise de tom do Ollama (Polêmico $\to$ Tensão, Motivacional $\to$ Épico, Aula $\to$ Lo-Fi).
+2. **🎬 B-Roll Inteligente & Split Screen Híbrido** (`core/broll_engine.py`):
+   - Detecção de entidades e tópicos visuais na fala (nomes de pessoas, notícias, dados, gráficos).
+   - Inserção de imagens/vídeos de apoio na metade superior do Split Screen ou em overlays curtos de 2 a 3 segundos (cutaways).
+
+---
+
+### 🚀 Fase 6 — Automação Total, Agendamento e Pipeline Sem Supervisão (Avançado)
+*Foco: Escala de publicação autônoma em canais e redes sociais.*
+
+1. **📅 Fila de Agendamento Automático de Postagens**:
+   - Agendamento de publicações com cronograma e espaçamento de horários pré-definido via YouTube Data API v3 e Webhooks.
+2. **🤖 Modo Fábrica 100% Autônomo (Zero-Touch Batch)**:
+   - Processamento de ponta a ponta a partir de uma lista de URLs do YouTube: download $\to$ análise $\to$ recorte multi-formato $\to$ empacotamento $\to$ disparo sem intervenção manual.
 
