@@ -31,11 +31,12 @@ shorcut-factory/
 ├── assets/
 │   └── audio/                 # Trilhas sonoras royalty-free categorizadas (.wav / .mp3)
 ├── tests/                     # Suíte de Testes Unitários Automatizados
+│   ├── test_thumbnail_generator.py # Testes de frames, nitidez e capas 9:16
 │   ├── test_headline_drawer.py   # Testes de headlines, quebras e formato ASS
 │   ├── test_export_kit.py        # Testes de pastas, prefixos e kit viral
 │   ├── test_cuts_catalog.py      # Testes de catálogo, instâncias e exclusão
 │   ├── test_audio_mixer.py       # Testes de trilhas e áudio ducking
-│   ├── test_retention_effects.py # Testes de zoom punch e emojis
+│   ├── test_retention_effects.py # Testes de zoom punch, progress bar e callouts
 │   ├── test_config_manager.py    # Testes de persistência de configurações
 │   ├── test_integrations.py      # Testes de webhooks e payloads
 │   └── test_analyzer_utils.py    # Testes de conversão de tempo e textos
@@ -45,14 +46,15 @@ shorcut-factory/
 │   ├── analyzer.py            # Análise Q&A/Temática e geração do Kit Viral com IA
 │   ├── video_processor.py     # Pipeline FFmpeg para os 5 formatos de enquadramento + efeitos
 │   ├── face_tracker.py        # Detecção facial MediaPipe e Split Screen Auto-Switch
-│   ├── subtitle_burner.py     # Geração de legendas dinâmicas em ASS + Headlines + Emojis
+│   ├── subtitle_burner.py     # Geração de legendas dinâmicas em ASS + Headlines + Emojis + Callout
 │   ├── headline_drawer.py     # Estilização de Headlines magnéticas de topo (Amarelo, Red, Dark, Custom)
+│   ├── thumbnail_generator.py # Extração de melhor frame (MediaPipe/sharpness) e capas 9:16
 │   ├── audio_mixer.py         # Mixagem de áudio com Ducking dinâmico via sidechaincompress FFmpeg
-│   ├── retention_effects.py   # Filtro Zoom Punch e emojis contextuais
+│   ├── retention_effects.py   # Barra de progresso, Zoom Punch, Climax Zoom e Callout ASS
 │   ├── integrations.py        # Upload YouTube Shorts API v3 e despachante de Webhooks
-│   ├── export_kit.py          # Nomenclatura estrita (VLDSS, VRIRA...) e pastas de publicação
+│   ├── export_kit.py          # Nomenclatura estrita (VLDSS, VRIRA...) e pastas de publicação com thumbnail
 │   ├── cuts_catalog.py        # Catálogo e cache inteligente multi-instância (cuts_catalog.json)
-│   ├── batch_processor.py     # Processamento sequencial em lote com Smart Skip e Phase 3
+│   ├── batch_processor.py     # Processamento sequencial em lote com Smart Skip e Phase 4
 │   ├── library_manager.py     # Catálogo global de vídeos processados (library.json)
 │   └── config_manager.py      # Persistência contínua de preferências (app_settings.json)
 ├── data/
@@ -64,7 +66,7 @@ shorcut-factory/
 │       ├── transcript.json    # Transcrição com timestamps por palavra
 │       ├── video_full.mp4     # Vídeo original Full HD 1080p
 │       ├── cuts_catalog.json  # Catálogo de cortes e formatos gerados para este vídeo
-│       └── <PREFIXO>_<NOME>/  # Pasta final do corte (Vídeo + Kit de Publicação)
+│       └── <PREFIXO>_<NOME>/  # Pasta final do corte (Vídeo + Thumbnail + Kit de Publicação)
 └── requirements.txt
 ```
 
@@ -98,7 +100,7 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 
 ---
 
-## ✅ Histórico de Fases Concluídas
+## ✅ Fases Concluídas e Sincronizadas
 
 ### 🔹 Fase 1 — Estrutura Base, Análise e Enquadramentos 9:16
 - **Interface Streamlit** modular (`app.py`).
@@ -107,24 +109,20 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 - **Inteligência Temática Dual** com Ollama (Llama 3 local):
   - Modo `🎙️ Entrevistas & Sabatinas`: Detecção de turnos Q&A com timestamp exato `[INÍCIO → FIM]`.
   - Modo `🧠 Temático / Monólogos`: Mapeamento de transições de tópicos e ganchos contínuos (10+ min).
-- **5 Modos de Enquadramento de Vídeo** em `core/video_processor.py`:
-  - Split Screen com Auto-Switch MediaPipe, Auto-Reframing Facial, Blur com Auto-Zoom, Center Crop e 16:9 Full HD.
+- **Ganchos Virais (Shorts / Reels)** estruturados sob as **6 Regras de Ouro Editoriais**.
+- **5 Modos de Enquadramento de Vídeo** em `core/video_processor.py` (Split Screen Auto-Switch, Auto-Reframing, Blur, Crop, 16:9).
 
 ### 🔹 Fase 2 — Legendas Dinâmicas, Kit Viral, Lote e Catálogo Inteligente
 - **Legendas Dinâmicas Estilo CapCut / Alex Hormozi** (`core/subtitle_burner.py`):
-  - Renderização nativa em ASS (`libass` do FFmpeg) com efeito karaokê palavra-a-palavra sincronizado com Whisper/YouTube.
-  - Cores configuráveis (Destaque e Base), sliders de fonte (40px a 160px) e contorno nítido.
+  - Renderização nativa em ASS (`libass` do FFmpeg) com efeito karaokê palavra-a-palavra sincronizado.
+  - Cores configuráveis (Destaque e Base), sliders de fonte e contorno nítido.
 - **Kit de Publicação Viral com IA** (`core/analyzer.py`):
-  - Título Magnético, Variações Alternativas, Legenda persuasiva com CTA e Hashtags/SEO contextuais.
+  - Título Magnético, Variações Alternativas, Legenda com CTA e Hashtags/SEO contextuais.
 - **Exportação Padronizada com Nomenclatura Estrita** (`core/export_kit.py`):
   - Prefixos de 5 letras (`VLDSS`, `VRIRA`, `VFDBS`, `VCCFT`, `HOFHD`) + limite de 25 caracteres em palavras completas do título.
   - Criação da pasta `data/<video_id>/<PREFIXO>_<Palavras>/` com `.mp4`, `info_publicacao.txt`, `descricao.txt` e `tags.txt`.
 - **Catálogo & Cache Inteligente por Minutagem e Formato** (`core/cuts_catalog.py`):
   - Rastreamento em `data/<video_id>/cuts_catalog.json` de múltiplas instâncias de enquadramento com abertura instantânea (0s).
-- **Esteira de Renderização em Lote (Batch Pipeline)** (`core/batch_processor.py`):
-  - Seleção por checkboxes unificados, botão *"Selecionar Todos para Lote"*, barra de progresso visual e Smart Skip.
-- **Galeria de Cortes Produzidos (Seção 4)**:
-  - Players verticais 9:16 compactos, download direto e exclusão granular.
 
 ### 🔹 Fase 3 — Retenção de Topo, Áudio Ducking & Integrações
 - **🏷️ Headline / Título Fixo de Retenção no Topo (9:16)** (`core/headline_drawer.py`):
@@ -136,32 +134,25 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Zoom Punch periódico sutil (1.08x) a cada ~8.5s e injeção de emojis contextuais nas legendas.
 - **🌐 Exportação Direta & Integrações** (`core/integrations.py`):
   - Upload para o YouTube Shorts via OAuth2 e disparo estruturado para Webhooks (n8n/Make/Zapier).
-- **🧪 Suíte de 24 Testes Unitários Automatizados (`tests/`)**:
+
+### 🔹 Fase 4 — Polimento Visual, Thumbnails Inteligentes & Retenção Dinâmica
+- **🖼️ Gerador Automático de Capas / Thumbnails 9:16 (`core/thumbnail_generator.py`)**:
+  - Extração do frame mais expressivo do corte combinando nitidez Laplaciana (anti-blur) e detecção facial MediaPipe BlazeFace.
+  - Composição visual 1080x1920 com a Headline magnética de topo, vinheta de contraste e tipografia `Montserrat-ExtraBold`.
+  - Salvamento automático de `thumbnail.jpg` dentro do pacote do corte (`export_kit.py`).
+  - Prévia visual e botão de download da thumbnail na **Seção 3** e em cada card da **Galeria (Seção 4)**.
+- **⏳ Barra de Progresso Animada de Retenção (Dynamic Progress Bar)**:
+  - Linha fluida no rodapé do vídeo renderizada via filtros dinâmicos FFmpeg `drawbox` com cores customizáveis (Vermelho, Amarelo, Ciano, Branco, Verde).
+- **📌 Banner de Chamada / Lower Third Dinâmico (Engagement Callout)**:
+  - Aparição elegante nos últimos 4-5 segundos provocando engajamento (*"💬 O que você acha? Comente!"*, *"🔔 Siga para mais cortes diários"*) em ASS com fade suave `\fad(300,300)`.
+- **🎯 Zoom de Ênfase no Clímax (Climax Punchline Zoom)**:
+  - Aproximação dramática (1.08x a 1.20x) no orador durante os últimos segundos do corte para reforçar a punchline final.
+- **🧪 Suíte de 31 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando toda a suíte do `core/` via `pytest`.
 
 ---
 
-## 🔮 Roadmap de Evolução por Fases (Do Mais Simples ao Mais Complexo)
-
-O plano de evolução futura da Fábrica de Cortes está dividido em etapas progressivas para garantir entregas modulares, testáveis e sem regressões:
-
----
-
-### 🚀 Fase 4 — Polimento Visual, Thumbnails Inteligentes & Retenção Dinâmica (Simples a Médio)
-*Foco: Elevar o apelo de clique e a taxa de conclusão (completion rate) com recursos visuais leves e diretos.*
-
-1. **🖼️ Gerador Automático de Capas / Thumbnails 9:16 (`core/thumbnail_generator.py`)**:
-   - Detecção do frame mais expressivo do corte via MediaPipe (olhos abertos, boca em articulação clara, nitidez facial).
-   - Composição automática com a Headline magnética de topo, moldura sutil e salvamento de `thumbnail.jpg` na pasta do corte (`export_kit.py`).
-   - Prévia instantânea e botão de download na Seção 3 e na Galeria de Cortes.
-2. **⏳ Barra de Progresso Animada de Retenção (Dynamic Progress Bar)**:
-   - Linha minimalista e personalizável no rodapé do vídeo (via FFmpeg) indicando o progresso do corte para reter o espectador até o último segundo.
-3. **📌 Banner de Chamada / Lower Third Dinâmico (Engagement Callout)**:
-   - Aparição sutil e elegante nos últimos 4-5 segundos provocando engajamento (*"💬 O que você acha? Comente!"* / *"🔔 Siga para mais cortes diários"*).
-4. **🎯 Zoom de Ênfase no Clímax (Climax Punchline Zoom)**:
-   - Aplicação de zoom dramático e focado no rosto do orador no exato segundo da frase de impacto/punchline final.
-
----
+## 🔮 Roadmap de Evolução Futura
 
 ### 🚀 Fase 5 — Sound FX (SFX) Inteligentes & B-Roll / Overlays de Contexto (Médio a Avançado)
 *Foco: Imersão sonora dinâmica e quebra de padrão visual com materiais visuais de apoio.*

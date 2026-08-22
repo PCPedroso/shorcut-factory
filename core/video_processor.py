@@ -119,7 +119,7 @@ def cut_video(
     subtitle_highlight_color: str = "#FFFF00",
     subtitle_base_color: str = "#FFFFFF",
     subtitle_font_size: int = 55,
-    # --- Parâmetros da Fase 3: Retenção & Áudio ---
+    # --- Parâmetros da Fase 3 & 4: Retenção, Capas & Áudio ---
     headline_enabled: bool = False,
     headline_text: str = "",
     headline_preset: str = "yellow_black",
@@ -133,6 +133,17 @@ def cut_video(
     bg_music_track_path: str = None,
     bg_music_volume: float = 0.15,
     ducking_preset: str = "medio",
+    # --- Parâmetros da Fase 4: Retenção Dinâmica & Thumbnails ---
+    progress_bar_enabled: bool = False,
+    progress_bar_color: str = "#FF0000",
+    progress_bar_height: int = 8,
+    callout_enabled: bool = False,
+    callout_text: str = "",
+    callout_duration: float = 4.5,
+    climax_zoom_enabled: bool = False,
+    climax_zoom_factor: float = 1.14,
+    thumbnail_enabled: bool = True,
+    thumbnail_output_path: str = None,
 ) -> dict:
     """
     Corta e formata o vídeo com alta precisão e esteira completa de pós-produção via FFmpeg.
@@ -272,7 +283,11 @@ def cut_video(
                 {"path": output_path, "error": None}, output_path, start_time_str, end_time_str,
                 subtitle_enabled, subtitle_transcript_path, subtitle_highlight_color, subtitle_base_color, subtitle_font_size,
                 headline_enabled, headline_text, headline_preset, headline_text_color, headline_bg_color, headline_font_size, headline_margin_top,
-                emojis_enabled, zoom_punch_enabled, bg_music_enabled, bg_music_track_path, bg_music_volume, ducking_preset
+                emojis_enabled, zoom_punch_enabled, bg_music_enabled, bg_music_track_path, bg_music_volume, ducking_preset,
+                progress_bar_enabled, progress_bar_color, progress_bar_height,
+                callout_enabled, callout_text, callout_duration,
+                climax_zoom_enabled, climax_zoom_factor,
+                thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path
             )
 
         # Fallback MoviePy se FFmpeg direto retornar erro
@@ -296,7 +311,11 @@ def cut_video(
             {"path": output_path, "error": None}, output_path, start_time_str, end_time_str,
             subtitle_enabled, subtitle_transcript_path, subtitle_highlight_color, subtitle_base_color, subtitle_font_size,
             headline_enabled, headline_text, headline_preset, headline_text_color, headline_bg_color, headline_font_size, headline_margin_top,
-            emojis_enabled, zoom_punch_enabled, bg_music_enabled, bg_music_track_path, bg_music_volume, ducking_preset
+            emojis_enabled, zoom_punch_enabled, bg_music_enabled, bg_music_track_path, bg_music_volume, ducking_preset,
+            progress_bar_enabled, progress_bar_color, progress_bar_height,
+            callout_enabled, callout_text, callout_duration,
+            climax_zoom_enabled, climax_zoom_factor,
+            thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path
         )
     except Exception as e:
         return {"path": None, "error": str(e)}
@@ -325,12 +344,27 @@ def _apply_all_post_processing(
     bg_music_track_path: str,
     bg_music_volume: float,
     ducking_preset: str,
+    # --- Parâmetros da Fase 4 ---
+    progress_bar_enabled: bool = False,
+    progress_bar_color: str = "#FF0000",
+    progress_bar_height: int = 8,
+    callout_enabled: bool = False,
+    callout_text: str = "",
+    callout_duration: float = 4.5,
+    climax_zoom_enabled: bool = False,
+    climax_zoom_factor: float = 1.14,
+    thumbnail_enabled: bool = True,
+    thumbnail_output_path: str = None,
+    aspect_mode: str = "9:16_smart_face",
+    source_video_path: str = None
 ) -> dict:
     """
-    Esteira unificada de pós-processamento:
-    1. Aplica Zoom Punch dinâmico (se ativado e corte vertical).
-    2. Aplica Legendas Dinâmicas e/ou Headline fixa no topo via ASS.
-    3. Aplica Trilha Sonora de fundo com Audio Ducking inteligente via FFmpeg.
+    Esteira unificada de pós-produção (Fases 2, 3 e 4):
+    1. Aplica Zoom Punch dinâmico e/ou Climax Punchline Zoom.
+    2. Aplica Barra de Progresso Animada no rodapé via FFmpeg drawbox.
+    3. Aplica Legendas Dinâmicas, Headline fixa e Lower Third de Engajamento via ASS libass.
+    4. Aplica Trilha Sonora de fundo com Audio Ducking inteligente.
+    5. Gera automaticamente a Capa / Thumbnail 9:16 de alta conversão.
     """
     if result.get("error") or not result.get("path"):
         return result
@@ -340,40 +374,92 @@ def _apply_all_post_processing(
     end_s = parse_time_to_seconds(end_time_str)
     duration_s = max(1.0, float(end_s - start_s))
 
-    # --- 1. Zoom Punch de Retenção Visual ---
+    # --- 1. Zoom Punch de Retenção & Climax Punchline Zoom ---
+    zoom_filters = []
     if zoom_punch_enabled and duration_s >= 7.0:
         try:
             from core.retention_effects import generate_zoom_punch_filter
-            punch_filter = generate_zoom_punch_filter(duration=duration_s, interval=8.5, zoom_factor=1.07)
-            if punch_filter:
-                tmp_punch = output_path.replace(".mp4", "_punch_tmp.mp4")
-                if tmp_punch == output_path:
-                    tmp_punch = output_path + ".p_tmp.mp4"
-                
+            punch_f = generate_zoom_punch_filter(duration=duration_s, interval=8.5, zoom_factor=1.07)
+            if punch_f:
+                zoom_filters.append(punch_f)
+        except Exception:
+            pass
+
+    if climax_zoom_enabled and duration_s >= 5.0:
+        try:
+            from core.retention_effects import generate_climax_zoom_filter
+            climax_f = generate_climax_zoom_filter(duration=duration_s, climax_duration=3.5, zoom_factor=climax_zoom_factor)
+            if climax_f:
+                zoom_filters.append(climax_f)
+        except Exception:
+            pass
+
+    for zf in zoom_filters:
+        try:
+            tmp_z = output_path.replace(".mp4", "_zoom_tmp.mp4")
+            if tmp_z == output_path:
+                tmp_z = output_path + ".z_tmp.mp4"
+
+            cmd = [
+                FFMPEG_EXE, "-y",
+                "-i", curr_path,
+                "-vf", zf,
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "20",
+                "-c:a", "copy",
+                tmp_z
+            ]
+            z_res = subprocess.run(cmd, capture_output=True, text=True)
+            if z_res.returncode == 0 and os.path.exists(tmp_z) and os.path.getsize(tmp_z) > 0:
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+                os.rename(tmp_z, output_path)
+                curr_path = output_path
+            else:
+                if os.path.exists(tmp_z):
+                    os.remove(tmp_z)
+        except Exception:
+            pass
+
+    # --- 2. Barra de Progresso Animada de Retenção (Fase 4) ---
+    if progress_bar_enabled and duration_s >= 2.0:
+        try:
+            from core.retention_effects import generate_progress_bar_filter
+            pb_filter = generate_progress_bar_filter(
+                duration=duration_s,
+                color_hex=progress_bar_color,
+                height_px=progress_bar_height
+            )
+            if pb_filter:
+                tmp_pb = output_path.replace(".mp4", "_pb_tmp.mp4")
+                if tmp_pb == output_path:
+                    tmp_pb = output_path + ".pb_tmp.mp4"
+
                 cmd = [
                     FFMPEG_EXE, "-y",
                     "-i", curr_path,
-                    "-vf", punch_filter,
+                    "-vf", pb_filter,
                     "-c:v", "libx264",
                     "-preset", "veryfast",
                     "-crf", "20",
                     "-c:a", "copy",
-                    tmp_punch
+                    tmp_pb
                 ]
-                p_res = subprocess.run(cmd, capture_output=True, text=True)
-                if p_res.returncode == 0 and os.path.exists(tmp_punch) and os.path.getsize(tmp_punch) > 0:
+                pb_res = subprocess.run(cmd, capture_output=True, text=True)
+                if pb_res.returncode == 0 and os.path.exists(tmp_pb) and os.path.getsize(tmp_pb) > 0:
                     if os.path.exists(output_path):
                         os.remove(output_path)
-                    os.rename(tmp_punch, output_path)
+                    os.rename(tmp_pb, output_path)
                     curr_path = output_path
                 else:
-                    if os.path.exists(tmp_punch):
-                        os.remove(tmp_punch)
+                    if os.path.exists(tmp_pb):
+                        os.remove(tmp_pb)
         except Exception:
             pass
 
-    # --- 2. Legendas Dinâmicas & Headline de Topo ---
-    if subtitle_enabled or (headline_enabled and headline_text):
+    # --- 3. Legendas Dinâmicas, Headline de Topo & Callout de Engajamento ---
+    if subtitle_enabled or (headline_enabled and headline_text) or (callout_enabled and callout_text):
         from core.subtitle_burner import burn_subtitles
         sub_result = burn_subtitles(
             input_video_path=curr_path,
@@ -392,6 +478,9 @@ def _apply_all_post_processing(
             headline_font_size=headline_font_size,
             headline_margin_top=headline_margin_top,
             emojis_enabled=emojis_enabled,
+            callout_enabled=callout_enabled,
+            callout_text=callout_text,
+            callout_duration=callout_duration,
         )
         if sub_result.get("error"):
             result["subtitle_error"] = sub_result["error"]
@@ -401,7 +490,7 @@ def _apply_all_post_processing(
             curr_path = sub_result["path"]
             result["path"] = curr_path
 
-    # --- 3. Trilha Sonora de Fundo & Audio Ducking Inteligente ---
+    # --- 4. Trilha Sonora de Fundo & Audio Ducking Inteligente ---
     if bg_music_enabled and bg_music_track_path and os.path.exists(bg_music_track_path):
         from core.audio_mixer import apply_audio_ducking
         duck_result = apply_audio_ducking(
@@ -416,6 +505,32 @@ def _apply_all_post_processing(
         elif duck_result.get("path"):
             curr_path = duck_result["path"]
             result["path"] = curr_path
+
+    # --- 5. Geração Automática de Thumbnail / Capa 9:16 (Fase 4) ---
+    if thumbnail_enabled:
+        try:
+            from core.thumbnail_generator import create_cut_thumbnail
+            thumb_target = thumbnail_output_path
+            if not thumb_target:
+                out_dir = os.path.dirname(output_path)
+                thumb_target = os.path.join(out_dir, "thumbnail.jpg")
+
+            thumb_src = source_video_path if (source_video_path and os.path.exists(source_video_path)) else curr_path
+            thumb_res = create_cut_thumbnail(
+                source_video_or_frame=thumb_src,
+                headline_text=headline_text if (headline_enabled and headline_text) else "",
+                output_path=thumb_target,
+                start_time_str=start_time_str,
+                end_time_str=end_time_str,
+                preset=headline_preset,
+                custom_text_color=headline_text_color,
+                custom_bg_color=headline_bg_color,
+                aspect_mode=aspect_mode
+            )
+            if thumb_res.get("path") and os.path.exists(thumb_res["path"]):
+                result["thumbnail_path"] = thumb_res["path"]
+        except Exception:
+            pass
 
     return result
 

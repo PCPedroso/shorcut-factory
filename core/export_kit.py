@@ -61,15 +61,17 @@ def create_viral_package(
     tags_seo: str,
     aspect_mode: str,
     output_base_dir: str,
-    orig_video_info: dict = None
+    orig_video_info: dict = None,
+    thumbnail_path: str = None,
 ) -> dict:
     """
     Cria a pasta estruturada do corte dentro de data/<video_id>/<PREFIXO>_<Palavras>/
     e gera:
     1. Vídeo renderizado (.mp4) nomeado com o código do corte
-    2. info_publicacao.txt (guia completo de postagem + dados do vídeo original)
-    3. descricao.txt (apenas a legenda pronta para colar)
-    4. tags.txt (hashtags e tags SEO)
+    2. Capa / Thumbnail 9:16 (thumbnail.jpg) em alta resolução
+    3. info_publicacao.txt (guia completo de postagem + dados do vídeo original)
+    4. descricao.txt (apenas a legenda pronta para colar)
+    5. tags.txt (hashtags e tags SEO)
     """
     try:
         folder_name = build_cut_folder_name(aspect_mode, title)
@@ -82,6 +84,13 @@ def create_viral_package(
         if os.path.exists(video_path):
             shutil.copy2(video_path, video_dest_path)
 
+        # 2. Copia ou move a thumbnail gerada
+        thumb_dest_path = None
+        thumb_filename = "thumbnail.jpg"
+        if thumbnail_path and os.path.exists(thumbnail_path):
+            thumb_dest_path = os.path.join(package_dir, thumb_filename)
+            shutil.copy2(thumbnail_path, thumb_dest_path)
+
         # Formata hashtags
         hashtags_str = " ".join(h if h.startswith("#") else f"#{h}" for h in hashtags) if hashtags else "#shorts #viral #cortes"
 
@@ -92,7 +101,9 @@ def create_viral_package(
         orig_date = orig_info.get("upload_date", "Data N/D")
         orig_url = orig_info.get("url", "")
 
-        # 2. info_publicacao.txt
+        thumb_info_str = f"• Capa / Thumbnail: {thumb_filename}\n" if thumb_dest_path else ""
+
+        # 3. info_publicacao.txt
         info_content = f"""════════════════════════════════════════════════════════════════
 🚀 PACOTE DE PUBLICAÇÃO VIRAL
 📁 CÓDIGO DO CORTE: {folder_name}
@@ -111,7 +122,7 @@ def create_viral_package(
 
 🎬 ARQUIVO DE VÍDEO GERADO:
 {video_filename}
-
+{thumb_info_str}
 ════════════════════════════════════════════════════════════════
 📺 INFORMAÇÕES DO VÍDEO ORIGINAL
 ════════════════════════════════════════════════════════════════
@@ -123,12 +134,12 @@ def create_viral_package(
         with open(os.path.join(package_dir, "info_publicacao.txt"), "w", encoding="utf-8") as f:
             f.write(info_content)
 
-        # 3. descricao.txt
+        # 4. descricao.txt
         desc_content = f"{description}\n\n{hashtags_str}"
         with open(os.path.join(package_dir, "descricao.txt"), "w", encoding="utf-8") as f:
             f.write(desc_content)
 
-        # 4. tags.txt
+        # 5. tags.txt
         tags_content = f"HASHTAGS:\n{hashtags_str}\n\nTAGS SEO:\n{tags_seo}\n"
         with open(os.path.join(package_dir, "tags.txt"), "w", encoding="utf-8") as f:
             f.write(tags_content)
@@ -138,6 +149,8 @@ def create_viral_package(
             "package_dir": package_dir,
             "video_filename": video_filename,
             "video_dest_path": video_dest_path,
+            "thumbnail_filename": thumb_filename if thumb_dest_path else None,
+            "thumbnail_dest_path": thumb_dest_path,
             "error": None
         }
 

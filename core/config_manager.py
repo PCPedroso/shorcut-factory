@@ -70,6 +70,18 @@ DEFAULT_SETTINGS = {
     "youtube_client_secrets_path": "data/client_secrets.json",
     "youtube_privacy_status": "unlisted",
 
+    # --- Fase 4: Polimento Visual, Thumbnails & Retenção Dinâmica ---
+    "progress_bar_enabled": False,
+    "progress_bar_color": "#FF0000",
+    "progress_bar_height": 8,
+    "callout_enabled": False,
+    "callout_preset": "comment",
+    "callout_text": "💬 O que você acha? Comente abaixo!",
+    "callout_duration": 4.5,
+    "climax_zoom_enabled": False,
+    "climax_zoom_factor": 1.14,
+    "thumbnail_enabled": True,
+
     # Última URL aberta
     "last_video_url": ""
 }

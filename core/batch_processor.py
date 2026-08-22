@@ -208,7 +208,7 @@ def process_batch_cuts(
             subtitle_highlight_color=subtitle_highlight_color,
             subtitle_base_color=subtitle_base_color,
             subtitle_font_size=subtitle_font_size,
-            # Fase 3: Retenção & Áudio Ducking
+            # Fase 3 & 4: Retenção & Áudio Ducking
             headline_enabled=params.get("headline_enabled", False),
             headline_text=cut_headline,
             headline_preset=params.get("headline_preset", "yellow_black"),
@@ -222,6 +222,16 @@ def process_batch_cuts(
             bg_music_track_path=resolved_music_path,
             bg_music_volume=params.get("bg_music_volume", 0.15),
             ducking_preset=params.get("ducking_preset", "medio"),
+            # Fase 4: Retenção Dinâmica & Thumbnails
+            progress_bar_enabled=params.get("progress_bar_enabled", False),
+            progress_bar_color=params.get("progress_bar_color", "#FF0000"),
+            progress_bar_height=params.get("progress_bar_height", 8),
+            callout_enabled=params.get("callout_enabled", False),
+            callout_text=params.get("callout_text", ""),
+            callout_duration=params.get("callout_duration", 4.5),
+            climax_zoom_enabled=params.get("climax_zoom_enabled", False),
+            climax_zoom_factor=params.get("climax_zoom_factor", 1.14),
+            thumbnail_enabled=params.get("thumbnail_enabled", True),
         )
 
         _log(f"Retorno de cut_video: {cut_res}")
@@ -249,7 +259,7 @@ def process_batch_cuts(
 
         _log(f"Vídeo renderizado com sucesso ({os.path.getsize(temp_corte_path)} bytes). Criando pacote de publicação...")
 
-        # 5. Criação do Pacote Estruturado
+        # 5. Criação do Pacote Estruturado (incluindo thumbnail)
         pkg_res = core.export_kit.create_viral_package(
             video_path=temp_corte_path,
             title=cut_title,
@@ -258,7 +268,8 @@ def process_batch_cuts(
             tags_seo=cut_tags_seo,
             aspect_mode=aspect_ratio_mode,
             output_base_dir=data_dir,
-            orig_video_info=orig_info
+            orig_video_info=orig_info,
+            thumbnail_path=cut_res.get("thumbnail_path")
         )
         _log(f"Pacote criado em: {pkg_res.get('package_dir')}")
         _log(f"Arquivo final: {pkg_res.get('video_filename')}")
@@ -286,7 +297,8 @@ def process_batch_cuts(
             folder_name=pkg_res["folder_name"],
             folder_path=pkg_res["package_dir"],
             video_path=pkg_res["video_dest_path"],
-            resolution=out_res
+            resolution=out_res,
+            thumbnail_path=pkg_res.get("thumbnail_dest_path")
         )
 
         _log(f"SUCESSO: Corte [{idx+1}/{total}] concluído e registrado no catálogo!")

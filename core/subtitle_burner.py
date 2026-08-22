@@ -298,15 +298,20 @@ def generate_ass_file(
     headline_bg_color: str = "#FFE600",
     headline_font_size: int = 46,
     headline_margin_top: int = 120,
+    # --- Parâmetros de Callout de Engajamento (Fase 4) ---
+    callout_enabled: bool = False,
+    callout_text: str = "",
+    callout_duration: float = 4.5,
     total_duration: float = 0.0,
 ) -> bool:
     """
-    Gera arquivo de legendas .ass completo com estilos e eventos karaokê palavra-a-palavra
-    e suporte opcional a Headline de Retenção fixa no Topo (estilo TikTok/Reels/Shorts).
+    Gera arquivo de legendas .ass completo com estilos e eventos karaokê palavra-a-palavra,
+    Headline de Retenção fixa no Topo e Banner Lower Third Dinâmico de Engajamento (Fase 4).
     """
     _ensure_font()
 
     from core.headline_drawer import build_ass_headline_style, format_headline_text
+    from core.retention_effects import generate_engagement_callout_ass_dialogue
 
     ass_base_color = _hex_to_ass_color(base_color, alpha=0.0)
     ass_highlight_color = _hex_to_ass_color(highlight_color, alpha=0.0)
@@ -346,6 +351,15 @@ def generate_ass_file(
         )
         styles_section.append(h_style)
 
+    # Adiciona estilo de Callout de Engajamento se habilitado (Fase 4)
+    if callout_enabled and callout_text:
+        callout_margin_v = max(55, int(video_height * 0.045))
+        c_style = (
+            f"Style: CalloutStyle,Montserrat ExtraBold,38,&H00FFFFFF&,&H000000FF&,&H00000000&,&H80000000&,"
+            f"-1,0,0,0,100,100,0,0,3,6,0,2,{margin_lr},{margin_lr},{callout_margin_v},1"
+        )
+        styles_section.append(c_style)
+
     content = [
         "[Script Info]",
         "ScriptType: v4.00+",
@@ -367,6 +381,16 @@ def generate_ass_file(
             h_start_str = "0:00:00.00"
             h_end_str = _format_ass_time(h_end_time)
             content.append(f"Dialogue: 1,{h_start_str},{h_end_str},Headline,,0,0,0,,{formatted_h}")
+
+    # Evento de Callout de Engajamento no final do vídeo (Fase 4)
+    if callout_enabled and callout_text:
+        c_dialogue = generate_engagement_callout_ass_dialogue(
+            duration=total_duration,
+            callout_text=callout_text,
+            callout_duration=callout_duration
+        )
+        if c_dialogue:
+            content.append(c_dialogue)
 
     for line_idx, line in enumerate(lines):
         words = line.get("words", [])
@@ -436,10 +460,14 @@ def burn_subtitles(
     headline_font_size: int = 46,
     headline_margin_top: int = 120,
     emojis_enabled: bool = False,
+    # --- Parâmetros de Callout de Engajamento (Fase 4) ---
+    callout_enabled: bool = False,
+    callout_text: str = "",
+    callout_duration: float = 4.5,
 ) -> dict:
     """
-    Aplica legendas dinâmicas palavra-a-palavra e/ou headline de retenção superior
-    queimadas via pass-2 FFmpeg com motor libass.
+    Aplica legendas dinâmicas palavra-a-palavra, headline de retenção superior e/ou
+    banner de chamada de engajamento queimadas via pass-2 FFmpeg com motor libass.
     Retorna dicionário com {'path': str, 'error': str|None, 'warning': str|None}.
     """
     if not os.path.exists(input_video_path):
@@ -466,9 +494,9 @@ def burn_subtitles(
         except Exception:
             lines = []
 
-    # Se não temos legendas e nem headline habilitada, não há nada a queimar
-    if not lines and not (headline_enabled and headline_text):
-        return {"path": input_video_path, "error": None, "warning": "Nenhuma legenda ou headline para queimar."}
+    # Se não temos legendas, nem headline e nem callout habilitados, não há nada a queimar
+    if not lines and not (headline_enabled and headline_text) and not (callout_enabled and callout_text):
+        return {"path": input_video_path, "error": None, "warning": "Nenhuma legenda, headline ou callout para queimar."}
 
     try:
         # 3. Detecta resolução real do vídeo
@@ -510,6 +538,9 @@ def burn_subtitles(
             headline_bg_color=headline_bg_color,
             headline_font_size=headline_font_size,
             headline_margin_top=headline_margin_top,
+            callout_enabled=callout_enabled,
+            callout_text=callout_text,
+            callout_duration=callout_duration,
             total_duration=cut_duration,
         )
 

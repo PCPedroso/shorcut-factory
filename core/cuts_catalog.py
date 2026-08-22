@@ -87,7 +87,8 @@ def register_cut_instance(
     folder_name: str,
     folder_path: str,
     video_path: str,
-    resolution: str = "1080p"
+    resolution: str = "1080p",
+    thumbnail_path: str = None,
 ) -> dict:
     """
     Registra uma nova instância de corte gerada ou atualiza uma existente no catálogo.
@@ -115,13 +116,22 @@ def register_cut_instance(
         catalog[key]["tags_seo"] = tags_seo
         catalog[key]["updated_at"] = datetime.now().strftime("%d/%m/%Y %H:%M")
 
+    # Verifica se a thumbnail existe na pasta
+    resolved_thumb_path = thumbnail_path
+    if not resolved_thumb_path and folder_path:
+        candidate_t = os.path.join(folder_path, "thumbnail.jpg")
+        if os.path.exists(candidate_t):
+            resolved_thumb_path = candidate_t
+
     # Registra a instância específica deste formato
     catalog[key]["formats"][aspect_mode] = {
         "aspect_mode": aspect_mode,
         "folder_name": folder_name,
         "folder_path": folder_path,
         "video_path": video_path,
-        "video_filename": os.path.basename(video_path),
+        "video_filename": os.path.basename(video_path) if video_path else f"{folder_name}.mp4",
+        "thumbnail_path": resolved_thumb_path,
+        "thumbnail_filename": "thumbnail.jpg" if resolved_thumb_path else None,
         "resolution": resolution,
         "rendered_at": datetime.now().strftime("%d/%m/%Y %H:%M")
     }

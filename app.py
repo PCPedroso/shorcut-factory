@@ -19,6 +19,7 @@ import core.headline_drawer
 import core.audio_mixer
 import core.retention_effects
 import core.integrations
+import core.thumbnail_generator
 
 importlib.reload(core.extractor)
 importlib.reload(core.transcriber)
@@ -34,6 +35,7 @@ importlib.reload(core.headline_drawer)
 importlib.reload(core.audio_mixer)
 importlib.reload(core.retention_effects)
 importlib.reload(core.integrations)
+importlib.reload(core.thumbnail_generator)
 
 from core.extractor import download_audio, get_video_metadata
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
@@ -46,6 +48,8 @@ from core.cuts_catalog import get_cut_entry, get_format_instance, register_cut_i
 from core.batch_processor import process_batch_cuts
 from core.headline_drawer import HEADLINE_PRESETS
 from core.audio_mixer import list_available_tracks, DUCKING_PRESETS
+from core.retention_effects import PROGRESS_BAR_COLORS, ENGAGEMENT_CALLOUT_PRESETS
+from core.thumbnail_generator import create_cut_thumbnail
 from core.integrations import get_youtube_auth_status, authenticate_youtube_oauth, upload_to_youtube_shorts, send_to_webhook
 
 # Carrega todas as configurações persistentes salvas
@@ -807,13 +811,17 @@ if st.session_state.transcription_done:
                         batch_sub_enabled = st.toggle("✨ Ativar Legendas Dinâmicas", value=_cfg.get("subtitle_enabled", True), key="batch_sub_toggle")
                         st.caption(f"Fontes e cores: {_cfg.get('subtitle_font_size', 80)}px • Destaque {_cfg.get('subtitle_highlight_color', '#FFFF00')}")
 
-                    with st.expander("⚙️ Personalizações da Fase 3 para o Lote (Headlines, Retenção & Trilha Sonora)", expanded=False):
+                    with st.expander("⚙️ Personalizações da Fase 3 & 4 para o Lote (Headlines, Retenção, Capas & Áudio)", expanded=False):
                         col_bopt1, col_bopt2 = st.columns(2)
                         with col_bopt1:
                             b_hl_on = st.toggle("🏷️ Headline de Retenção no Topo", value=_cfg.get("headline_enabled", False), key="b_hl_toggle")
                             b_em_on = st.toggle("😃 Emojis Contextuais", value=_cfg.get("emojis_enabled", False), key="b_em_toggle")
                             b_zp_on = st.toggle("🔍 Zoom Punch Dinâmico", value=_cfg.get("zoom_punch_enabled", False), key="b_zp_toggle")
+                            b_cz_on = st.toggle("🎯 Zoom de Clímax na Frase Final", value=_cfg.get("climax_zoom_enabled", False), key="b_cz_toggle")
                         with col_bopt2:
+                            b_pb_on = st.toggle("⏳ Barra de Progresso no Rodapé", value=_cfg.get("progress_bar_enabled", False), key="b_pb_toggle")
+                            b_co_on = st.toggle("📌 Banner de Chamada / Callout", value=_cfg.get("callout_enabled", False), key="b_co_toggle")
+                            b_th_on = st.toggle("🖼️ Gerar Capa / Thumbnail 9:16", value=_cfg.get("thumbnail_enabled", True), key="b_th_toggle")
                             b_bgm_on = st.toggle("🎵 Trilha Sonora & Ducking", value=_cfg.get("bg_music_enabled", False), key="b_bgm_toggle")
                             if b_bgm_on:
                                 b_bgm_trk = st.selectbox(
@@ -855,6 +863,11 @@ if st.session_state.transcription_done:
                                 "headline_enabled": b_hl_on,
                                 "emojis_enabled": b_em_on,
                                 "zoom_punch_enabled": b_zp_on,
+                                "climax_zoom_enabled": b_cz_on,
+                                "progress_bar_enabled": b_pb_on,
+                                "callout_enabled": b_co_on,
+                                "callout_text": _cfg.get("callout_text", "💬 O que você acha? Comente abaixo!"),
+                                "thumbnail_enabled": b_th_on,
                                 "bg_music_enabled": b_bgm_on,
                                 "bg_music_track_id": b_bgm_trk,
                             })
@@ -1353,7 +1366,7 @@ if st.session_state.transcription_done:
             st.caption("💡 O texto da Headline puxará automaticamente o Título Viral gerado pela IA ou digitado no Kit de Publicação abaixo.")
 
     # ─────────────────────────────────────────────────────────────────
-    # 🖼️ Efeitos Visuais & Retenção de Feed (Fase 3)
+    # 🖼️ Efeitos Visuais & Retenção de Feed (Fases 3 e 4)
     # ─────────────────────────────────────────────────────────────────
     zoom_punch_enabled = _cfg.get("zoom_punch_enabled", False)
     emojis_enabled = _cfg.get("emojis_enabled", False)
@@ -1372,6 +1385,89 @@ if st.session_state.transcription_done:
                 value=emojis_enabled,
                 help="Insere automaticamente stickers e emojis (💰, 🔥, 🚀, 🧠, ⚠️) ao lado de palavras de alta carga emocional."
             )
+
+    # ─────────────────────────────────────────────────────────────────
+    # 🚀 Polimento Visual, Thumbnails & Retenção Dinâmica (Fase 4)
+    # ─────────────────────────────────────────────────────────────────
+    progress_bar_enabled = _cfg.get("progress_bar_enabled", False)
+    progress_bar_color = _cfg.get("progress_bar_color", "#FF0000")
+    progress_bar_height = int(_cfg.get("progress_bar_height", 8))
+    callout_enabled = _cfg.get("callout_enabled", False)
+    callout_preset = _cfg.get("callout_preset", "comment")
+    callout_text = _cfg.get("callout_text", "💬 O que você acha? Comente abaixo!")
+    callout_duration = float(_cfg.get("callout_duration", 4.5))
+    climax_zoom_enabled = _cfg.get("climax_zoom_enabled", False)
+    climax_zoom_factor = float(_cfg.get("climax_zoom_factor", 1.14))
+    thumbnail_enabled = _cfg.get("thumbnail_enabled", True)
+
+    with st.expander("🚀 Retenção Dinâmica, Thumbnails & Callout (Fase 4)", expanded=(progress_bar_enabled or callout_enabled or climax_zoom_enabled or thumbnail_enabled)):
+        col_f4_1, col_f4_2 = st.columns(2)
+        with col_f4_1:
+            progress_bar_enabled = st.toggle(
+                "⏳ Barra de Progresso no Rodapé",
+                value=progress_bar_enabled,
+                help="Desenha uma linha minimalista no rodapé indicando o progresso do corte para reter o espectador até o final."
+            )
+            if progress_bar_enabled:
+                col_pb1, col_pb2 = st.columns([1.5, 1])
+                with col_pb1:
+                    pb_color_keys = list(PROGRESS_BAR_COLORS.keys())
+                    pb_color_labels = [PROGRESS_BAR_COLORS[k]["name"] for k in pb_color_keys]
+                    cur_pb_col_idx = 0
+                    for i_k, k in enumerate(pb_color_keys):
+                        if PROGRESS_BAR_COLORS[k]["color"].upper() == progress_bar_color.upper():
+                            cur_pb_col_idx = i_k
+                            break
+                    sel_pb_label = st.selectbox("Cor da Barra:", pb_color_labels, index=cur_pb_col_idx, key="sel_pb_color")
+                    progress_bar_color = PROGRESS_BAR_COLORS[pb_color_keys[pb_color_labels.index(sel_pb_label)]]["color"]
+                with col_pb2:
+                    progress_bar_height = st.slider("Espessura (px):", 4, 18, progress_bar_height, 2, key="sl_pb_height")
+
+            st.divider()
+
+            climax_zoom_enabled = st.toggle(
+                "🎯 Zoom de Ênfase no Clímax (Punchline Final)",
+                value=climax_zoom_enabled,
+                help="Aproxima dramaticamente no rosto do orador nos últimos segundos da conclusão para reforçar a frase de impacto."
+            )
+            if climax_zoom_enabled:
+                climax_zoom_factor = st.slider(
+                    "Intensidade do Zoom de Clímax:",
+                    1.06, 1.25, climax_zoom_factor, 0.02,
+                    format="%.2fx",
+                    help="1.08x = Suave | 1.14x = Médio/Dramático | 1.20x = Impacto Forte"
+                )
+
+        with col_f4_2:
+            thumbnail_enabled = st.toggle(
+                "🖼️ Gerar Capa / Thumbnail 9:16 com IA",
+                value=thumbnail_enabled,
+                help="Captura automaticamente o melhor frame com MediaPipe/nitidez, compõe com a Headline magnética e salva thumbnail.jpg na pasta do corte."
+            )
+
+            st.divider()
+
+            callout_enabled = st.toggle(
+                "📌 Banner de Chamada / Lower Third (Callout)",
+                value=callout_enabled,
+                help="Exibe um banner elegante nos últimos 4-5 segundos provocando comentários e seguidores nas redes."
+            )
+            if callout_enabled:
+                co_keys = list(ENGAGEMENT_CALLOUT_PRESETS.keys())
+                co_labels = [ENGAGEMENT_CALLOUT_PRESETS[k]["name"] for k in co_keys]
+                cur_co_idx = co_keys.index(callout_preset) if callout_preset in co_keys else 0
+                sel_co_label = st.selectbox("Modelo de Chamada:", co_labels, index=cur_co_idx, key="sel_co_preset")
+                callout_preset = co_keys[co_labels.index(sel_co_label)]
+
+                if callout_preset != "custom":
+                    callout_text = ENGAGEMENT_CALLOUT_PRESETS[callout_preset]["text"]
+
+                callout_text = st.text_input(
+                    "Texto do Banner:",
+                    value=callout_text,
+                    key="txt_callout_val"
+                )
+                callout_duration = st.slider("Duração do Banner (segundos no final):", 3.0, 7.0, callout_duration, 0.5, key="sl_co_dur")
 
     # ─────────────────────────────────────────────────────────────────
     # 🎵 Trilha Sonora de Fundo & Audio Ducking Inteligente (Fase 3)
@@ -1446,6 +1542,16 @@ if st.session_state.transcription_done:
         "headline_margin_top": headline_margin_top,
         "zoom_punch_enabled": zoom_punch_enabled,
         "emojis_enabled": emojis_enabled,
+        "progress_bar_enabled": progress_bar_enabled,
+        "progress_bar_color": progress_bar_color,
+        "progress_bar_height": progress_bar_height,
+        "callout_enabled": callout_enabled,
+        "callout_preset": callout_preset,
+        "callout_text": callout_text,
+        "callout_duration": callout_duration,
+        "climax_zoom_enabled": climax_zoom_enabled,
+        "climax_zoom_factor": climax_zoom_factor,
+        "thumbnail_enabled": thumbnail_enabled,
         "bg_music_enabled": bg_music_enabled,
         "bg_music_track_id": bg_music_track_id,
         "bg_music_volume": bg_music_volume,
@@ -1600,25 +1706,52 @@ if st.session_state.transcription_done:
     # Exibição imediata da instância existente do cache se já renderizada
     if existing_inst and os.path.exists(existing_inst.get("video_path", "")):
         st.markdown(f"#### 🎬 Prévia da Instância Pronta ({aspect_option})")
+        
+        cached_thumb = existing_inst.get("thumbnail_path") or os.path.join(existing_inst.get("folder_path", ""), "thumbnail.jpg")
+        has_cached_thumb = cached_thumb and os.path.exists(cached_thumb)
+
         if "9:16" in selected_aspect:
-            col_pv1, col_pv2, col_pv3 = st.columns([1.6, 1.2, 1.6])
-            with col_pv2:
-                st.video(existing_inst["video_path"])
+            if has_cached_thumb:
+                col_pv1, col_pv2, col_pv3, col_pv4 = st.columns([1.0, 1.2, 1.2, 1.0])
+                with col_pv2:
+                    st.caption("🎬 **Vídeo Renderizado:**")
+                    st.video(existing_inst["video_path"])
+                with col_pv3:
+                    st.caption("🖼️ **Capa / Thumbnail (9:16):**")
+                    st.image(cached_thumb, use_container_width=True)
+            else:
+                col_pv1, col_pv2, col_pv3 = st.columns([1.6, 1.2, 1.6])
+                with col_pv2:
+                    st.video(existing_inst["video_path"])
         else:
             col_pv1, col_pv2, col_pv3 = st.columns([1, 2, 1])
             with col_pv2:
                 st.video(existing_inst["video_path"])
 
-        with open(existing_inst["video_path"], "rb") as vf_cached:
-            st.download_button(
-                label=f"💾 Baixar Vídeo Pronto do Cache ({existing_inst['video_filename']})",
-                data=vf_cached,
-                file_name=existing_inst["video_filename"],
-                mime="video/mp4",
-                type="primary",
-                use_container_width=True,
-                key="btn_dl_cached_instance"
-            )
+        col_dl1, col_dl2 = st.columns([2, 1.2] if has_cached_thumb else [1, 0.001])
+        with col_dl1:
+            with open(existing_inst["video_path"], "rb") as vf_cached:
+                st.download_button(
+                    label=f"💾 Baixar Vídeo Pronto do Cache ({existing_inst['video_filename']})",
+                    data=vf_cached,
+                    file_name=existing_inst["video_filename"],
+                    mime="video/mp4",
+                    type="primary",
+                    use_container_width=True,
+                    key="btn_dl_cached_instance"
+                )
+        if has_cached_thumb:
+            with col_dl2:
+                with open(cached_thumb, "rb") as tf_cached:
+                    st.download_button(
+                        label="🖼️ Baixar Thumbnail (JPG)",
+                        data=tf_cached,
+                        file_name="thumbnail.jpg",
+                        mime="image/jpeg",
+                        type="secondary",
+                        use_container_width=True,
+                        key="btn_dl_cached_thumb"
+                    )
         st.caption(f"⚡ Carregado instantaneamente do cache: `{existing_inst['folder_path']}`")
 
     st.markdown("")
@@ -1724,6 +1857,16 @@ if st.session_state.transcription_done:
                             bg_music_track_path=bg_music_track_path,
                             bg_music_volume=bg_music_volume,
                             ducking_preset=ducking_preset,
+                            # Fase 4: Retenção Dinâmica & Thumbnails
+                            progress_bar_enabled=progress_bar_enabled,
+                            progress_bar_color=progress_bar_color,
+                            progress_bar_height=progress_bar_height,
+                            callout_enabled=callout_enabled,
+                            callout_text=callout_text,
+                            callout_duration=callout_duration,
+                            climax_zoom_enabled=climax_zoom_enabled,
+                            climax_zoom_factor=climax_zoom_factor,
+                            thumbnail_enabled=thumbnail_enabled,
                         )
                         if cut_res.get("error"):
                             st.error(f"Erro ao cortar: {cut_res['error']}")
@@ -1732,7 +1875,10 @@ if st.session_state.transcription_done:
                             _sub_badge = " 📝 Legendas" if subtitle_enabled and not cut_res.get("subtitle_error") and not cut_res.get("subtitle_warning") else ""
                             _hl_badge = " 🏷️ Headline" if headline_enabled else ""
                             _mus_badge = " 🎵 Ducking" if bg_music_enabled else ""
-                            st.success(f"🎉 Corte gerado com sucesso! Resolução: **{out_res}** | Formato: **{aspect_option}**{_sub_badge}{_hl_badge}{_mus_badge}")
+                            _pb_badge = " ⏳ Barra" if progress_bar_enabled else ""
+                            _cz_badge = " 🎯 Clímax" if climax_zoom_enabled else ""
+                            _th_badge = " 🖼️ Thumbnail" if thumbnail_enabled and cut_res.get("thumbnail_path") else ""
+                            st.success(f"🎉 Corte gerado com sucesso! Resolução: **{out_res}** | Formato: **{aspect_option}**{_sub_badge}{_hl_badge}{_mus_badge}{_pb_badge}{_cz_badge}{_th_badge}")
                             
                             # Avisos de legendas / áudio
                             if cut_res.get("subtitle_error"):
@@ -1742,10 +1888,22 @@ if st.session_state.transcription_done:
                             if cut_res.get("audio_warning"):
                                 st.info(f"ℹ️ {cut_res['audio_warning']}")
                             
+                            gen_thumb_path = cut_res.get("thumbnail_path")
+                            has_gen_thumb = gen_thumb_path and os.path.exists(gen_thumb_path)
+
                             if "9:16" in selected_aspect:
-                                col_v1, col_v2, col_v3 = st.columns([1.6, 1.2, 1.6])
-                                with col_v2:
-                                    st.video(corte_output_path)
+                                if has_gen_thumb:
+                                    col_v1, col_v2, col_v3, col_v4 = st.columns([1.0, 1.2, 1.2, 1.0])
+                                    with col_v2:
+                                        st.caption("🎬 **Vídeo Renderizado:**")
+                                        st.video(corte_output_path)
+                                    with col_v3:
+                                        st.caption("🖼️ **Capa / Thumbnail (9:16):**")
+                                        st.image(gen_thumb_path, use_container_width=True)
+                                else:
+                                    col_v1, col_v2, col_v3 = st.columns([1.6, 1.2, 1.6])
+                                    with col_v2:
+                                        st.video(corte_output_path)
                             else:
                                 col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
                                 with col_v2:
@@ -1778,7 +1936,8 @@ if st.session_state.transcription_done:
                                 tags_seo=cut_tags_seo_val,
                                 aspect_mode=selected_aspect,
                                 output_base_dir=data_dir,
-                                orig_video_info=orig_info
+                                orig_video_info=orig_info,
+                                thumbnail_path=gen_thumb_path
                             )
 
                             # Registra no Catálogo de Cortes
@@ -1794,11 +1953,19 @@ if st.session_state.transcription_done:
                                 folder_name=package_res["folder_name"],
                                 folder_path=package_res["package_dir"],
                                 video_path=package_res["video_dest_path"],
-                                resolution=out_res
+                                resolution=out_res,
+                                thumbnail_path=package_res.get("thumbnail_dest_path")
                             )
 
                             # Botões de Ação do Corte Renderizado
-                            col_b1, col_b2, col_b3 = st.columns([1.5, 1.2, 1.2])
+                            saved_thumb = package_res.get("thumbnail_dest_path")
+                            has_saved_thumb = saved_thumb and os.path.exists(saved_thumb)
+
+                            if has_saved_thumb:
+                                col_b1, col_b_th, col_b2, col_b3 = st.columns([1.5, 1.2, 1.2, 1.2])
+                            else:
+                                col_b1, col_b2, col_b3 = st.columns([1.5, 1.2, 1.2])
+
                             with col_b1:
                                 with open(package_res["video_dest_path"], "rb") as vf:
                                     st.download_button(
@@ -1809,6 +1976,18 @@ if st.session_state.transcription_done:
                                         type="primary",
                                         use_container_width=True
                                     )
+
+                            if has_saved_thumb:
+                                with col_b_th:
+                                    with open(saved_thumb, "rb") as tf_btn:
+                                        st.download_button(
+                                            label="🖼️ Baixar Thumbnail",
+                                            data=tf_btn,
+                                            file_name="thumbnail.jpg",
+                                            mime="image/jpeg",
+                                            type="secondary",
+                                            use_container_width=True
+                                        )
                             with col_b2:
                                 with st.popover("🔴 Publicar no Shorts", use_container_width=True):
                                     st.markdown("##### 🚀 Enviar para o YouTube Shorts")
@@ -1918,9 +2097,25 @@ if st.session_state.transcription_done:
                                 
                                 st.markdown(f"**{fmt_badge}**")
                                 v_file = fmt_data.get("video_path")
+                                g_thumb = fmt_data.get("thumbnail_path") or os.path.join(fmt_data.get("folder_path", ""), "thumbnail.jpg")
+                                has_g_thumb = g_thumb and os.path.exists(g_thumb)
+
                                 if v_file and os.path.exists(v_file):
                                     st.video(v_file)
                                     
+                                    if has_g_thumb:
+                                        with st.expander("🖼️ Visualizar Capa / Thumbnail (9:16)", expanded=False):
+                                            st.image(g_thumb, use_container_width=True)
+                                            with open(g_thumb, "rb") as tf_gal:
+                                                st.download_button(
+                                                    label="💾 Baixar Thumbnail (JPG)",
+                                                    data=tf_gal,
+                                                    file_name="thumbnail.jpg",
+                                                    mime="image/jpeg",
+                                                    key=f"dl_thumb_gal_{c_idx}_{f_idx}",
+                                                    use_container_width=True
+                                                )
+
                                     col_b_dl, col_b_yt, col_b_wh, col_b_del = st.columns([2, 1.2, 1.2, 0.8])
                                     with col_b_dl:
                                         with open(v_file, "rb") as vf_gal:
