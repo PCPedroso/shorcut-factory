@@ -375,11 +375,27 @@ def _apply_all_post_processing(
     duration_s = max(1.0, float(end_s - start_s))
 
     # --- 1. Zoom Punch de Retenção & Climax Punchline Zoom ---
+    curr_res_str = get_video_resolution(curr_path)
+    v_w, v_h = 1080, 1920
+    if "x" in curr_res_str:
+        try:
+            parts = curr_res_str.split("x")
+            v_w = int(parts[0])
+            v_h = int(parts[1])
+        except Exception:
+            pass
+
     zoom_filters = []
     if zoom_punch_enabled and duration_s >= 7.0:
         try:
             from core.retention_effects import generate_zoom_punch_filter
-            punch_f = generate_zoom_punch_filter(duration=duration_s, interval=8.5, zoom_factor=1.07)
+            punch_f = generate_zoom_punch_filter(
+                duration=duration_s,
+                interval=8.5,
+                zoom_factor=1.08,
+                video_width=v_w,
+                video_height=v_h
+            )
             if punch_f:
                 zoom_filters.append(punch_f)
         except Exception:
@@ -388,7 +404,13 @@ def _apply_all_post_processing(
     if climax_zoom_enabled and duration_s >= 5.0:
         try:
             from core.retention_effects import generate_climax_zoom_filter
-            climax_f = generate_climax_zoom_filter(duration=duration_s, climax_duration=3.5, zoom_factor=climax_zoom_factor)
+            climax_f = generate_climax_zoom_filter(
+                duration=duration_s,
+                climax_duration=3.5,
+                zoom_factor=climax_zoom_factor,
+                video_width=v_w,
+                video_height=v_h
+            )
             if climax_f:
                 zoom_filters.append(climax_f)
         except Exception:
@@ -403,7 +425,7 @@ def _apply_all_post_processing(
             cmd = [
                 FFMPEG_EXE, "-y",
                 "-i", curr_path,
-                "-vf", zf,
+                "-filter_complex", zf,
                 "-c:v", "libx264",
                 "-preset", "veryfast",
                 "-crf", "20",

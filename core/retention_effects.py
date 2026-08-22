@@ -53,15 +53,15 @@ def attach_contextual_emojis_to_words(words: list, max_emojis: int = 6) -> list:
 
 def generate_zoom_punch_filter(
     duration: float,
-    interval: float = 9.0,
-    punch_duration: float = 0.45,
+    interval: float = 8.5,
+    punch_duration: float = 0.50,
     zoom_factor: float = 1.08,
+    video_width: int = 1080,
+    video_height: int = 1920
 ) -> str:
     """
-    Gera expressão de filtro FFmpeg para aplicar Zoom Punchs sutis e dinâmicos
+    Gera expressão filter_complex para aplicar Zoom Punchs sutis e dinâmicos (1.08x)
     a cada intervalo de segundos, quebrando a monotonia visual sem cortar elementos da cena.
-    
-    Exemplo: em t=8.0 a 8.45s, dá um leve punch de zoom 1.08x e volta suavemente.
     """
     if duration <= 6.0:
         return ""
@@ -78,17 +78,21 @@ def generate_zoom_punch_filter(
         return ""
 
     combined_cond = "+".join(conditions)
-    # FFmpeg filter: scale dinâmico ou crop com zoom suave
-    # Multiplica dimensões e recentraliza
-    crop_w = f"in_w/if({combined_cond},{zoom_factor},1.0)"
-    crop_h = f"in_h/if({combined_cond},{zoom_factor},1.0)"
-    
-    vf = f"crop=w='{crop_w}':h='{crop_h}':x='(in_w-out_w)/2':y='(in_h-out_h)/2',scale=1080:1920:flags=lanczos"
-    return vf
+    factor = round(max(1.02, min(1.30, float(zoom_factor))), 2)
+    w = max(360, int(video_width))
+    h = max(360, int(video_height))
+
+    # Scale + crop centrado + overlay condicional ativado durante os pulsos
+    fc = (
+        f"[0:v]setpts=PTS-STARTPTS,split=2[base][z_src];"
+        f"[z_src]scale=iw*{factor}:ih*{factor},crop={w}:{h}:(in_w-{w})/2:(in_h-{h})/2[z_layer];"
+        f"[base][z_layer]overlay=0:0:enable='{combined_cond}'"
+    )
+    return fc
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ⏳ BARRA DE PROGRESSO ANIMADA DE RETENÇÃO (FFmpeg drawbox)
+# ⏳ BARRA DE PROGRESSO ANIMADA DE RETENÇÃO (FFmpeg drawbox & overlay)
 # ─────────────────────────────────────────────────────────────────────────────
 
 PROGRESS_BAR_COLORS = {
@@ -147,7 +151,9 @@ def generate_progress_bar_filter(
 def generate_climax_zoom_filter(
     duration: float,
     climax_duration: float = 3.5,
-    zoom_factor: float = 1.14
+    zoom_factor: float = 1.14,
+    video_width: int = 1080,
+    video_height: int = 1920
 ) -> str:
     """
     Gera expressão de filtro FFmpeg para aproximar a cena dramaticamente no rosto do orador
@@ -159,13 +165,16 @@ def generate_climax_zoom_filter(
     climax_start = max(0.5, round(duration - climax_duration, 2))
     climax_end = round(duration, 2)
     factor = round(max(1.02, min(1.30, float(zoom_factor))), 2)
+    w = max(360, int(video_width))
+    h = max(360, int(video_height))
 
     cond = f"between(t,{climax_start},{climax_end})"
-    crop_w = f"in_w/if({cond},{factor},1.0)"
-    crop_h = f"in_h/if({cond},{factor},1.0)"
-
-    vf = f"crop=w='{crop_w}':h='{crop_h}':x='(in_w-out_w)/2':y='(in_h-out_h)/2',scale=1080:1920:flags=lanczos"
-    return vf
+    fc = (
+        f"[0:v]setpts=PTS-STARTPTS,split=2[base][z_src];"
+        f"[z_src]scale=iw*{factor}:ih*{factor},crop={w}:{h}:(in_w-{w})/2:(in_h-{h})/2[z_layer];"
+        f"[base][z_layer]overlay=0:0:enable='{cond}'"
+    )
+    return fc
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -12,9 +12,10 @@ from core.retention_effects import (
 class TestRetentionEffects(unittest.TestCase):
 
     def test_generate_zoom_punch_filter(self):
-        filter_str = generate_zoom_punch_filter(duration=30.0, interval=8.5, zoom_factor=1.07)
-        self.assertIn("scale=1080:1920", filter_str)
-        self.assertIn("crop=w='in_w/if(between(t", filter_str)
+        filter_str = generate_zoom_punch_filter(duration=30.0, interval=8.5, zoom_factor=1.08, video_width=1080, video_height=1920)
+        self.assertIn("scale=iw*1.08:ih*1.08", filter_str)
+        self.assertIn("crop=1080:1920", filter_str)
+        self.assertIn("overlay=0:0:enable='between(t", filter_str)
 
         # Se a duração for muito curta (< 5s), não gera filtro desnecessário
         short_filter = generate_zoom_punch_filter(duration=3.0)
@@ -41,10 +42,11 @@ class TestRetentionEffects(unittest.TestCase):
         self.assertEqual(empty_pb, "")
 
     def test_generate_climax_zoom_filter(self):
-        climax_f = generate_climax_zoom_filter(duration=30.0, climax_duration=3.5, zoom_factor=1.14)
+        climax_f = generate_climax_zoom_filter(duration=30.0, climax_duration=3.5, zoom_factor=1.14, video_width=1080, video_height=1920)
         self.assertIn("between(t,26.5,30.0)", climax_f)
-        self.assertIn("1.14", climax_f)
-        self.assertIn("scale=1080:1920", climax_f)
+        self.assertIn("scale=iw*1.14:ih*1.14", climax_f)
+        self.assertIn("crop=1080:1920", climax_f)
+        self.assertIn("overlay=0:0:enable='between(t,26.5,30.0)'", climax_f)
 
         # Duração curta (< 5s) não aplica
         empty_climax = generate_climax_zoom_filter(duration=4.0)
