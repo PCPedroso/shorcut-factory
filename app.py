@@ -543,7 +543,7 @@ if st.session_state.transcription_done:
 
                 col_chk, col_p_info, col_dur = st.columns([0.5, 4.5, 1.2])
                 with col_chk:
-                    is_checked = st.checkbox("", key=chk_key)
+                    is_checked = st.checkbox(f"Pauta {p['id']}", key=chk_key, label_visibility="collapsed")
                     if is_checked:
                         selected_pauta_objs.append(p)
                 with col_p_info:

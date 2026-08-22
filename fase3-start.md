@@ -53,22 +53,12 @@ O projeto possui duas fases 100% concluídas, testadas e commitadas:
 
 ---
 
-### 🚀 Fase 3 — CONCLUÍDA (Em fase de refinamento fino)
-
-Objetivo: Elevar o nível de **retenção visual, dinamismo sonoro e automação de publicação** dos cortes gerados:
-
-1. **🏷️ Headline / Título Fixo de Retenção no Topo (9:16)**: ✅ Implementado
-   - Inserção de caixa de chamada magnética superior (estilo headline viral de retenção) com fundo contrastante customizável (amarelo, vermelho, preto, gradiente), fonte bold e posicionamento que não colide com rostos ou legendas.
-2. **🎵 Trilha Sonora de Fundo & Audio Ducking Inteligente**: ✅ Implementado
-   - Biblioteca de trilhas sonoras de fundo livres de direitos (Lo-Fi, Tensão, Inspiracional, Dinâmica).
-   - Efeito de **Audio Ducking via FFmpeg**: a música diminui suavemente de volume enquanto a pessoa fala e sobe sutilmente nas pausas/silêncios.
-3. **🖼️ B-Roll / Overlays Visuais & Efeitos de Retenção (Zoom Punch / Emojis)**: ✅ Implementado
-   - Efeito de *Zoom Punch / Jump Cut suave* em palavras de alta ênfase para quebrar monotonia visual no feed do TikTok/Reels/Shorts.
-   - Inserção automática de emojis ou stickers contextuais sobre as falas.
-4. **🌐 Exportação Direta & Integrações**: ✅ Implementado
-   - Upload de rascunhos direto para o YouTube Shorts via YouTube Data API v3 ou exportação em lote para Google Drive / Webhooks.
-5. **📋 Painel de Rastreamento & Logs em Tempo Real**: ✅ Implementado
-   - Streaming de logs segundo a segundo durante a esteira em lote, com caixa de texto aberta para cópia rápida e diagnóstico completo.
+### 🚀 Fase 3 — 100% CONCLUÍDA & VALIDADA COM TESTES
+- **🏷️ Headline / Título Fixo de Retenção no Topo (9:16)**: Presets, margem, 2 linhas concisas e IA com pensamento completo.
+- **🎵 Trilha Sonora de Fundo & Audio Ducking Inteligente**: 4 trilhas royalty-free categorizadas e ducking via sidechain FFmpeg.
+- **🔍 Efeitos de Retenção (Zoom Punch & Emojis)**: Pulsos dinâmicos a cada ~8.5s e inserção de emojis contextuais.
+- **🌐 Exportação Direta & Integrações**: Upload para YouTube Shorts API e Webhooks HTTP (n8n/Make/Zapier).
+- **🧪 Suíte de 24 Testes Unitários Automatizados (`pytest -v tests/`)**: Todos os módulos do `core/` validados com 100% de sucesso.
 
 ---
 

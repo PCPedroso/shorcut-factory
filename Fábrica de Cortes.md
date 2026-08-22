@@ -153,3 +153,41 @@ Para cada corte gerado, a aplicação cria automaticamente uma pasta estruturada
 - **Galeria de Cortes Produzidos (Seção 4)**:
   - Players de vídeo 9:16 compactos e elegantes dispostos lado a lado.
   - Botão de download direto, botões de publicação direta no YouTube Shorts e Webhook, e botão de exclusão individual `🗑️` com confirmação (*Apenas Vídeo* vs *Pasta Completa*).
+
+---
+
+## 🧪 Suíte de Testes Unitários Automatizados (`tests/`)
+
+A integridade de todos os módulos centrais da aplicação é validada através de testes unitários contínuos com `pytest`:
+
+```bash
+venv\Scripts\pytest -v tests/
+```
+
+- **`test_headline_drawer.py`**: Formatação de headlines, conversão ASS e higienização inteligente com pensamento completo.
+- **`test_export_kit.py`**: Nomenclatura padronizada (prefixos de 5 letras) e integridade do pacote viral de publicação.
+- **`test_cuts_catalog.py`**: Isolamento multi-formato, cache em disco e remoção granular de cortes.
+- **`test_audio_mixer.py`**: Resolução de trilhas sonoras e presets de Audio Ducking.
+- **`test_retention_effects.py`**: Geração de filtros dinâmicos de Zoom Punch e injeção de emojis contextuais.
+- **`test_config_manager.py`**: Persistência e restauração de preferências em `data/app_settings.json`.
+- **`test_integrations.py`**: Validação de payloads e despacho para Webhooks HTTP.
+- **`test_analyzer_utils.py`**: Conversão de tempo, formatação legível e limpeza de introduções de IA.
+
+---
+
+## 🔮 Roadmap Futuro & Backlog de Melhorias (Fase 4)
+
+Itens mapeados para expansão após a consolidação da versão funcional:
+
+1. **🖼️ Gerador Automático de Capas / Miniaturas (Thumbnails 9:16)**:
+   - Extração do frame mais expressivo do corte com detecção facial (olhos abertos, expressão ativa).
+   - Inserção de texto de chamada contrastante e exportação automática de `thumbnail.jpg` dentro do pacote viral.
+2. **🔊 Biblioteca Dinâmica de Efeitos Sonoros (SFX)**:
+   - Inserção de efeitos sonoros rápidos (*Whoosh* em transições de Zoom Punch, *Pop* ao surgir emojis, *Impact/Boom* em declarações polêmicas) sintonizados com o tom emocional do trecho.
+3. **🎬 B-Roll Inteligente & Split Screen Híbrido (Vídeo + Imagem/Vídeo de Contexto)**:
+   - Detecção de termos-chave e entidades na fala (ex: nomes de empresas, gráficos, pessoas públicas) com inserção de imagem/vídeo ilustrativo de apoio no topo ou em overlay de 2 a 3 segundos.
+4. **⏳ Barra de Progresso Animada de Retenção (Dynamic Progress Bar)**:
+   - Barra minimalista animada no rodapé do vídeo para indicar o tempo restante do corte, aumentando a taxa de conclusão (completion rate) no algoritmo do TikTok e Shorts.
+5. **📅 Fila de Agendamento Automático de Postagens**:
+   - Agendamento de publicações com cronograma pré-definido via API e Webhooks.
+
