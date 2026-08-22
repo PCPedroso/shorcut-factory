@@ -114,11 +114,12 @@ def generate_progress_bar_filter(
     duration: float,
     color_hex: str = "#FF0000",
     height_px: int = 8,
-    bg_alpha: float = 0.45
+    bg_alpha: float = 0.45,
+    video_width: int = 1080
 ) -> str:
     """
     Gera expressão de filtro FFmpeg para desenhar uma barra de progresso fluida e minimalista
-    no rodapé exato do vídeo (y = ih - height_px), preenchendo proporcionalmente ao tempo `t`.
+    no rodapé do vídeo (y = ih - height_px), preenchendo dinamicamente de 0% a 100% via overlay per-frame.
     """
     if duration <= 1.0:
         return ""
@@ -126,13 +127,17 @@ def generate_progress_bar_filter(
     fg_col = _hex_to_ffmpeg_color(color_hex)
     dur_f = max(0.1, round(float(duration), 3))
     h = max(2, min(30, int(height_px)))
+    w = max(360, int(video_width))
 
-    # 1. Trilha de fundo escura semitransparente
-    bg_layer = f"drawbox=x=0:y=ih-{h}:w=iw:h={h}:color=0x000000@{bg_alpha:.2f}:t=fill"
-    # 2. Barra de progresso preenchendo de 0 a 100% da largura (iw) conforme t avança
-    fg_layer = f"drawbox=x=0:y=ih-{h}:w='min(iw,iw*(t/{dur_f}))':h={h}:color={fg_col}@1:t=fill"
-
-    return f"{bg_layer},{fg_layer}"
+    # 1. Desenha a trilha de fundo escura semitransparente
+    # 2. Cria a barra de cor na largura total
+    # 3. Sobrepõe a barra deslizando no eixo X de -w até 0 proporcionalmente a (t / duration)
+    fc = (
+        f"[0:v]setpts=PTS-STARTPTS,drawbox=x=0:y=ih-{h}:w=iw:h={h}:color=0x000000@{bg_alpha:.2f}:t=fill[bg];"
+        f"color=c={fg_col}:s={w}x{h}[bar];"
+        f"[bg][bar]overlay=x='-w+w*(t/{dur_f})':y='main_h-{h}':shortest=1"
+    )
+    return fc
 
 
 # ─────────────────────────────────────────────────────────────────────────────

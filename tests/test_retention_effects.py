@@ -31,9 +31,10 @@ class TestRetentionEffects(unittest.TestCase):
         self.assertEqual(enriched[0]["word"], "O")
 
     def test_generate_progress_bar_filter(self):
-        pb_filter = generate_progress_bar_filter(duration=45.0, color_hex="#FF0000", height_px=8)
+        pb_filter = generate_progress_bar_filter(duration=45.0, color_hex="#FF0000", height_px=8, video_width=1080)
         self.assertIn("drawbox=x=0:y=ih-8:w=iw:h=8:color=0x000000", pb_filter)
-        self.assertIn("drawbox=x=0:y=ih-8:w='min(iw,iw*(t/45.0))':h=8:color=0xFF0000@1:t=fill", pb_filter)
+        self.assertIn("overlay=x='-w+w*(t/45.0)':y='main_h-8'", pb_filter)
+        self.assertIn("color=c=0xFF0000:s=1080x8", pb_filter)
 
         # Se duração for menor ou igual a 1s, retorna vazio
         empty_pb = generate_progress_bar_filter(duration=0.5)

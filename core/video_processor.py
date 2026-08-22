@@ -426,10 +426,19 @@ def _apply_all_post_processing(
     if progress_bar_enabled and duration_s >= 2.0:
         try:
             from core.retention_effects import generate_progress_bar_filter
+            curr_res_str = get_video_resolution(curr_path)
+            v_w = 1080
+            if "x" in curr_res_str:
+                try:
+                    v_w = int(curr_res_str.split("x")[0])
+                except Exception:
+                    pass
+
             pb_filter = generate_progress_bar_filter(
                 duration=duration_s,
                 color_hex=progress_bar_color,
-                height_px=progress_bar_height
+                height_px=progress_bar_height,
+                video_width=v_w
             )
             if pb_filter:
                 tmp_pb = output_path.replace(".mp4", "_pb_tmp.mp4")
@@ -439,7 +448,7 @@ def _apply_all_post_processing(
                 cmd = [
                     FFMPEG_EXE, "-y",
                     "-i", curr_path,
-                    "-vf", pb_filter,
+                    "-filter_complex", pb_filter,
                     "-c:v", "libx264",
                     "-preset", "veryfast",
                     "-crf", "20",
