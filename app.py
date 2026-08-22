@@ -728,6 +728,14 @@ if st.session_state.transcription_done:
             else:
                 st.error(fb.get("msg", ""))
 
+        if st.session_state.get("last_batch_logs"):
+            with st.expander("📋 Copiar Registro Completo de Logs do Lote (Clique para Expandir)", expanded=False):
+                st.info("💡 Você pode selecionar e copiar o texto abaixo para enviar para análise:")
+                st.text_area("Logs de Execução Detalhados:", value=st.session_state["last_batch_logs"], height=300, key="txt_last_batch_logs")
+                if st.button("🗑️ Limpar Registro de Logs", key="btn_clear_logs"):
+                    st.session_state["last_batch_logs"] = ""
+                    st.rerun()
+
         if 'shorts' in st.session_state and st.session_state.shorts:
             # Reseta seleção de checkboxes de forma segura antes da instanciação dos widgets
             if st.session_state.get("_reset_batch_selection"):
@@ -833,11 +841,19 @@ if st.session_state.transcription_done:
                         else:
                             prog_bar = st.progress(0)
                             status_box = st.empty()
+                            st.markdown("##### 📋 Registro de Execução em Tempo Real:")
+                            log_display_box = st.empty()
+
+                            live_logs_list = []
 
                             def _batch_cb(cur, tot, msg):
                                 pct = int((cur / max(tot, 1)) * 100)
                                 prog_bar.progress(min(pct, 100))
                                 status_box.info(f"**Progresso ({cur}/{tot}):** {msg}")
+
+                            def _log_cb(line):
+                                live_logs_list.append(line)
+                                log_display_box.code("\n".join(live_logs_list[-25:]), language="bash")
 
                             batch_params_merged = dict(_cfg)
                             batch_params_merged.update({
@@ -860,10 +876,15 @@ if st.session_state.transcription_done:
                                 ollama_model=ollama_model,
                                 aspect_params=batch_params_merged,
                                 force_rerender=batch_force_rerender,
-                                progress_callback=_batch_cb
+                                progress_callback=_batch_cb,
+                                log_callback=_log_cb
                             )
 
                             prog_bar.progress(100)
+
+                            # Salva todos os logs completos para visualização e cópia
+                            full_logs_text = "\n".join(live_logs_list)
+                            st.session_state["last_batch_logs"] = full_logs_text
 
                             # Agenda o reset limpo dos checkboxes para a próxima renderização
                             st.session_state["_reset_batch_selection"] = True
