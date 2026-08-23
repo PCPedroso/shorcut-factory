@@ -116,12 +116,25 @@ def register_cut_instance(
         catalog[key]["tags_seo"] = tags_seo
         catalog[key]["updated_at"] = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-    # Verifica se a thumbnail existe na pasta
+    # Verifica se a thumbnail e suas variações existem na pasta
     resolved_thumb_path = thumbnail_path
     if not resolved_thumb_path and folder_path:
         candidate_t = os.path.join(folder_path, "thumbnail.jpg")
         if os.path.exists(candidate_t):
             resolved_thumb_path = candidate_t
+
+    # Mapeia variações de thumbnail disponíveis
+    thumb_variations = []
+    if folder_path:
+        for v_i, v_name in [(1, "⚡ Impacto Neon (Glow)"), (2, "✨ Clean Focus (Sombra 3D)"), (3, "🎬 Moldura Dinâmica (HDR)")]:
+            v_cand = os.path.join(folder_path, f"thumbnail_{v_i}.jpg")
+            if os.path.exists(v_cand):
+                thumb_variations.append({
+                    "id": v_i,
+                    "name": v_name,
+                    "filename": f"thumbnail_{v_i}.jpg",
+                    "path": v_cand
+                })
 
     # Registra a instância específica deste formato
     catalog[key]["formats"][aspect_mode] = {
@@ -132,12 +145,54 @@ def register_cut_instance(
         "video_filename": os.path.basename(video_path) if video_path else f"{folder_name}.mp4",
         "thumbnail_path": resolved_thumb_path,
         "thumbnail_filename": "thumbnail.jpg" if resolved_thumb_path else None,
+        "thumbnail_variations": thumb_variations,
+        "active_variation": 1,
         "resolution": resolution,
         "rendered_at": datetime.now().strftime("%d/%m/%Y %H:%M")
     }
 
     save_cuts_catalog(video_id, catalog)
     return catalog[key]
+
+
+def set_active_thumbnail_variation(
+    video_id: str,
+    start_time: str,
+    end_time: str,
+    aspect_mode: str,
+    variation_id: int
+) -> dict:
+    """
+    Define a variação selecionada (1, 2 ou 3) como a capa principal do corte (thumbnail.jpg).
+    """
+    catalog = load_cuts_catalog(video_id)
+    key = make_time_key(start_time, end_time)
+    entry = catalog.get(key)
+    if not entry:
+        return {"error": "Corte não encontrado no catálogo."}
+
+    inst = entry.get("formats", {}).get(aspect_mode)
+    if not inst:
+        return {"error": f"Formato {aspect_mode} não encontrado para este corte."}
+
+    folder_path = inst.get("folder_path")
+    if not folder_path or not os.path.exists(folder_path):
+        return {"error": "Pasta do pacote do corte não encontrada no disco."}
+
+    var_path = os.path.join(folder_path, f"thumbnail_{variation_id}.jpg")
+    main_path = os.path.join(folder_path, "thumbnail.jpg")
+
+    if not os.path.exists(var_path):
+        return {"error": f"Variação {variation_id} não encontrada em {var_path}."}
+
+    try:
+        shutil.copy2(var_path, main_path)
+        inst["active_variation"] = variation_id
+        inst["thumbnail_path"] = main_path
+        save_cuts_catalog(video_id, catalog)
+        return {"success": True, "active_variation": variation_id, "thumbnail_path": main_path}
+    except Exception as e:
+        return {"error": f"Erro ao aplicar variação de capa: {str(e)}"}
 
 
 def update_cut_texts_only(

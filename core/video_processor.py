@@ -559,7 +559,7 @@ def _apply_all_post_processing(
             thumb_src = source_video_path if (source_video_path and os.path.exists(source_video_path)) else curr_path
             thumb_res = create_cut_thumbnail(
                 source_video_or_frame=thumb_src,
-                headline_text=headline_text if (headline_enabled and headline_text) else "",
+                headline_text=headline_text or "",
                 output_path=thumb_target,
                 start_time_str=start_time_str,
                 end_time_str=end_time_str,
@@ -570,6 +570,7 @@ def _apply_all_post_processing(
             )
             if thumb_res.get("path") and os.path.exists(thumb_res["path"]):
                 result["thumbnail_path"] = thumb_res["path"]
+                result["thumbnail_variations"] = thumb_res.get("variations", [])
         except Exception:
             pass
 

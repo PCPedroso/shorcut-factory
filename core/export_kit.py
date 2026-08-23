@@ -84,12 +84,26 @@ def create_viral_package(
         if os.path.exists(video_path):
             shutil.copy2(video_path, video_dest_path)
 
-        # 2. Copia ou move a thumbnail gerada
+        # 2. Copia ou move a thumbnail gerada e suas variações estilizadas
         thumb_dest_path = None
         thumb_filename = "thumbnail.jpg"
+        variations_copied = []
         if thumbnail_path and os.path.exists(thumbnail_path):
             thumb_dest_path = os.path.join(package_dir, thumb_filename)
             shutil.copy2(thumbnail_path, thumb_dest_path)
+
+            src_dir = os.path.dirname(thumbnail_path)
+            for v_i, v_name in [(1, "⚡ Impacto Neon (Glow)"), (2, "✨ Clean Focus (Sombra 3D)"), (3, "🎬 Moldura Dinâmica (HDR)")]:
+                v_src = os.path.join(src_dir, f"thumbnail_{v_i}.jpg")
+                if os.path.exists(v_src):
+                    v_dst = os.path.join(package_dir, f"thumbnail_{v_i}.jpg")
+                    shutil.copy2(v_src, v_dst)
+                    variations_copied.append({
+                        "id": v_i,
+                        "name": v_name,
+                        "filename": f"thumbnail_{v_i}.jpg",
+                        "path": v_dst
+                    })
 
         # Formata hashtags
         hashtags_str = " ".join(h if h.startswith("#") else f"#{h}" for h in hashtags) if hashtags else "#shorts #viral #cortes"
@@ -101,7 +115,9 @@ def create_viral_package(
         orig_date = orig_info.get("upload_date", "Data N/D")
         orig_url = orig_info.get("url", "")
 
-        thumb_info_str = f"• Capa / Thumbnail: {thumb_filename}\n" if thumb_dest_path else ""
+        thumb_info_str = f"• Capa / Thumbnail Principal: {thumb_filename}\n" if thumb_dest_path else ""
+        if variations_copied:
+            thumb_info_str += "• Variações de Capa Disponíveis:\n" + "".join(f"  - {v['filename']} ({v['name']})\n" for v in variations_copied)
 
         # 3. info_publicacao.txt
         info_content = f"""════════════════════════════════════════════════════════════════
@@ -128,14 +144,15 @@ def create_viral_package(
 ════════════════════════════════════════════════════════════════
 • Título Original: {orig_title}
 • Canal do YouTube: {orig_channel}
-• Data de Lançamento: {orig_date}
-• Link do Vídeo: {orig_url}
+• Data de Publicação: {orig_date}
+• Link Original: {orig_url}
+════════════════════════════════════════════════════════════════
 """
         with open(os.path.join(package_dir, "info_publicacao.txt"), "w", encoding="utf-8") as f:
             f.write(info_content)
 
         # 4. descricao.txt
-        desc_content = f"{description}\n\n{hashtags_str}"
+        desc_content = f"{description}\n\n{hashtags_str}\n"
         with open(os.path.join(package_dir, "descricao.txt"), "w", encoding="utf-8") as f:
             f.write(desc_content)
 
@@ -151,6 +168,7 @@ def create_viral_package(
             "video_dest_path": video_dest_path,
             "thumbnail_filename": thumb_filename if thumb_dest_path else None,
             "thumbnail_dest_path": thumb_dest_path,
+            "thumbnail_variations": variations_copied,
             "error": None
         }
 

@@ -242,8 +242,7 @@ def process_batch_cuts(
             callout_text=params.get("callout_text", ""),
             callout_duration=params.get("callout_duration", 4.5),
             climax_zoom_enabled=eff_climax_zoom,
-            climax_zoom_factor=params.get("climax_zoom_factor", 1.14),
-            thumbnail_enabled=params.get("thumbnail_enabled", True) if not is_series_or_169 else False,
+            thumbnail_enabled=params.get("thumbnail_enabled", True),
         )
 
         _log(f"Retorno de cut_video: {cut_res}")

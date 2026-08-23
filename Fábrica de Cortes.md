@@ -135,23 +135,26 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 - **🌐 Exportação Direta & Integrações** (`core/integrations.py`):
   - Upload para o YouTube Shorts via OAuth2 e disparo estruturado para Webhooks (n8n/Make/Zapier).
 
-### 🔹 Fase 4 — Polimento Visual, Thumbnails Inteligentes & Retenção Dinâmica
-- **🖼️ Gerador Automático de Capas / Thumbnails 9:16 (`core/thumbnail_generator.py`)**:
-  - Extração do frame mais expressivo do corte combinando nitidez Laplaciana (anti-blur) e detecção facial MediaPipe BlazeFace.
-  - Composição visual 1080x1920 com a Headline magnética de topo, vinheta de contraste e tipografia `Montserrat-ExtraBold`.
-  - Salvamento automático de `thumbnail.jpg` dentro do pacote do corte (`export_kit.py`).
-  - Prévia visual e botão de download da thumbnail na **Seção 3** e em cada card da **Galeria (Seção 4)**.
+### 🔹 Fase 4 — Polimento Visual, Thumbnails Multicamadas & Retenção Dinâmica
+- **🖼️ Gerador Avançado de Capas / Thumbnails Multicamadas com 3 Variações (`core/thumbnail_generator.py`)**:
+  - Extração do frame mais expressivo via nitidez Laplaciana + MediaPipe BlazeFace.
+  - Isolamento de sujeito por IA via `Rembg` (modelo U2-Net) + realce de micro-contraste adaptativo local `OpenCV CLAHE` + Unsharp Mask nos olhos e feições.
+  - Suporte total a **16:9 Full HD (1920x1080)** para YouTube e **9:16 Vertical (1080x1920)** para Shorts/Reels.
+  - **Geração Automática de 3 Variações Estilizadas por Corte**:
+    1. `thumbnail_1.jpg`: **⚡ Impacto Neon (Glow)** (Fundo desfocado com vinheta escura + Orador isolado com Glow Neon + Caixa de alto contraste).
+    2. `thumbnail_2.jpg`: **✨ Clean Focus (Sombra 3D)** (Fundo bokeh suave + Orador com sombra projetada + Tipografia com stroke grosso e sombra 3D sem caixa).
+    3. `thumbnail_3.jpg`: **🎬 Moldura Dinâmica (HDR)** (Fundo com contraste/saturação elevados + Tarja translúcida moderna + Badge de destaque).
+  - **Seletor Interativo de Capas no Streamlit (`app.py`)**: Mini-galeria com prévia das 3 variações e botão *"⭐ Definir como Principal"* para alternar a capa oficial (`thumbnail.jpg`) instantaneamente na **Seção 3** e na **Galeria (Seção 4)**.
 - **⏳ Barra de Progresso Animada de Retenção (Dynamic Progress Bar)**:
   - Linha fluida no rodapé do vídeo animada dinamicamente quadro a quadro via `overlay` do FFmpeg (`-w + w*(t/duration)`), progredindo de 0% a 100% com cores customizáveis (Vermelho, Amarelo, Ciano, Branco, Verde).
 - **📌 Banner de Chamada / Lower Third Dinâmico (Engagement Callout)**:
   - Aparição elegante nos últimos 4-5 segundos provocando engajamento (*"💬 O que você acha? Comente!"*, *"🔔 Siga para mais cortes diários"*) em ASS com contorno de alto contraste (`BorderStyle=1`), sombra suave e fade `\fad(300,300)`.
 - **🎯 Zoom de Ênfase no Clímax & Zoom Punch**:
   - Zoom dinâmico via camadas `scale + crop + overlay` condicional no FFmpeg para pulsos periódicos de retenção e aproximação dramática na punchline final.
+- **🎛️ Controles em Massa & Modo Vídeo Normal (16:9)**:
+  - Controles de *Marcar Tudo*, *Desmarcar Tudo* e *Inverter Seleção* em Séries e Ganchos Virais, com travas de segurança para desabilitar efeitos verticais de Shorts em vídeos longos 16:9.
 - **🧪 Suíte de 31 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando toda a suíte do `core/` via `pytest`.
-
-> [!NOTE]
-> Os recursos de **Gerar Capa (Thumbnails 9:16)** e **Zoom de Ênfase no Clímax** estão operacionais e integrados na esteira, com aperfeiçoamentos visuais adicionais mapeados para refinamento contínuo nas fases seguintes.
 
 ---
 

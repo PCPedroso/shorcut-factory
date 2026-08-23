@@ -44,7 +44,7 @@ from core.video_processor import download_full_video, cut_video, get_video_resol
 from core.library_manager import get_library, add_or_update_video_in_library, remove_video_from_library
 from core.config_manager import load_settings, save_all_settings, save_setting
 from core.export_kit import build_cut_folder_name, create_viral_package
-from core.cuts_catalog import get_cut_entry, get_format_instance, register_cut_instance, update_cut_texts_only, delete_entire_cut, delete_format_instance, load_cuts_catalog
+from core.cuts_catalog import get_cut_entry, get_format_instance, register_cut_instance, update_cut_texts_only, delete_entire_cut, delete_format_instance, load_cuts_catalog, set_active_thumbnail_variation
 from core.batch_processor import process_batch_cuts
 from core.headline_drawer import HEADLINE_PRESETS
 from core.audio_mixer import list_available_tracks, DUCKING_PRESETS
@@ -1860,16 +1860,63 @@ if st.session_state.transcription_done:
                     st.caption("🎬 **Vídeo Renderizado:**")
                     st.video(existing_inst["video_path"])
                 with col_pv3:
-                    st.caption("🖼️ **Capa / Thumbnail (9:16):**")
+                    st.caption("🖼️ **Capa / Thumbnail Principal:**")
                     st.image(cached_thumb, use_container_width=True)
             else:
                 col_pv1, col_pv2, col_pv3 = st.columns([1.6, 1.2, 1.6])
                 with col_pv2:
                     st.video(existing_inst["video_path"])
         else:
-            col_pv1, col_pv2, col_pv3 = st.columns([1, 2, 1])
-            with col_pv2:
-                st.video(existing_inst["video_path"])
+            if has_cached_thumb:
+                col_pv1, col_pv2 = st.columns(2)
+                with col_pv1:
+                    st.caption("🎬 **Vídeo 16:9 Full HD:**")
+                    st.video(existing_inst["video_path"])
+                with col_pv2:
+                    st.caption("🖼️ **Capa / Thumbnail Principal (16:9):**")
+                    st.image(cached_thumb, use_container_width=True)
+            else:
+                col_pv1, col_pv2, col_pv3 = st.columns([1, 2, 1])
+                with col_pv2:
+                    st.video(existing_inst["video_path"])
+
+        # Variações de Capa Disponíveis
+        f_dir = existing_inst.get("folder_path", "")
+        var_list = []
+        for v_i, v_name in [(1, "⚡ Impacto Neon (Glow)"), (2, "✨ Clean Focus (Sombra 3D)"), (3, "🎬 Moldura Dinâmica (HDR)")]:
+            v_p = os.path.join(f_dir, f"thumbnail_{v_i}.jpg")
+            if os.path.exists(v_p):
+                var_list.append((v_i, v_name, v_p))
+
+        if len(var_list) > 1:
+            with st.expander("🖼️ Variações de Capa / Thumbnail Disponíveis (Escolha sua preferida)", expanded=False):
+                st.caption("Clique em **⭐ Ativar como Principal** para trocar a capa oficial do corte:")
+                v_cols = st.columns(len(var_list))
+                active_var = existing_inst.get("active_variation", 1)
+                for v_idx_col, (v_i, v_name, v_p) in enumerate(var_list):
+                    with v_cols[v_idx_col]:
+                        is_active = (v_i == active_var)
+                        st.markdown(f"**{v_name}**" + (" ⭐ *(Ativa)*" if is_active else ""))
+                        st.image(v_p, use_container_width=True)
+                        col_bt1, col_bt2 = st.columns(2)
+                        with col_bt1:
+                            if not is_active:
+                                if st.button("⭐ Ativar", key=f"btn_set_var_cached_{v_i}", use_container_width=True):
+                                    set_active_thumbnail_variation(_vid_id_cat, start_time, end_time, selected_aspect, v_i)
+                                    st.success(f"Capa {v_i} definida como principal!")
+                                    st.rerun()
+                            else:
+                                st.button("✅ Ativa", disabled=True, key=f"btn_active_cached_{v_i}", use_container_width=True)
+                        with col_bt2:
+                            with open(v_p, "rb") as vf_var:
+                                st.download_button(
+                                    label="⬇️ JPG",
+                                    data=vf_var,
+                                    file_name=f"thumbnail_{v_i}.jpg",
+                                    mime="image/jpeg",
+                                    key=f"btn_dl_var_cached_{v_i}",
+                                    use_container_width=True
+                                )
 
         col_dl1, col_dl2 = st.columns([2, 1.2] if has_cached_thumb else [1, 0.001])
         with col_dl1:
@@ -1887,7 +1934,7 @@ if st.session_state.transcription_done:
             with col_dl2:
                 with open(cached_thumb, "rb") as tf_cached:
                     st.download_button(
-                        label="🖼️ Baixar Thumbnail (JPG)",
+                        label="🖼️ Baixar Thumbnail Principal (JPG)",
                         data=tf_cached,
                         file_name="thumbnail.jpg",
                         mime="image/jpeg",
@@ -2041,16 +2088,25 @@ if st.session_state.transcription_done:
                                         st.caption("🎬 **Vídeo Renderizado:**")
                                         st.video(corte_output_path)
                                     with col_v3:
-                                        st.caption("🖼️ **Capa / Thumbnail (9:16):**")
+                                        st.caption("🖼️ **Capa / Thumbnail Principal:**")
                                         st.image(gen_thumb_path, use_container_width=True)
                                 else:
                                     col_v1, col_v2, col_v3 = st.columns([1.6, 1.2, 1.6])
                                     with col_v2:
                                         st.video(corte_output_path)
                             else:
-                                col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
-                                with col_v2:
-                                    st.video(corte_output_path)
+                                if has_gen_thumb:
+                                    col_v1, col_v2 = st.columns(2)
+                                    with col_v1:
+                                        st.caption("🎬 **Vídeo 16:9 Full HD:**")
+                                        st.video(corte_output_path)
+                                    with col_v2:
+                                        st.caption("🖼️ **Capa / Thumbnail Principal (16:9):**")
+                                        st.image(gen_thumb_path, use_container_width=True)
+                                else:
+                                    col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
+                                    with col_v2:
+                                        st.video(corte_output_path)
                             
                             # Carrega metadados do vídeo original
                             _meta_file = os.path.join(data_dir, "metadata.json")
@@ -2247,17 +2303,53 @@ if st.session_state.transcription_done:
                                     st.video(v_file)
                                     
                                     if has_g_thumb:
-                                        with st.expander("🖼️ Visualizar Capa / Thumbnail (9:16)", expanded=False):
-                                            st.image(g_thumb, use_container_width=True)
-                                            with open(g_thumb, "rb") as tf_gal:
-                                                st.download_button(
-                                                    label="💾 Baixar Thumbnail (JPG)",
-                                                    data=tf_gal,
-                                                    file_name="thumbnail.jpg",
-                                                    mime="image/jpeg",
-                                                    key=f"dl_thumb_gal_{c_idx}_{f_idx}",
-                                                    use_container_width=True
-                                                )
+                                        g_folder = fmt_data.get("folder_path", "")
+                                        g_var_list = []
+                                        for v_i, v_name in [(1, "⚡ Impacto Neon (Glow)"), (2, "✨ Clean Focus (Sombra 3D)"), (3, "🎬 Moldura Dinâmica (HDR)")]:
+                                            v_p = os.path.join(g_folder, f"thumbnail_{v_i}.jpg")
+                                            if os.path.exists(v_p):
+                                                g_var_list.append((v_i, v_name, v_p))
+
+                                        with st.expander(f"🖼️ Visualizar Capa / Thumbnail ({'16:9' if fmt_key == '16:9' else '9:16'})", expanded=False):
+                                            st.image(g_thumb, caption="Capa Principal Ativa", use_container_width=True)
+                                            if len(g_var_list) > 1:
+                                                st.markdown("##### 🎨 Variações de Capa:")
+                                                g_vcols = st.columns(len(g_var_list))
+                                                active_g_var = fmt_data.get("active_variation", 1)
+                                                for g_vi, (gv_id, gv_name, gv_path) in enumerate(g_var_list):
+                                                    with g_vcols[g_vi]:
+                                                        is_g_act = (gv_id == active_g_var)
+                                                        st.caption(f"**{gv_name}**" + (" ⭐" if is_g_act else ""))
+                                                        st.image(gv_path, use_container_width=True)
+                                                        col_g1, col_g2 = st.columns(2)
+                                                        with col_g1:
+                                                            if not is_g_act:
+                                                                if st.button("⭐ Ativar", key=f"btn_set_gvar_{c_idx}_{f_idx}_{gv_id}", use_container_width=True):
+                                                                    set_active_thumbnail_variation(_vid_id_gal, cut_item.get('start_time'), cut_item.get('end_time'), fmt_key, gv_id)
+                                                                    st.success(f"Capa {gv_id} ativada!")
+                                                                    st.rerun()
+                                                            else:
+                                                                st.button("✅", disabled=True, key=f"btn_act_gvar_{c_idx}_{f_idx}_{gv_id}", use_container_width=True)
+                                                        with col_g2:
+                                                            with open(gv_path, "rb") as tg_var:
+                                                                st.download_button(
+                                                                    label="⬇️",
+                                                                    data=tg_var,
+                                                                    file_name=f"thumbnail_{gv_id}.jpg",
+                                                                    mime="image/jpeg",
+                                                                    key=f"dl_gvar_{c_idx}_{f_idx}_{gv_id}",
+                                                                    use_container_width=True
+                                                                )
+                                            else:
+                                                with open(g_thumb, "rb") as tf_gal:
+                                                    st.download_button(
+                                                        label="💾 Baixar Thumbnail (JPG)",
+                                                        data=tf_gal,
+                                                        file_name="thumbnail.jpg",
+                                                        mime="image/jpeg",
+                                                        key=f"dl_thumb_gal_{c_idx}_{f_idx}",
+                                                        use_container_width=True
+                                                    )
 
                                     col_b_dl, col_b_yt, col_b_wh, col_b_del = st.columns([2, 1.2, 1.2, 0.8])
                                     with col_b_dl:
