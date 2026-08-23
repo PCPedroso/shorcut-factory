@@ -805,8 +805,11 @@ if st.session_state.transcription_done:
                             )
 
                             s_prog_bar.progress(100)
-                            success_count = sum(1 for r in s_batch_res if r.get("success"))
-                            error_items = [r for r in s_batch_res if r.get("error")]
+                            if not isinstance(s_batch_res, list):
+                                s_batch_res = [s_batch_res] if s_batch_res else []
+
+                            success_count = sum(1 for r in s_batch_res if isinstance(r, dict) and r.get("success"))
+                            error_items = [r for r in s_batch_res if isinstance(r, dict) and r.get("error")]
 
                             if error_items:
                                 err_details = "\n".join([f"- **{e.get('title', 'Série')}**: {e.get('error')}" for e in error_items])
