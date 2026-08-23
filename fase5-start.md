@@ -69,6 +69,9 @@ O projeto possui quatro fases 100% concluídas, testadas com 31 testes unitário
   - Banner elegante nos últimos 4-5 segundos (*"💬 Comente" / "🔔 Siga"*) em ASS com contorno de alto contraste (`BorderStyle=1`), sombra suave e fade `\fad(300,300)`.
 - **🎯 Zoom de Ênfase no Clímax & Zoom Punch**:
   - Zoom dinâmico via camadas `scale + crop + overlay` condicional no FFmpeg para pulsos de retenção e punchline final.
+- **🎛️ Controles em Massa & Modo Vídeo Normal (16:9)**:
+  - Controles de *Marcar Tudo*, *Desmarcar Tudo* e *Inverter Seleção* em Séries e Ganchos Virais.
+  - Travas mandatórias para vídeos de 10+ min (Séries em 16:9) desabilitando efeitos agressivos de Shorts para gerar vídeos limpos para YouTube tradicional.
 
 ---
 
