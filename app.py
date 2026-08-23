@@ -71,6 +71,37 @@ def get_video_id(url):
 
 st.title("✂️ ViralCut - Fábrica de Cortes")
 
+def safe_display_image(img_source, caption=None, use_container_width=True):
+    """
+    Exibe imagens no Streamlit lendo diretamente os bytes em memória
+    para garantir 100% de estabilidade de renderização no Windows/Chrome.
+    """
+    if not img_source:
+        return False
+    if isinstance(img_source, str) and os.path.exists(img_source):
+        try:
+            with open(img_source, "rb") as f:
+                data = f.read()
+            if data:
+                st.image(data, caption=caption, use_container_width=use_container_width)
+                return True
+        except Exception:
+            pass
+    elif isinstance(img_source, (bytes, bytearray)):
+        st.image(img_source, caption=caption, use_container_width=use_container_width)
+        return True
+    elif hasattr(img_source, "save") or hasattr(img_source, "convert"):
+        st.image(img_source, caption=caption, use_container_width=use_container_width)
+        return True
+    return False
+
+def safe_display_video(video_path: str):
+    """Garante reprodução e streaming instantâneo de vídeo MP4."""
+    if not video_path or not os.path.exists(video_path):
+        st.warning("Arquivo de vídeo não encontrado.")
+        return
+    st.video(video_path)
+
 def load_video_saved_artifacts(video_id: str):
     """Carrega todas as ações e análises salvas individualmente para o vídeo."""
     if not video_id:
@@ -1901,27 +1932,27 @@ if st.session_state.transcription_done:
                 col_pv1, col_pv2, col_pv3, col_pv4 = st.columns([1.0, 1.2, 1.2, 1.0])
                 with col_pv2:
                     st.caption("🎬 **Vídeo Renderizado:**")
-                    st.video(existing_inst["video_path"])
+                    safe_display_video(existing_inst["video_path"])
                 with col_pv3:
                     st.caption("🖼️ **Capa / Thumbnail Principal:**")
-                    st.image(cached_thumb, use_container_width=True)
+                    safe_display_image(cached_thumb, use_container_width=True)
             else:
                 col_pv1, col_pv2, col_pv3 = st.columns([1.6, 1.2, 1.6])
                 with col_pv2:
-                    st.video(existing_inst["video_path"])
+                    safe_display_video(existing_inst["video_path"])
         else:
             if has_cached_thumb:
                 col_pv1, col_pv2 = st.columns(2)
                 with col_pv1:
                     st.caption("🎬 **Vídeo 16:9 Full HD:**")
-                    st.video(existing_inst["video_path"])
+                    safe_display_video(existing_inst["video_path"])
                 with col_pv2:
                     st.caption("🖼️ **Capa / Thumbnail Principal (16:9):**")
-                    st.image(cached_thumb, use_container_width=True)
+                    safe_display_image(cached_thumb, use_container_width=True)
             else:
                 col_pv1, col_pv2, col_pv3 = st.columns([1, 2, 1])
                 with col_pv2:
-                    st.video(existing_inst["video_path"])
+                    safe_display_video(existing_inst["video_path"])
 
         # Variações de Capa Disponíveis
         f_dir = existing_inst.get("folder_path", "")
@@ -1940,7 +1971,7 @@ if st.session_state.transcription_done:
                     with v_cols[v_idx_col]:
                         is_active = (v_i == active_var)
                         st.markdown(f"**{v_name}**" + (" ⭐ *(Ativa)*" if is_active else ""))
-                        st.image(v_p, use_container_width=True)
+                        safe_display_image(v_p, use_container_width=True)
                         col_bt1, col_bt2 = st.columns(2)
                         with col_bt1:
                             if not is_active:
@@ -2129,27 +2160,27 @@ if st.session_state.transcription_done:
                                     col_v1, col_v2, col_v3, col_v4 = st.columns([1.0, 1.2, 1.2, 1.0])
                                     with col_v2:
                                         st.caption("🎬 **Vídeo Renderizado:**")
-                                        st.video(corte_output_path)
+                                        safe_display_video(corte_output_path)
                                     with col_v3:
                                         st.caption("🖼️ **Capa / Thumbnail Principal:**")
-                                        st.image(gen_thumb_path, use_container_width=True)
+                                        safe_display_image(gen_thumb_path, use_container_width=True)
                                 else:
                                     col_v1, col_v2, col_v3 = st.columns([1.6, 1.2, 1.6])
                                     with col_v2:
-                                        st.video(corte_output_path)
+                                        safe_display_video(corte_output_path)
                             else:
                                 if has_gen_thumb:
                                     col_v1, col_v2 = st.columns(2)
                                     with col_v1:
                                         st.caption("🎬 **Vídeo 16:9 Full HD:**")
-                                        st.video(corte_output_path)
+                                        safe_display_video(corte_output_path)
                                     with col_v2:
                                         st.caption("🖼️ **Capa / Thumbnail Principal (16:9):**")
-                                        st.image(gen_thumb_path, use_container_width=True)
+                                        safe_display_image(gen_thumb_path, use_container_width=True)
                                 else:
                                     col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
                                     with col_v2:
-                                        st.video(corte_output_path)
+                                        safe_display_video(corte_output_path)
                             
                             # Carrega metadados do vídeo original
                             _meta_file = os.path.join(data_dir, "metadata.json")
@@ -2343,7 +2374,7 @@ if st.session_state.transcription_done:
                                 has_g_thumb = g_thumb and os.path.exists(g_thumb)
 
                                 if v_file and os.path.exists(v_file):
-                                    st.video(v_file)
+                                    safe_display_video(v_file)
                                     
                                     if has_g_thumb:
                                         g_folder = fmt_data.get("folder_path", "")
@@ -2354,7 +2385,7 @@ if st.session_state.transcription_done:
                                                 g_var_list.append((v_i, v_name, v_p))
 
                                         with st.expander(f"🖼️ Visualizar Capa / Thumbnail ({'16:9' if fmt_key == '16:9' else '9:16'})", expanded=False):
-                                            st.image(g_thumb, caption="Capa Principal Ativa", use_container_width=True)
+                                            safe_display_image(g_thumb, caption="Capa Principal Ativa", use_container_width=True)
                                             if len(g_var_list) > 1:
                                                 st.markdown("##### 🎨 Variações de Capa:")
                                                 g_vcols = st.columns(len(g_var_list))
@@ -2363,7 +2394,7 @@ if st.session_state.transcription_done:
                                                     with g_vcols[g_vi]:
                                                         is_g_act = (gv_id == active_g_var)
                                                         st.caption(f"**{gv_name}**" + (" ⭐" if is_g_act else ""))
-                                                        st.image(gv_path, use_container_width=True)
+                                                        safe_display_image(gv_path, use_container_width=True)
                                                         col_g1, col_g2 = st.columns(2)
                                                         with col_g1:
                                                             if not is_g_act:

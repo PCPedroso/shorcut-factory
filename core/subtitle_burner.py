@@ -563,6 +563,7 @@ def burn_subtitles(
                 "-crf", "20",
                 "-c:a", "copy",
                 "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
                 tmp_output
             ]
 

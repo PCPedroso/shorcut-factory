@@ -258,6 +258,7 @@ def cut_video(
                 "-c:a", "aac",
                 "-b:a", "192k",
                 "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
                 output_path
             ]
         else:
@@ -273,6 +274,7 @@ def cut_video(
                 "-c:a", "aac",
                 "-b:a", "192k",
                 "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
                 output_path
             ]
 
@@ -440,6 +442,7 @@ def _apply_all_post_processing(
                 "-preset", "veryfast",
                 "-crf", "20",
                 "-c:a", "copy",
+                "-movflags", "+faststart",
                 tmp_z
             ]
             z_res = subprocess.run(cmd, capture_output=True, text=True)
@@ -485,6 +488,7 @@ def _apply_all_post_processing(
                     "-preset", "veryfast",
                     "-crf", "20",
                     "-c:a", "copy",
+                    "-movflags", "+faststart",
                     tmp_pb
                 ]
                 pb_res = subprocess.run(cmd, capture_output=True, text=True)
@@ -575,4 +579,22 @@ def _apply_all_post_processing(
             pass
 
     return result
+
+
+def ensure_faststart(video_path: str) -> str:
+    """
+    Garante que o arquivo MP4 possua o moov atom no início do arquivo (+faststart)
+    permitindo streaming e reprodução instantânea no navegador sem travamentos.
+    """
+    if not video_path or not os.path.exists(video_path):
+        return video_path
+    try:
+        tmp_fast = video_path + ".fast.mp4"
+        cmd = [FFMPEG_EXE, "-y", "-i", video_path, "-c", "copy", "-movflags", "+faststart", tmp_fast]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0 and os.path.exists(tmp_fast) and os.path.getsize(tmp_fast) > 0:
+            os.replace(tmp_fast, video_path)
+    except Exception:
+        pass
+    return video_path
 

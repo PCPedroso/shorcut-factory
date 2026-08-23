@@ -263,6 +263,7 @@ def apply_audio_ducking(
             "-c:v", "copy",
             "-c:a", "aac",
             "-b:a", "192k",
+            "-movflags", "+faststart",
             tmp_output
         ]
         
