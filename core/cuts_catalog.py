@@ -195,6 +195,36 @@ def set_active_thumbnail_variation(
         return {"error": f"Erro ao aplicar variação de capa: {str(e)}"}
 
 
+def update_cut_thumbnail_in_catalog(
+    video_id: str,
+    start_time: str,
+    end_time: str,
+    aspect_mode: str,
+    thumbnail_path: str,
+    variations: list = None
+) -> dict:
+    """Atualiza a referência da thumbnail e variações no catálogo para um formato existente."""
+    catalog = load_cuts_catalog(video_id)
+    key = make_time_key(start_time, end_time)
+    entry = catalog.get(key)
+    if not entry:
+        return {"error": "Minutagem não encontrada no catálogo."}
+
+    inst = entry.get("formats", {}).get(aspect_mode)
+    if not inst:
+        return {"error": f"Formato {aspect_mode} não encontrado para este corte."}
+
+    inst["thumbnail_path"] = thumbnail_path
+    inst["thumbnail_filename"] = os.path.basename(thumbnail_path) if thumbnail_path else "thumbnail.jpg"
+    if variations:
+        inst["thumbnail_variations"] = variations
+    inst["active_variation"] = 1
+    inst["updated_at"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    save_cuts_catalog(video_id, catalog)
+    return {"success": True, "entry": entry}
+
+
 def update_cut_texts_only(
     video_id: str,
     start_time: str,

@@ -44,7 +44,7 @@ from core.video_processor import download_full_video, cut_video, get_video_resol
 from core.library_manager import get_library, add_or_update_video_in_library, remove_video_from_library
 from core.config_manager import load_settings, save_all_settings, save_setting
 from core.export_kit import build_cut_folder_name, create_viral_package
-from core.cuts_catalog import get_cut_entry, get_format_instance, register_cut_instance, update_cut_texts_only, delete_entire_cut, delete_format_instance, load_cuts_catalog, set_active_thumbnail_variation
+from core.cuts_catalog import get_cut_entry, get_format_instance, register_cut_instance, update_cut_texts_only, delete_entire_cut, delete_format_instance, load_cuts_catalog, set_active_thumbnail_variation, update_cut_thumbnail_in_catalog
 from core.batch_processor import process_batch_cuts
 from core.headline_drawer import HEADLINE_PRESETS
 from core.audio_mixer import list_available_tracks, DUCKING_PRESETS
@@ -1823,28 +1823,71 @@ if st.session_state.transcription_done:
                 key="input_cut_tags_seo"
             )
 
-        # Se a minutagem já existe no catálogo, botão para salvar edições de texto instantaneamente
-        if existing_cut:
-            if st.button("💾 Atualizar Apenas Textos no Disco (Sem Re-renderizar Vídeo)", use_container_width=True):
-                _meta_file_quick = os.path.join("data", _vid_id_cat, "metadata.json")
-                orig_info_quick = {}
-                if os.path.exists(_meta_file_quick):
-                    try:
-                        with open(_meta_file_quick, "r", encoding="utf-8") as _mfq:
-                            orig_info_quick = json.load(_mfq)
-                    except Exception:
-                        pass
-                update_res = update_cut_texts_only(
-                    video_id=_vid_id_cat,
-                    start_time=start_time,
-                    end_time=end_time,
-                    title=cut_title_val,
-                    description=cut_desc_val,
-                    hashtags=cut_hashtags_val.split(),
-                    tags_seo=cut_tags_seo_val,
-                    orig_video_info=orig_info_quick
-                )
-                st.success("✅ Arquivos de texto atualizados com sucesso em todas as instâncias existentes deste corte!")
+        # Ações Rápidas Independentes (Não exigem re-renderização de vídeo)
+        col_act_txt, col_act_th = st.columns(2)
+        with col_act_txt:
+            if existing_cut:
+                if st.button("💾 Atualizar Apenas Textos (Sem Renderizar Vídeo)", use_container_width=True):
+                    _meta_file_quick = os.path.join("data", _vid_id_cat, "metadata.json")
+                    orig_info_quick = {}
+                    if os.path.exists(_meta_file_quick):
+                        try:
+                            with open(_meta_file_quick, "r", encoding="utf-8") as _mfq:
+                                orig_info_quick = json.load(_mfq)
+                        except Exception:
+                            pass
+                    update_res = update_cut_texts_only(
+                        video_id=_vid_id_cat,
+                        start_time=start_time,
+                        end_time=end_time,
+                        title=cut_title_val,
+                        description=cut_desc_val,
+                        hashtags=cut_hashtags_val.split(),
+                        tags_seo=cut_tags_seo_val,
+                        orig_video_info=orig_info_quick
+                    )
+                    st.success("✅ Textos atualizados no disco!")
+
+        with col_act_th:
+            if start_time and end_time:
+                if st.button("🖼️ Gerar / Recriar Capas Agora (Sem Renderizar Vídeo)", type="secondary", use_container_width=True):
+                    active_u_th = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                    v_id_th = get_video_id(active_u_th)
+                    if v_id_th:
+                        v_full_th = os.path.join("data", v_id_th, "video_full.mp4")
+                        if not os.path.exists(v_full_th):
+                            st.warning("O vídeo original precisa estar baixado na Seção 1 para extrair os frames em alta resolução.")
+                        else:
+                            with st.spinner("Extraindo frame, aplicando Rembg e gerando 3 variações de capa..."):
+                                f_dest_dir = existing_inst.get("folder_path") if existing_inst else os.path.join("data", v_id_th, f"temp_thumbs_{selected_aspect.replace(':', '-')}")
+                                os.makedirs(f_dest_dir, exist_ok=True)
+                                target_thumb_path = os.path.join(f_dest_dir, "thumbnail.jpg")
+
+                                th_standalone_res = create_cut_thumbnail(
+                                    source_video_or_frame=v_full_th,
+                                    headline_text=cut_headline_val,
+                                    output_path=target_thumb_path,
+                                    start_time_str=start_time,
+                                    end_time_str=end_time,
+                                    preset=headline_preset,
+                                    custom_text_color=headline_text_color,
+                                    custom_bg_color=headline_bg_color,
+                                    aspect_mode=selected_aspect
+                                )
+                                if th_standalone_res.get("error"):
+                                    st.error(f"Erro ao gerar capas: {th_standalone_res['error']}")
+                                else:
+                                    if existing_inst:
+                                        update_cut_thumbnail_in_catalog(
+                                            video_id=v_id_th,
+                                            start_time=start_time,
+                                            end_time=end_time,
+                                            aspect_mode=selected_aspect,
+                                            thumbnail_path=target_thumb_path,
+                                            variations=th_standalone_res.get("variations", [])
+                                        )
+                                    st.success("🎉 3 Variações de Capa geradas com sucesso!")
+                                    st.rerun()
 
     # Exibição imediata da instância existente do cache se já renderizada
     if existing_inst and os.path.exists(existing_inst.get("video_path", "")):
@@ -2350,6 +2393,35 @@ if st.session_state.transcription_done:
                                                         key=f"dl_thumb_gal_{c_idx}_{f_idx}",
                                                         use_container_width=True
                                                     )
+
+                                            st.markdown("")
+                                            if st.button("🔄 Recriar 3 Capas com IA (Sem Renderizar Vídeo)", key=f"btn_regen_gal_{c_idx}_{f_idx}", use_container_width=True):
+                                                v_full_gal = os.path.join("data", _vid_id_gal, "video_full.mp4")
+                                                if os.path.exists(v_full_gal):
+                                                    with st.spinner("Recriando capas com Rembg e IA..."):
+                                                        th_g_res = create_cut_thumbnail(
+                                                            source_video_or_frame=v_full_gal,
+                                                            headline_text=cut_item.get("title", ""),
+                                                            output_path=g_thumb,
+                                                            start_time_str=cut_item.get("start_time"),
+                                                            end_time_str=cut_item.get("end_time"),
+                                                            aspect_mode=fmt_key
+                                                        )
+                                                        if th_g_res.get("error"):
+                                                            st.error(f"Erro ao recriar: {th_g_res['error']}")
+                                                        else:
+                                                            update_cut_thumbnail_in_catalog(
+                                                                video_id=_vid_id_gal,
+                                                                start_time=cut_item.get("start_time"),
+                                                                end_time=cut_item.get("end_time"),
+                                                                aspect_mode=fmt_key,
+                                                                thumbnail_path=g_thumb,
+                                                                variations=th_g_res.get("variations", [])
+                                                            )
+                                                            st.success("Capas recriadas com sucesso!")
+                                                            st.rerun()
+                                                else:
+                                                    st.warning("Vídeo original não encontrado em data.")
 
                                     col_b_dl, col_b_yt, col_b_wh, col_b_del = st.columns([2, 1.2, 1.2, 0.8])
                                     with col_b_dl:
