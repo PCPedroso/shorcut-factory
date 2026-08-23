@@ -374,6 +374,16 @@ def _apply_all_post_processing(
     end_s = parse_time_to_seconds(end_time_str)
     duration_s = max(1.0, float(end_s - start_s))
 
+    # ── RESTRIÇÕES PARA VÍDEOS LONGOS (SÉRIES 10+ MIN) E HORIZONTAIS (16:9) ──
+    # Vídeos normais de YouTube não devem ter tarjas de topo, barras de progresso, zoom punches ou callouts verticais de Shorts
+    is_long_or_169 = (aspect_mode == "16:9") or (duration_s > 180.0)
+    if is_long_or_169:
+        zoom_punch_enabled = False
+        climax_zoom_enabled = False
+        progress_bar_enabled = False
+        headline_enabled = False
+        callout_enabled = False
+
     # --- 1. Zoom Punch de Retenção & Climax Punchline Zoom ---
     curr_res_str = get_video_resolution(curr_path)
     v_w, v_h = 1080, 1920

@@ -650,7 +650,17 @@ if st.session_state.transcription_done:
 
     # ── TAB 2: SÉRIES AUTOMÁTICAS ─────────────────────────────────────────────
     with tab_series:
-        st.markdown("Cortes automáticos de **10+ minutos** sugeridos agrupando sequências de pautas.")
+        st.markdown("Cortes de **10+ minutos** sugeridos agrupando sequências de pautas para publicação como **Vídeos Normais no YouTube** (Horizontal 16:9 Full HD).")
+        st.info("ℹ️ **Modo Vídeo Normal (YouTube 16:9)**: Séries e vídeos longos de 10+ minutos são renderizados no formato original widescreen limpo (sem tarjas de topo, zoom punches periódicos ou barras de progresso de Shorts), preservando a experiência de vídeo tradicional do YouTube.")
+
+        if "batch_feedback" in st.session_state:
+            fb = st.session_state.pop("batch_feedback")
+            if fb.get("type") == "success":
+                st.success(fb.get("msg", ""))
+            elif fb.get("type") == "warning":
+                st.warning(fb.get("msg", ""))
+            else:
+                st.error(fb.get("msg", ""))
         
         if st.button("🧠 Gerar Séries Automáticas (10 min)", key="btn_series"):
             with st.spinner("Agrupando pautas em séries de 10+ min..."):
@@ -743,7 +753,7 @@ if st.session_state.transcription_done:
                     col_sp1, col_sp2 = st.columns([2, 2])
                     with col_sp1:
                         _series_aspect_map = {
-                            "💻 Horizontal 16:9 (Original 1080p Full HD - Recomendado para Séries de 10+ min)": "16:9",
+                            "💻 Horizontal 16:9 (Original 1080p Full HD - Padrão YouTube)": "16:9",
                             "📱 Vertical 9:16 (Fundo Desfocado / Blur)": "9:16_blur",
                             "📱 Vertical 9:16 (🎯 Auto-Reframing Facial)": "9:16_smart_face",
                             "📱 Vertical 9:16 (👥 Split Screen)": "9:16_split",
@@ -793,10 +803,22 @@ if st.session_state.transcription_done:
                                 progress_callback=_s_batch_cb,
                                 log_callback=_s_log_cb
                             )
-                            st.session_state["batch_feedback"] = {
-                                "type": "success" if s_batch_res.get("success") else "error",
-                                "msg": f"🎉 Processamento concluído! Sucessos: {s_batch_res.get('processed_count', 0)} | Pulados: {s_batch_res.get('skipped_count', 0)} | Erros: {len(s_batch_res.get('errors', []))}"
-                            }
+
+                            s_prog_bar.progress(100)
+                            success_count = sum(1 for r in s_batch_res if r.get("success"))
+                            error_items = [r for r in s_batch_res if r.get("error")]
+
+                            if error_items:
+                                err_details = "\n".join([f"- **{e.get('title', 'Série')}**: {e.get('error')}" for e in error_items])
+                                st.session_state["batch_feedback"] = {
+                                    "type": "warning" if success_count > 0 else "error",
+                                    "msg": f"Processamento de séries concluído com {success_count} sucesso(s) e {len(error_items)} erro(s):\n{err_details}"
+                                }
+                            else:
+                                st.session_state["batch_feedback"] = {
+                                    "type": "success",
+                                    "msg": f"🎉 **Renderização de séries em lote concluída com sucesso!** {success_count} séries geradas e disponíveis na Galeria (Seção 4)."
+                                }
                             st.session_state["_reset_bundles_selection"] = True
                             st.rerun()
 

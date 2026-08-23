@@ -139,11 +139,15 @@ def process_batch_cuts(
 
         # 3. Geração de Metadados com IA
         words_meta = core.subtitle_burner.extract_words_in_range(transcript_path, start_t, end_t)
-        snippet_text = " ".join(w["word"] for w in words_meta)
+        if len(words_meta) > 180:
+            snippet_text = " ".join(w["word"] for w in words_meta[:180]) + "..."
+        else:
+            snippet_text = " ".join(w["word"] for w in words_meta)
+
         _log(f"Trecho da transcrição extraído: {len(words_meta)} palavras ({len(snippet_text)} caracteres)")
 
         if snippet_text:
-            _log(f"Solicitando kit viral de IA via Ollama (modelo: {ollama_model})...")
+            _log(f"Solicitando metadados de IA via Ollama (modelo: {ollama_model})...")
             try:
                 meta_res = core.analyzer.generate_viral_cut_metadata(snippet_text, model=ollama_model)
                 cut_title = meta_res.get("titulo_principal") or base_title
@@ -184,6 +188,14 @@ def process_batch_cuts(
             resolved_music_path = get_track_path_by_id(params.get("bg_music_track_id"))
             _log(f"Trilha sonora resolvida: ID={params.get('bg_music_track_id')} -> Path={resolved_music_path}")
 
+        # Restrição para vídeos longos / 16:9
+        is_series_or_169 = (aspect_ratio_mode == "16:9")
+        eff_headline = False if is_series_or_169 else params.get("headline_enabled", False)
+        eff_zoom_punch = False if is_series_or_169 else params.get("zoom_punch_enabled", False)
+        eff_climax_zoom = False if is_series_or_169 else params.get("climax_zoom_enabled", False)
+        eff_progress_bar = False if is_series_or_169 else params.get("progress_bar_enabled", False)
+        eff_callout = False if is_series_or_169 else params.get("callout_enabled", False)
+
         cut_res = core.video_processor.cut_video(
             video_full_path,
             start_t,
@@ -209,29 +221,29 @@ def process_batch_cuts(
             subtitle_base_color=subtitle_base_color,
             subtitle_font_size=subtitle_font_size,
             # Fase 3 & 4: Retenção & Áudio Ducking
-            headline_enabled=params.get("headline_enabled", False),
+            headline_enabled=eff_headline,
             headline_text=cut_headline,
             headline_preset=params.get("headline_preset", "yellow_black"),
             headline_text_color=params.get("headline_text_color", "#000000"),
             headline_bg_color=params.get("headline_bg_color", "#FFE600"),
             headline_font_size=params.get("headline_font_size", 46),
             headline_margin_top=params.get("headline_margin_top", 120),
-            emojis_enabled=params.get("emojis_enabled", False),
-            zoom_punch_enabled=params.get("zoom_punch_enabled", False),
+            emojis_enabled=params.get("emojis_enabled", False) if not is_series_or_169 else False,
+            zoom_punch_enabled=eff_zoom_punch,
             bg_music_enabled=params.get("bg_music_enabled", False),
             bg_music_track_path=resolved_music_path,
             bg_music_volume=params.get("bg_music_volume", 0.15),
             ducking_preset=params.get("ducking_preset", "medio"),
             # Fase 4: Retenção Dinâmica & Thumbnails
-            progress_bar_enabled=params.get("progress_bar_enabled", False),
+            progress_bar_enabled=eff_progress_bar,
             progress_bar_color=params.get("progress_bar_color", "#FF0000"),
             progress_bar_height=params.get("progress_bar_height", 8),
-            callout_enabled=params.get("callout_enabled", False),
+            callout_enabled=eff_callout,
             callout_text=params.get("callout_text", ""),
             callout_duration=params.get("callout_duration", 4.5),
-            climax_zoom_enabled=params.get("climax_zoom_enabled", False),
+            climax_zoom_enabled=eff_climax_zoom,
             climax_zoom_factor=params.get("climax_zoom_factor", 1.14),
-            thumbnail_enabled=params.get("thumbnail_enabled", True),
+            thumbnail_enabled=params.get("thumbnail_enabled", True) if not is_series_or_169 else False,
         )
 
         _log(f"Retorno de cut_video: {cut_res}")
