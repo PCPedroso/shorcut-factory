@@ -157,9 +157,12 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Aparar Início e Fim (Trim)**: Ajuste milimétrico de pontos de corte com prévia visual dos frames inicial e final no navegador.
   - **Remover Trecho do Meio (Snip & Merge)**: Eliminação de gafes, silêncios ou tosses com junção contínua e sem emendas de áudio e vídeo via filtros FFmpeg concat.
   - Disponível instantaneamente no editor de cortes ativos e em todos os cards da galeria de cortes gerados.
+- **🧠 Mineração Multi-Corte em Falas Longas e Podcasts (`core/analyzer.py`)**:
+  - **Fatiamento Semântico Contínuo**: Falas e respostas longas (3 a 10 minutos) são varridas buscando múltiplos pontos de impacto por conectivos de transição (*"Por exemplo"*, *"Veja bem"*, *"O ponto central"*, etc.) e trocas de turno (`>>`), gerando de 2 a 5 cortes virais autônomos por resposta.
+  - **Detecção Flexível de Turnos e Perguntas**: Identificação inteligente de perguntas (`?`), saudações e réplicas sem depender de termos rígidos.
 - **🎛️ Controles em Massa & Modo Vídeo Normal (16:9)**:
   - Controles de *Marcar Tudo*, *Desmarcar Tudo* e *Inverter Seleção* em Séries e Ganchos Virais, com travas de segurança para desabilitar efeitos verticais de Shorts em vídeos longos 16:9.
-- **🧪 Suíte de 35 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 36 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando toda a suíte do `core/` via `pytest`.
 
 ---

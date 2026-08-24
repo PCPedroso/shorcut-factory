@@ -36,6 +36,38 @@ class TestAnalyzerUtils(unittest.TestCase):
         clean2 = _clean_ai_title(raw2)
         self.assertNotIn("Aqui estão", clean2)
 
+    def test_multi_cut_mining_on_long_speech(self):
+        from core.analyzer import build_golden_rule_micro_cuts
+        
+        # Simula uma pauta longa de 240s (4 minutos) com múltiplos pontos de transição
+        pautas = [{
+            "id": 1,
+            "title": "Debate sobre Economia e Segurança",
+            "start": "00:01:00",
+            "end": "00:05:00",
+            "start_s": 60.0,
+            "end_s": 300.0,
+            "duration_s": 240.0,
+            "duration_label": "4m 00s",
+            "text_snippet": "Pergunta e resposta longa sobre o futuro do país."
+        }]
+
+        segments = [
+            {"start": 60.0, "end": 75.0, "text": ">> Qual é a sua proposta para a segurança?"},
+            {"start": 76.0, "end": 115.0, "text": ">> Muito obrigado pela pergunta. O primeiro ponto central é a retomada territorial."},
+            {"start": 116.0, "end": 155.0, "text": "Por exemplo, no caso da fronteira nós temos que dobrar o policiamento."},
+            {"start": 156.0, "end": 195.0, "text": ">> Posso te falar uma coisa? Essa medida já foi tentada antes."},
+            {"start": 196.0, "end": 240.0, "text": ">> Grande pergunta. A diferença é que agora temos tecnologia de ponta e drones."},
+            {"start": 241.0, "end": 298.0, "text": "Em resumo, sem segurança jurídica não há crescimento econômico para o cidadão."}
+        ]
+
+        cuts = build_golden_rule_micro_cuts(pautas, segments)
+        # Deve minerar pelo menos 3 cortes virais distintos dentro dessa fala de 4 minutos
+        self.assertGreaterEqual(len(cuts), 3)
+        for c in cuts:
+            self.assertGreaterEqual(c["duration_s"], 20.0)
+            self.assertLessEqual(c["duration_s"], 85.0)
+
 
 if __name__ == '__main__':
     unittest.main()

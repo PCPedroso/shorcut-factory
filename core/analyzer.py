@@ -75,29 +75,29 @@ def detect_qa_pautas(segments: list, model: str = "llama3") -> list:
     if not segments:
         return []
 
-    question_starts = []
-    # 1. Início do vídeo (Abertura)
-    question_starts.append({"start_s": 0.0, "is_opening": True})
+    question_starts = [{"start_s": 0.0, "is_opening": True}]
 
     for i, s in enumerate(segments):
         txt = s.get("text", "").strip()
         t = s.get("start", 0.0)
 
         is_new_speaker = ">>" in txt
+        has_q_mark = "?" in txt
         is_q_pattern = bool(re.search(
-            r"(candidato|jornalista|primeira pergunta|gostaria de|o senhor disse|como defender|que que é|já que o senhor|dá tempo da gente|muitíssimo obrigado|boa noite)",
+            r"(candidato|jornalista|primeira pergunta|gostaria de|o senhor disse|como defender|que que é|já que o senhor|dá tempo|muitíssimo obrigado|boa noite|qual|como|por que|a pergunta|pergunta que faço|o que você pensa|posso te falar|adorei a proposta)",
             txt,
             re.IGNORECASE
         ))
 
-        # Detecta a 1ª pergunta formal do entrevistador (geralmente após a vinheta/apresentação ~60s-90s)
-        if is_new_speaker and t >= 60.0 and len(question_starts) == 1:
+        # Detecta a 1ª pergunta formal do entrevistador (geralmente após vinheta ~45s-90s)
+        if (is_new_speaker or has_q_mark) and t >= 45.0 and len(question_starts) == 1:
             question_starts.append({"start_s": t, "is_opening": False})
             continue
 
-        # Perguntas subsequentes (com distância mínima de 30 segundos)
-        if is_new_speaker and is_q_pattern and (t - question_starts[-1]["start_s"] >= 30.0):
-            question_starts.append({"start_s": t, "is_opening": False})
+        # Perguntas subsequentes ou trocas de orador com distância mínima de 35 segundos
+        if (is_new_speaker or (has_q_mark and is_q_pattern)) and (t - question_starts[-1]["start_s"] >= 35.0):
+            if is_q_pattern or has_q_mark or is_new_speaker:
+                question_starts.append({"start_s": t, "is_opening": False})
 
     total_dur = segments[-1]["end"]
     pautas = []
@@ -382,13 +382,20 @@ def build_suggested_bundles(pautas: list, min_minutes: int = 10) -> list:
     return bundles
 
 
+TRANSITION_KEYWORDS = re.compile(
+    r"(por exemplo|veja bem|o que acontece|em resumo|a grande verdade|e tem mais|imagina o seguinte|posso te falar|a verdade é que|o ponto central|em segundo lugar|o grande problema|mas quando você|a realidade é|deixa eu te falar|o segredo é|a pergunta que faço|a minha pergunta|qual sua ideia|vamos falar|agradeço a contribuição|obrigado por acreditar|em relação a essa proposta|grande pergunta|adorei a proposta)",
+    re.IGNORECASE
+)
+
+
 def build_golden_rule_micro_cuts(pautas: list, segments: list) -> list:
     """
-    Gera micro-cortes para Shorts/Reels/TikTok aplicando as 6 Regras de Ouro Editoriais:
+    Gera micro-cortes para Shorts/Reels/TikTok aplicando as 6 Regras de Ouro Editoriais
+    e Mineração Multi-Corte em falas/respostas longas (> 80s):
     1. Clean Entry: Ponto de entrada limpo no início da fala/pergunta com respiro de áudio.
     2. Clean Exit: Fechamento completo da oração com respiro, sem vazamento da próxima pauta.
     3. Autonomia Semântica: Compreensão autônoma no feed sem necessidade de contexto externo.
-    4. Tipologia Clara: Classifica em Q&A Completo, Declaração/Punchline ou Debate/Réplica.
+    4. Tipologia Clara: Classifica em Q&A Completo, Declaração/Punchline, Argumento ou Debate/Réplica.
     5. Anti-Vazamento: Isolamento rígido dos limites de assunto.
     6. Retenção Ótima: Janela temporal calibrada entre 20s e 75s.
     """
@@ -396,16 +403,19 @@ def build_golden_rule_micro_cuts(pautas: list, segments: list) -> list:
         return []
 
     micro_cuts = []
+    seen_windows = []
 
     for p in pautas:
-        # Pula vinhetas de abertura e encerramento
         if "Abertura" in p["title"] or "Encerramento" in p["title"]:
             continue
 
         dur = p["duration_s"]
+        p_segs = [s for s in segments if p["start_s"] <= s.get("start", 0) <= p["end_s"]]
+        if not p_segs:
+            continue
 
-        # Tipo A: Pergunta & Resposta Completa (Q&A Unit) [20s a 80s]
-        if 20.0 <= dur <= 85.0:
+        # Caso 1: Pauta curta (20s a 80s) -> 1 corte Q&A direto
+        if 20.0 <= dur <= 80.0:
             micro_cuts.append({
                 "type": "🏷️ [Q&A] Pergunta & Resposta Completa",
                 "start": p["start"],
@@ -415,39 +425,78 @@ def build_golden_rule_micro_cuts(pautas: list, segments: list) -> list:
                 "duration_s": dur,
                 "duration_label": format_duration_human(dur),
                 "title": p["title"],
-                "notes": "Pergunta do entrevistador e resposta integral do entrevistado com raciocínio 100% fechado.",
+                "notes": "Pergunta e resposta direta completa.",
                 "snippet": p.get("text_snippet", "")
             })
+            seen_windows.append((p["start_s"], p["end_s"]))
+            continue
 
-        # Tipo B: Declaração / Tese de Impacto (Punchline) para pautas longas (> 85s)
-        elif dur > 85.0 and segments:
-            p_segs = [s for s in segments if p["start_s"] <= s.get("start", 0) <= p["end_s"]]
-            if len(p_segs) >= 4:
-                # Procura a resposta do entrevistado (após a pergunta inicial)
-                ans_start_seg = next((s for s in p_segs if ">>" in s.get("text", "") and s["start"] > p["start_s"] + 8), None)
-                cut_start = ans_start_seg["start"] if ans_start_seg else p["start_s"] + 15.0
+        # Caso 2: Pauta longa (> 80s) -> Mineração Multi-Corte de Teses / Respostas
+        candidate_starts = []
 
-                # Busca o melhor fechamento de oração entre 30s e 70s
-                potential_ends = [s for s in p_segs if cut_start + 25.0 <= s["end"] <= cut_start + 70.0 and s.get("text", "").strip().endswith(('.', '!'))]
-                if potential_ends:
-                    cut_end = potential_ends[-1]["end"]
-                else:
-                    cut_end = min(p["end_s"], cut_start + 55.0)
+        # 1. Ponto de resposta inicial
+        ans_seg = next((s for s in p_segs if ">>" in s.get("text", "") and s["start"] > p["start_s"] + 5), None)
+        if ans_seg:
+            candidate_starts.append((ans_seg["start"], "🏷️ [Q&A] Resposta Inicial"))
+        else:
+            candidate_starts.append((p["start_s"], "🏷️ [Punchline] Tese de Abertura"))
 
-                cut_dur = cut_end - cut_start
-                if cut_dur >= 20.0:
-                    micro_cuts.append({
-                        "type": "🏷️ [Punchline] Declaração / Tese de Impacto",
-                        "start": format_seconds_to_time(cut_start),
-                        "end": format_seconds_to_time(cut_end),
-                        "start_s": cut_start,
-                        "end_s": cut_end,
-                        "duration_s": cut_dur,
-                        "duration_label": format_duration_human(cut_dur),
-                        "title": f"Tese: {p['title']}",
-                        "notes": "Declaração contundente e autônoma do entrevistado com início e fim de raciocínio.",
-                        "snippet": " ".join(s.get("text", "").replace(">>", "").strip() for s in p_segs if cut_start <= s["start"] <= cut_end)[:140]
-                    })
+        # 2. Varredura interna por transições semânticas e réplicas
+        last_added_t = candidate_starts[0][0]
+        for seg in p_segs:
+            t = seg.get("start", 0)
+            txt = seg.get("text", "")
+            
+            if t - last_added_t < 35.0:
+                continue
+
+            if ">>" in txt:
+                candidate_starts.append((t, "🏷️ [Debate] Intervenção / Réplica"))
+                last_added_t = t
+            elif TRANSITION_KEYWORDS.search(txt):
+                candidate_starts.append((t, "🏷️ [Punchline] Declaração / Tese de Impacto"))
+                last_added_t = t
+
+        # Para cada candidate start, busca o melhor fechamento em ponto final entre 30s e 75s
+        for c_start, c_type in candidate_starts:
+            if any(abs(c_start - sw[0]) < 25.0 for sw in seen_windows):
+                continue
+
+            potential_ends = [
+                s for s in p_segs 
+                if c_start + 25.0 <= s["end"] <= c_start + 75.0 
+                and s.get("text", "").strip().endswith(('.', '!', '?'))
+            ]
+
+            if potential_ends:
+                c_end = potential_ends[-1]["end"]
+            else:
+                fallback_ends = [s for s in p_segs if c_start + 25.0 <= s["end"] <= c_start + 65.0]
+                c_end = fallback_ends[-1]["end"] if fallback_ends else min(p["end_s"], c_start + 55.0)
+
+            c_dur = c_end - c_start
+            if 20.0 <= c_dur <= 85.0:
+                cut_text_segs = [s.get("text", "").replace(">>", "").strip() for s in p_segs if c_start <= s["start"] <= c_end]
+                cut_text = " ".join(cut_text_segs)
+                
+                first_sent = cut_text.split('.')[0] if '.' in cut_text else cut_text[:70]
+                c_title = first_sent[:65].strip()
+                if len(c_title) < 5:
+                    c_title = p["title"]
+
+                micro_cuts.append({
+                    "type": c_type,
+                    "start": format_seconds_to_time(c_start),
+                    "end": format_seconds_to_time(c_end),
+                    "start_s": c_start,
+                    "end_s": c_end,
+                    "duration_s": c_dur,
+                    "duration_label": format_duration_human(c_dur),
+                    "title": c_title,
+                    "notes": f"Tese autônoma minerada de fala longa ({format_duration_human(dur)}).",
+                    "snippet": cut_text[:140]
+                })
+                seen_windows.append((c_start, c_end))
 
     # Fallback caso não haja pautas de Q&A específicas
     if not micro_cuts:
