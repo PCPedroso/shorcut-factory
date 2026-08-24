@@ -51,6 +51,7 @@ from core.audio_mixer import list_available_tracks, DUCKING_PRESETS
 from core.retention_effects import PROGRESS_BAR_COLORS, ENGAGEMENT_CALLOUT_PRESETS
 from core.thumbnail_generator import create_cut_thumbnail
 from core.integrations import get_youtube_auth_status, authenticate_youtube_oauth, upload_to_youtube_shorts, send_to_webhook
+from core.quick_editor import get_video_duration, extract_frame_at_timestamp, trim_video, remove_snippet_and_merge
 
 # Carrega todas as configurações persistentes salvas
 _cfg = load_settings()
@@ -101,6 +102,115 @@ def safe_display_video(video_path: str):
         st.warning("Arquivo de vídeo não encontrado.")
         return
     st.video(video_path)
+
+def render_quick_editor_component(video_path: str, unique_key: str):
+    """
+    Componente interativo de edição rápida / ajuste fino para cortar pequenos trechos do vídeo.
+    """
+    if not video_path or not os.path.exists(video_path):
+        return
+
+    dur = get_video_duration(video_path)
+    if dur < 0.5:
+        return
+
+    with st.expander(f"✂️ Edição Rápida / Ajuste Fino de Trechos (Duração: {dur:.1f}s)", expanded=False):
+        st.caption("Ajuste o vídeo diretamente sem precisar abrir softwares externos:")
+        tab_trim, tab_snip = st.tabs(["✂️ Aparar Início / Fim (Trim)", "🗑️ Remover Trecho do Meio (Cut & Join)"])
+
+        with tab_trim:
+            st.markdown("##### ✂️ Aparar Vídeo")
+            col_t1, col_t2 = st.columns(2)
+            with col_t1:
+                start_trim = st.number_input(
+                    "Ponto Inicial (segundos):",
+                    min_value=0.0,
+                    max_value=max(0.0, float(dur - 0.5)),
+                    value=0.0,
+                    step=0.1,
+                    key=f"trim_start_{unique_key}"
+                )
+            with col_t2:
+                end_trim = st.number_input(
+                    "Ponto Final (segundos):",
+                    min_value=min(float(dur), start_trim + 0.5),
+                    max_value=float(dur),
+                    value=float(dur),
+                    step=0.1,
+                    key=f"trim_end_{unique_key}"
+                )
+
+            # Prévia visual dos frames de entrada e saída
+            col_pf1, col_pf2 = st.columns(2)
+            with col_pf1:
+                st.caption(f"📍 Frame de Início ({start_trim:.1f}s):")
+                f_start = extract_frame_at_timestamp(video_path, start_trim)
+                if f_start is not None:
+                    safe_display_image(f_start, use_container_width=True)
+            with col_pf2:
+                st.caption(f"🏁 Frame Final ({end_trim:.1f}s):")
+                f_end = extract_frame_at_timestamp(video_path, max(0.0, end_trim - 0.1))
+                if f_end is not None:
+                    safe_display_image(f_end, use_container_width=True)
+
+            dur_result = end_trim - start_trim
+            st.info(f"⏱️ Nova duração resultante: **{dur_result:.1f} segundos** (removendo {start_trim:.1f}s no início e {dur - end_trim:.1f}s no final).")
+
+            if st.button("✂️ Aplicar Corte e Atualizar Vídeo", key=f"btn_apply_trim_{unique_key}", type="primary", use_container_width=True):
+                with st.spinner("Aparando vídeo via FFmpeg..."):
+                    trim_res = trim_video(video_path, start_trim, end_trim)
+                    if trim_res.get("error"):
+                        st.error(f"Erro ao aparar vídeo: {trim_res['error']}")
+                    else:
+                        st.success(f"🎉 Vídeo aparado com sucesso! Nova duração: {trim_res.get('new_duration', dur_result):.1f}s")
+                        st.rerun()
+
+        with tab_snip:
+            st.markdown("##### 🗑️ Remover Trecho do Meio")
+            st.caption("Selecione o intervalo indesejado (ex: gafe, silêncio longo, tosse). O início e o fim serão unidos automaticamente.")
+            col_s1, col_s2 = st.columns(2)
+            with col_s1:
+                snip_start = st.number_input(
+                    "Início do Trecho a Deletar (segundos):",
+                    min_value=0.0,
+                    max_value=max(0.0, float(dur - 0.2)),
+                    value=min(1.0, float(dur * 0.2)),
+                    step=0.1,
+                    key=f"snip_start_{unique_key}"
+                )
+            with col_s2:
+                snip_end = st.number_input(
+                    "Fim do Trecho a Deletar (segundos):",
+                    min_value=min(float(dur), snip_start + 0.1),
+                    max_value=float(dur),
+                    value=min(float(dur), snip_start + 2.0),
+                    step=0.1,
+                    key=f"snip_end_{unique_key}"
+                )
+
+            col_ps1, col_ps2 = st.columns(2)
+            with col_ps1:
+                st.caption(f"❌ Início do corte a deletar ({snip_start:.1f}s):")
+                f_sstart = extract_frame_at_timestamp(video_path, snip_start)
+                if f_sstart is not None:
+                    safe_display_image(f_sstart, use_container_width=True)
+            with col_ps2:
+                st.caption(f"❌ Fim do corte a deletar ({snip_end:.1f}s):")
+                f_send = extract_frame_at_timestamp(video_path, snip_end)
+                if f_send is not None:
+                    safe_display_image(f_send, use_container_width=True)
+
+            dur_after_snip = dur - (snip_end - snip_start)
+            st.info(f"⏱️ O trecho de **{snip_start:.1f}s a {snip_end:.1f}s** ({snip_end - snip_start:.1f}s) será descartado. Nova duração: **{dur_after_snip:.1f}s**.")
+
+            if st.button("🗑️ Excluir Trecho e Juntar Vídeo", key=f"btn_apply_snip_{unique_key}", type="primary", use_container_width=True):
+                with st.spinner("Excluindo trecho e unindo partes com FFmpeg..."):
+                    snip_res = remove_snippet_and_merge(video_path, snip_start, snip_end)
+                    if snip_res.get("error"):
+                        st.error(f"Erro ao remover trecho: {snip_res['error']}")
+                    else:
+                        st.success(f"🎉 Trecho removido e vídeo unido com sucesso! Nova duração: {snip_res.get('new_duration', dur_after_snip):.1f}s")
+                        st.rerun()
 
 def load_video_saved_artifacts(video_id: str):
     """Carrega todas as ações e análises salvas individualmente para o vídeo."""
@@ -2017,6 +2127,7 @@ if st.session_state.transcription_done:
                         key="btn_dl_cached_thumb"
                     )
         st.caption(f"⚡ Carregado instantaneamente do cache: `{existing_inst['folder_path']}`")
+        render_quick_editor_component(existing_inst["video_path"], f"cached_{_vid_id_cat}_{start_time}_{end_time}_{selected_aspect}")
 
     st.markdown("")
     render_button_label = "🔄 Forçar Re-renderização no Formato Escolhido" if existing_inst else "✂️ Gerar Corte no Formato Escolhido"
@@ -2312,6 +2423,9 @@ if st.session_state.transcription_done:
                                             else:
                                                 st.error(f"Falha no webhook: {wh_res.get('error')}")
 
+                            # Ferramenta de Edição Rápida / Ajuste Fino
+                            render_quick_editor_component(package_res["video_dest_path"], f"newly_rendered_{video_id}_{start_time}_{end_time}_{selected_aspect}")
+
                             with st.expander(f"📁 Pasta de Publicação Criada em: data/{video_id}/{package_res['folder_name']}/", expanded=True):
                                 st.markdown(f"**🎬 Arquivo de Vídeo:** `{package_res['video_filename']}`")
                                 st.markdown(f"**📌 Título:** `{cut_title_val}`")
@@ -2531,6 +2645,7 @@ if st.session_state.transcription_done:
                                                 st.success("Excluído com sucesso.")
                                                 st.rerun()
                                     st.caption(f"📁 `{fmt_data.get('folder_name')}`")
+                                    render_quick_editor_component(v_file, f"gal_{_vid_id_gal}_{c_idx}_{f_idx}")
                                 else:
                                     st.warning("Vídeo excluído / não encontrado.")
                                     if st.button("🗑️ Remover do Catálogo", key=f"btn_clean_fmt_{c_idx}_{f_idx}"):

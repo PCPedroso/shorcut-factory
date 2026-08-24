@@ -31,6 +31,7 @@ shorcut-factory/
 ├── assets/
 │   └── audio/                 # Trilhas sonoras royalty-free categorizadas (.wav / .mp3)
 ├── tests/                     # Suíte de Testes Unitários Automatizados
+│   ├── test_quick_editor.py      # Testes de duração, trim, corte cirúrgico e concatenação
 │   ├── test_thumbnail_generator.py # Testes de frames, nitidez e capas 9:16
 │   ├── test_headline_drawer.py   # Testes de headlines, quebras e formato ASS
 │   ├── test_export_kit.py        # Testes de pastas, prefixos e kit viral
@@ -41,6 +42,7 @@ shorcut-factory/
 │   ├── test_integrations.py      # Testes de webhooks e payloads
 │   └── test_analyzer_utils.py    # Testes de conversão de tempo e textos
 ├── core/
+│   ├── quick_editor.py        # Edição rápida / ajuste fino: Trim (início/fim) e Snip & Merge de trechos
 │   ├── extractor.py           # Extração de áudio, canais e metadados via yt-dlp
 │   ├── transcriber.py         # Transcrição faster-whisper (CUDA) + fallback ASR YouTube
 │   ├── analyzer.py            # Análise Q&A/Temática e geração do Kit Viral com IA
@@ -151,9 +153,13 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Aparição elegante nos últimos 4-5 segundos provocando engajamento (*"💬 O que você acha? Comente!"*, *"🔔 Siga para mais cortes diários"*) em ASS com contorno de alto contraste (`BorderStyle=1`), sombra suave e fade `\fad(300,300)`.
 - **🎯 Zoom de Ênfase no Clímax & Zoom Punch**:
   - Zoom dinâmico via camadas `scale + crop + overlay` condicional no FFmpeg para pulsos periódicos de retenção e aproximação dramática na punchline final.
+- **✂️ Ferramenta Integrada de Edição Rápida & Ajuste Fino (`core/quick_editor.py`)**:
+  - **Aparar Início e Fim (Trim)**: Ajuste milimétrico de pontos de corte com prévia visual dos frames inicial e final no navegador.
+  - **Remover Trecho do Meio (Snip & Merge)**: Eliminação de gafes, silêncios ou tosses com junção contínua e sem emendas de áudio e vídeo via filtros FFmpeg concat.
+  - Disponível instantaneamente no editor de cortes ativos e em todos os cards da galeria de cortes gerados.
 - **🎛️ Controles em Massa & Modo Vídeo Normal (16:9)**:
   - Controles de *Marcar Tudo*, *Desmarcar Tudo* e *Inverter Seleção* em Séries e Ganchos Virais, com travas de segurança para desabilitar efeitos verticais de Shorts em vídeos longos 16:9.
-- **🧪 Suíte de 31 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 35 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando toda a suíte do `core/` via `pytest`.
 
 ---
