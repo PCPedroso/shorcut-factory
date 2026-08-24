@@ -77,7 +77,12 @@ def safe_display_image(img_source, caption=None, use_container_width=True):
     Exibe imagens no Streamlit lendo diretamente os bytes em memória
     para garantir 100% de estabilidade de renderização no Windows/Chrome.
     """
-    if not img_source:
+    if img_source is None:
+        return False
+    if isinstance(img_source, np.ndarray):
+        if img_source.size > 0:
+            st.image(img_source, caption=caption, use_container_width=use_container_width)
+            return True
         return False
     if isinstance(img_source, str) and os.path.exists(img_source):
         try:
