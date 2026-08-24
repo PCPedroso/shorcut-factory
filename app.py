@@ -124,6 +124,27 @@ def render_quick_editor_component(video_path: str, unique_key: str):
 
     with st.expander(f"✂️ Edição Rápida / Ajuste Fino de Trechos (Duração: {dur:.1f}s)", expanded=False):
         st.caption("Ajuste o vídeo diretamente sem precisar abrir softwares externos:")
+
+        col_mode, col_suf = st.columns([1.5, 1.0])
+        with col_mode:
+            save_mode = st.radio(
+                "Destino do vídeo editado:",
+                ["🔄 Substituir o vídeo atual", "✨ Salvar como um novo vídeo"],
+                index=0,
+                horizontal=True,
+                key=f"edit_save_mode_{unique_key}"
+            )
+        with col_suf:
+            custom_suffix = ""
+            if "Salvar como um novo vídeo" in save_mode:
+                custom_suffix = st.text_input(
+                    "Sufixo da nova versão:",
+                    value="_editado",
+                    key=f"edit_suffix_{unique_key}"
+                ).strip()
+                if not custom_suffix.startswith("_"):
+                    custom_suffix = f"_{custom_suffix}"
+
         tab_trim, tab_snip = st.tabs(["✂️ Aparar Início / Fim (Trim)", "🗑️ Remover Trecho do Meio (Cut & Join)"])
 
         with tab_trim:
@@ -164,14 +185,26 @@ def render_quick_editor_component(video_path: str, unique_key: str):
             dur_result = end_trim - start_trim
             st.info(f"⏱️ Nova duração resultante: **{dur_result:.1f} segundos** (removendo {start_trim:.1f}s no início e {dur - end_trim:.1f}s no final).")
 
-            if st.button("✂️ Aplicar Corte e Atualizar Vídeo", key=f"btn_apply_trim_{unique_key}", type="primary", use_container_width=True):
+            btn_label_trim = "✂️ Salvar como Novo Vídeo Aparado" if "Salvar como um novo vídeo" in save_mode else "✂️ Aplicar Corte no Vídeo Atual"
+            if st.button(btn_label_trim, key=f"btn_apply_trim_{unique_key}", type="primary", use_container_width=True):
                 with st.spinner("Aparando vídeo via FFmpeg..."):
-                    trim_res = trim_video(video_path, start_trim, end_trim)
+                    out_target = None
+                    if "Salvar como um novo vídeo" in save_mode:
+                        v_dir = os.path.dirname(video_path)
+                        b_name, ext = os.path.splitext(os.path.basename(video_path))
+                        out_target = os.path.join(v_dir, f"{b_name}{custom_suffix}{ext}")
+
+                    trim_res = trim_video(video_path, start_trim, end_trim, output_path=out_target)
                     if trim_res.get("error"):
                         st.error(f"Erro ao aparar vídeo: {trim_res['error']}")
                     else:
-                        st.success(f"🎉 Vídeo aparado com sucesso! Nova duração: {trim_res.get('new_duration', dur_result):.1f}s")
-                        st.rerun()
+                        if out_target:
+                            st.session_state[f"last_edited_video_{unique_key}"] = out_target
+                            st.success(f"🎉 Novo vídeo criado com sucesso! Nova duração: {trim_res.get('new_duration', dur_result):.1f}s")
+                            st.rerun()
+                        else:
+                            st.success(f"🎉 Vídeo atualizado com sucesso! Nova duração: {trim_res.get('new_duration', dur_result):.1f}s")
+                            st.rerun()
 
         with tab_snip:
             st.markdown("##### 🗑️ Remover Trecho do Meio")
@@ -211,14 +244,43 @@ def render_quick_editor_component(video_path: str, unique_key: str):
             dur_after_snip = dur - (snip_end - snip_start)
             st.info(f"⏱️ O trecho de **{snip_start:.1f}s a {snip_end:.1f}s** ({snip_end - snip_start:.1f}s) será descartado. Nova duração: **{dur_after_snip:.1f}s**.")
 
-            if st.button("🗑️ Excluir Trecho e Juntar Vídeo", key=f"btn_apply_snip_{unique_key}", type="primary", use_container_width=True):
+            btn_label_snip = "🗑️ Excluir Trecho e Salvar Novo Vídeo" if "Salvar como um novo vídeo" in save_mode else "🗑️ Excluir Trecho e Atualizar Vídeo Atual"
+            if st.button(btn_label_snip, key=f"btn_apply_snip_{unique_key}", type="primary", use_container_width=True):
                 with st.spinner("Excluindo trecho e unindo partes com FFmpeg..."):
-                    snip_res = remove_snippet_and_merge(video_path, snip_start, snip_end)
+                    out_target = None
+                    if "Salvar como um novo vídeo" in save_mode:
+                        v_dir = os.path.dirname(video_path)
+                        b_name, ext = os.path.splitext(os.path.basename(video_path))
+                        out_target = os.path.join(v_dir, f"{b_name}{custom_suffix}{ext}")
+
+                    snip_res = remove_snippet_and_merge(video_path, snip_start, snip_end, output_path=out_target)
                     if snip_res.get("error"):
                         st.error(f"Erro ao remover trecho: {snip_res['error']}")
                     else:
-                        st.success(f"🎉 Trecho removido e vídeo unido com sucesso! Nova duração: {snip_res.get('new_duration', dur_after_snip):.1f}s")
-                        st.rerun()
+                        if out_target:
+                            st.session_state[f"last_edited_video_{unique_key}"] = out_target
+                            st.success(f"🎉 Novo vídeo criado com sucesso! Nova duração: {snip_res.get('new_duration', dur_after_snip):.1f}s")
+                            st.rerun()
+                        else:
+                            st.success(f"🎉 Trecho removido e vídeo atualizado com sucesso! Nova duração: {snip_res.get('new_duration', dur_after_snip):.1f}s")
+                            st.rerun()
+
+        # Se uma nova versão foi gerada recentemente para este componente, exibe player e download
+        last_new_v = st.session_state.get(f"last_edited_video_{unique_key}")
+        if last_new_v and os.path.exists(last_new_v):
+            st.markdown("---")
+            st.markdown(f"##### 🎬 Última Nova Versão Gerada (`{os.path.basename(last_new_v)}`):")
+            safe_display_video(last_new_v)
+            with open(last_new_v, "rb") as vf_last_new:
+                st.download_button(
+                    label=f"💾 Baixar Nova Versão ({os.path.basename(last_new_v)})",
+                    data=vf_last_new,
+                    file_name=os.path.basename(last_new_v),
+                    mime="video/mp4",
+                    type="primary",
+                    use_container_width=True,
+                    key=f"dl_last_new_btn_{unique_key}"
+                )
 
 def load_video_saved_artifacts(video_id: str):
     """Carrega todas as ações e análises salvas individualmente para o vídeo."""
