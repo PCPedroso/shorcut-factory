@@ -3,6 +3,7 @@ import os
 import re
 import json
 import importlib
+import numpy as np
 from urllib.parse import urlparse, parse_qs
 
 import core.extractor
@@ -20,6 +21,7 @@ import core.audio_mixer
 import core.retention_effects
 import core.integrations
 import core.thumbnail_generator
+import core.quick_editor
 
 importlib.reload(core.extractor)
 importlib.reload(core.transcriber)
@@ -36,6 +38,7 @@ importlib.reload(core.audio_mixer)
 importlib.reload(core.retention_effects)
 importlib.reload(core.integrations)
 importlib.reload(core.thumbnail_generator)
+importlib.reload(core.quick_editor)
 
 from core.extractor import download_audio, get_video_metadata
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
