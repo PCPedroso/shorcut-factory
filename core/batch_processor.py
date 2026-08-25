@@ -196,14 +196,25 @@ def process_batch_cuts(
         eff_progress_bar = False if is_series_or_169 else params.get("progress_bar_enabled", False)
         eff_callout = False if is_series_or_169 else params.get("callout_enabled", False)
 
+        # Resolve parâmetros de blur garantindo sincronia com blur_zoom_custom e person_preference
+        eff_blur_zoom = params.get("blur_zoom")
+        if eff_blur_zoom is None:
+            eff_blur_zoom = params.get("blur_zoom_custom")
+        if eff_blur_zoom is None:
+            eff_blur_zoom = 1.0 if params.get("person_preference") == "both" else 1.35
+
+        eff_blur_pan = params.get("blur_pan")
+        if eff_blur_pan is None:
+            eff_blur_pan = params.get("blur_pan_custom", 0.0)
+
         cut_res = core.video_processor.cut_video(
             video_full_path,
             start_t,
             end_t,
             temp_corte_path,
             aspect_ratio_mode=aspect_ratio_mode,
-            blur_zoom=params.get("blur_zoom", 1.35),
-            blur_pan=params.get("blur_pan", 0.0),
+            blur_zoom=eff_blur_zoom,
+            blur_pan=eff_blur_pan,
             blur_intensity=params.get("blur_intensity", 25),
             face_auto_zoom=params.get("face_auto_zoom", True),
             face_margin_ratio=params.get("face_margin_ratio", 1.55),

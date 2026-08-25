@@ -207,6 +207,11 @@ def cut_video(
 
         elif aspect_ratio_mode == "9:16_blur":
             # Pipeline 9:16 Fundo Desfocado com Zoom e Pan configuráveis
+            # Se person_preference == "both", garante enquadramento integral 16:9 sem cortes laterais
+            if person_preference == "both":
+                blur_zoom = 1.0
+                blur_pan = 0.0
+
             w_fg = int(1080 * blur_zoom)
             if w_fg % 2 != 0:
                 w_fg += 1
