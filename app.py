@@ -149,9 +149,9 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     custom_suffix = f"_{custom_suffix}"
 
         tab_trim, tab_snip, tab_overlay = st.tabs([
-            "✂️ Aparar Início / Fim (Trim)", 
-            "🗑️ Remover Trecho do Meio (Cut & Join)",
-            "🎨 Sobrepor Banner / Tarja (Overlay)"
+            "✂️ Aparar (Trim)", 
+            "🗑️ Remover Trecho",
+            "🎨 Banner (Overlay)"
         ])
 
         with tab_trim:
