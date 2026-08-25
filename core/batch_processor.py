@@ -196,14 +196,25 @@ def process_batch_cuts(
         eff_progress_bar = False if is_series_or_169 else params.get("progress_bar_enabled", False)
         eff_callout = False if is_series_or_169 else params.get("callout_enabled", False)
 
-        # Resolve parâmetros de blur garantindo sincronia com blur_zoom_custom e person_preference
+        # Resolve parâmetros de blur garantindo cálculo dinâmico por corte
         eff_blur_zoom = params.get("blur_zoom")
-        if eff_blur_zoom is None:
-            eff_blur_zoom = params.get("blur_zoom_custom")
-        if eff_blur_zoom is None:
-            eff_blur_zoom = 1.0 if params.get("person_preference") == "both" else 1.35
-
         eff_blur_pan = params.get("blur_pan")
+
+        if (eff_blur_zoom is None or eff_blur_pan is None) and aspect_ratio_mode == "9:16_blur":
+            try:
+                from core.face_tracker import calculate_auto_blur_params
+                pref = params.get("person_preference", "both")
+                margin = params.get("face_margin_ratio", 1.55)
+                auto_p = calculate_auto_blur_params(video_full_path, start_t, pref, margin)
+                if auto_p.get("face_detected"):
+                    eff_blur_zoom = auto_p["zoom"]
+                    eff_blur_pan = auto_p["pan"]
+                    _log(f"Auto-Blur dinâmico calculado para [{start_t}]: Zoom={eff_blur_zoom:.2f}x, Pan={eff_blur_pan:+.2f} (Dual Shot={auto_p.get('dual_shot')})")
+            except Exception as e:
+                _log(f"Aviso ao calcular auto-blur para [{start_t}]: {e}")
+
+        if eff_blur_zoom is None:
+            eff_blur_zoom = params.get("blur_zoom_custom", 1.35)
         if eff_blur_pan is None:
             eff_blur_pan = params.get("blur_pan_custom", 0.0)
 

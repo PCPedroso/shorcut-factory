@@ -310,28 +310,42 @@ def calculate_auto_blur_params(
         detector.close()
 
         detections = results.detections if results.detections else []
+        prominent = filter_prominent_faces(detections, width, height, min_relative_area=0.28)
 
-        # Caso 1: Preferência explícita por 'both' (Ambos os Interlocutores)
-        if person_preference == "both":
-            return {
-                "zoom": 1.0,
-                "pan": 0.0,
-                "face_detected": len(detections) > 0,
-                "dual_shot": True,
-                "notes": "Enquadramento 16:9 completo centralizado para manter ambos os interlocutores."
-            }
+        # Caso 1: Preferência explícita por 'both' (Ambos os Interlocutores) ou 'auto' com plano conjunto detectado
+        is_dual = is_dual_interlocutor_shot(detections, width, height)
+        if person_preference == "both" or (person_preference == "auto" and is_dual):
+            if len(prominent) >= 2:
+                # Ordena os 2 oradores principais da esquerda para a direita
+                sorted_dual = sorted(prominent[:2], key=lambda d: d.bounding_box.origin_x)
+                d_left, d_right = sorted_dual[0], sorted_dual[1]
 
-        # Caso 2: Modo 'auto' com detecção de Plano Conjunto / Split-Screen
-        if person_preference == "auto" and is_dual_interlocutor_shot(detections, width, height):
-            return {
-                "zoom": 1.0,
-                "pan": 0.0,
-                "face_detected": True,
-                "dual_shot": True,
-                "notes": "Plano conjunto / Dual detectado automaticamente (ambos os oradores enquadrados)."
-            }
+                min_x = d_left.bounding_box.origin_x
+                max_x = d_right.bounding_box.origin_x + d_right.bounding_box.width
+                dual_cx = (min_x + max_x) / 2.0
+                dual_w = max_x - min_x
 
-        target_face, _ = select_target_face(detections, width, height, None, person_preference)
+                face_avg_w = (d_left.bounding_box.width + d_right.bounding_box.width) / 2.0
+                # Adiciona margem lateral para englobar ombros e moldura do split-screen dos dois oradores
+                crop_box_w = dual_w + face_avg_w * (2.0 * margin_ratio / 1.55)
+                crop_box_w = min(float(width), max(1080.0, crop_box_w))
+
+                calc_zoom = min(1.85, max(1.0, float(width) / crop_box_w))
+                calc_pan = max(-1.0, min(1.0, (dual_cx - (width / 2.0)) / (width / 2.0)))
+
+                return {
+                    "zoom": round(calc_zoom, 2),
+                    "pan": round(calc_pan, 2),
+                    "face_detected": True,
+                    "dual_shot": True,
+                    "notes": "Enquadramento ajustado para englobar ambos os interlocutores com recorte das bordas irrelevantes."
+                }
+            elif len(prominent) == 1:
+                target_face = prominent[0]
+            else:
+                return {"zoom": 1.35, "pan": 0.0, "face_detected": False, "dual_shot": False}
+        else:
+            target_face, _ = select_target_face(detections, width, height, None, person_preference)
 
         if target_face is None:
             return {"zoom": 1.35, "pan": 0.0, "face_detected": False, "dual_shot": False}
