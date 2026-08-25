@@ -320,18 +320,22 @@ def calculate_auto_blur_params(
                 sorted_dual = sorted(prominent[:2], key=lambda d: d.bounding_box.origin_x)
                 d_left, d_right = sorted_dual[0], sorted_dual[1]
 
-                min_x = d_left.bounding_box.origin_x
-                max_x = d_right.bounding_box.origin_x + d_right.bounding_box.width
-                dual_cx = (min_x + max_x) / 2.0
-                dual_w = max_x - min_x
-
+                cx_left = d_left.bounding_box.origin_x + d_left.bounding_box.width / 2.0
+                cx_right = d_right.bounding_box.origin_x + d_right.bounding_box.width / 2.0
+                span_x = cx_right - cx_left
                 face_avg_w = (d_left.bounding_box.width + d_right.bounding_box.width) / 2.0
-                # Adiciona margem lateral para englobar ombros e moldura do split-screen dos dois oradores
-                crop_box_w = dual_w + face_avg_w * (2.0 * margin_ratio / 1.55)
-                crop_box_w = min(float(width), max(1080.0, crop_box_w))
+
+                # Margens equilibradas cobrindo as duas molduras do split-screen com precisão
+                margin_left = max(face_avg_w * 1.35, span_x * 0.75) * (margin_ratio / 1.55)
+                margin_right = max(face_avg_w * 1.75, span_x * 0.95) * (margin_ratio / 1.55)
+
+                box_left = max(0.0, cx_left - margin_left)
+                box_right = min(float(width), cx_right + margin_right)
+                crop_box_w = max(1080.0, min(float(width), box_right - box_left))
+                crop_center_x = (box_left + box_right) / 2.0
 
                 calc_zoom = min(1.85, max(1.0, float(width) / crop_box_w))
-                calc_pan = max(-1.0, min(1.0, (dual_cx - (width / 2.0)) / (width / 2.0)))
+                calc_pan = max(-1.0, min(1.0, (crop_center_x - (width / 2.0)) / (width / 2.0)))
 
                 return {
                     "zoom": round(calc_zoom, 2),
