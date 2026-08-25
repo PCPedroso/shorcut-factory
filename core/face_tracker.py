@@ -35,13 +35,83 @@ def parse_time_to_seconds(time_str: str) -> float:
     return float(time_str)
 
 
+def is_dual_interlocutor_shot(detections, frame_width: int, frame_height: int) -> bool:
+    """
+    Detecta se o enquadramento atual possui 2 interlocutores (plano conjunto ou split-screen de debate/sabatina).
+    Critérios:
+    - Pelo menos 2 rostos detectados com áreas relevantes (> 0.3% da tela cada).
+    - Ambos os rostos com separação horizontal clara (distância >= 18% da largura).
+    - Alinhamento vertical coerente (diferença de altura <= 28% da tela).
+    """
+    if not detections or len(detections) < 2:
+        return False
+
+    valid_faces = []
+    min_face_area = frame_width * frame_height * 0.003
+    for d in detections:
+        bx = d.bounding_box
+        area = bx.width * bx.height
+        if area >= min_face_area:
+            cx = bx.origin_x + bx.width / 2.0
+            cy = bx.origin_y + bx.height / 2.0
+            valid_faces.append((cx, cy, bx.width, bx.height, d))
+
+    if len(valid_faces) < 2:
+        return False
+
+    valid_faces.sort(key=lambda x: x[2] * x[3], reverse=True)
+    f1, f2 = valid_faces[0], valid_faces[1]
+
+    cx_dist = abs(f1[0] - f2[0]) / float(frame_width)
+    cy_diff = abs(f1[1] - f2[1]) / float(frame_height)
+
+    return cx_dist >= 0.18 and cy_diff <= 0.28
+
+
+class CompositeBoundingBox:
+    def __init__(self, origin_x: int, origin_y: int, width: int, height: int):
+        self.origin_x = origin_x
+        self.origin_y = origin_y
+        self.width = width
+        self.height = height
+
+
+class CompositeFaceDetection:
+    def __init__(self, bbox: CompositeBoundingBox):
+        self.bounding_box = bbox
+
+
 def select_target_face(detections, frame_width: int, frame_height: int, last_tracked_center=None, person_preference: str = "auto"):
     """
     Seleciona o rosto alvo respeitando a preferência do usuário e mantendo a
     Trava de Continuidade Espacial (Target Lock) para nunca pular para outra pessoa na cena.
+    Suporta modo 'both' para enquadrar ambos os interlocutores em plano conjunto simultaneamente.
     """
     if not detections:
         return None, last_tracked_center
+
+    # Modo 'both' (Ambos os Interlocutores em Plano Conjunto / Split-Screen)
+    if person_preference == "both":
+        if len(detections) >= 2:
+            min_area = frame_width * frame_height * 0.002
+            valid_dets = [d for d in detections if d.bounding_box.width * d.bounding_box.height >= min_area]
+            if not valid_dets:
+                valid_dets = detections
+
+            min_x = min(d.bounding_box.origin_x for d in valid_dets)
+            max_x = max(d.bounding_box.origin_x + d.bounding_box.width for d in valid_dets)
+            min_y = min(d.bounding_box.origin_y for d in valid_dets)
+            max_y = max(d.bounding_box.origin_y + d.bounding_box.height for d in valid_dets)
+
+            comp_bbox = CompositeBoundingBox(min_x, min_y, max(1, max_x - min_x), max(1, max_y - min_y))
+            comp_face = CompositeFaceDetection(comp_bbox)
+            cx = min_x + comp_bbox.width / 2.0
+            cy = min_y + comp_bbox.height / 2.0
+            return comp_face, (cx, cy)
+        else:
+            best_face = detections[0]
+            bx = best_face.bounding_box
+            return best_face, (bx.origin_x + bx.width / 2.0, bx.origin_y + bx.height / 2.0)
 
     # Se já temos um alvo rastreado anteriormente, usamos a menor distância euclidiana (Target Lock)
     if last_tracked_center is not None:
@@ -210,10 +280,31 @@ def calculate_auto_blur_params(
         detector.close()
 
         detections = results.detections if results.detections else []
+
+        # Caso 1: Preferência explícita por 'both' (Ambos os Interlocutores)
+        if person_preference == "both":
+            return {
+                "zoom": 1.0,
+                "pan": 0.0,
+                "face_detected": len(detections) > 0,
+                "dual_shot": True,
+                "notes": "Enquadramento 16:9 completo centralizado para manter ambos os interlocutores."
+            }
+
+        # Caso 2: Modo 'auto' com detecção de Plano Conjunto / Split-Screen
+        if person_preference == "auto" and is_dual_interlocutor_shot(detections, width, height):
+            return {
+                "zoom": 1.0,
+                "pan": 0.0,
+                "face_detected": True,
+                "dual_shot": True,
+                "notes": "Plano conjunto / Dual detectado automaticamente (ambos os oradores enquadrados)."
+            }
+
         target_face, _ = select_target_face(detections, width, height, None, person_preference)
 
         if target_face is None:
-            return {"zoom": 1.35, "pan": 0.0, "face_detected": False}
+            return {"zoom": 1.35, "pan": 0.0, "face_detected": False, "dual_shot": False}
 
         bx = target_face.bounding_box
         face_cx = bx.origin_x + bx.width / 2.0
@@ -228,10 +319,11 @@ def calculate_auto_blur_params(
         return {
             "zoom": round(calc_zoom, 2),
             "pan": round(calc_pan, 2),
-            "face_detected": True
+            "face_detected": True,
+            "dual_shot": False
         }
     except Exception:
-        return {"zoom": 1.35, "pan": 0.0, "face_detected": False}
+        return {"zoom": 1.35, "pan": 0.0, "face_detected": False, "dual_shot": False}
 
 
 def generate_blur_preview_image(

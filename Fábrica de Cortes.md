@@ -160,9 +160,13 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 - **🧠 Mineração Multi-Corte em Falas Longas e Podcasts (`core/analyzer.py`)**:
   - **Fatiamento Semântico Contínuo**: Falas e respostas longas (3 a 10 minutos) são varridas buscando múltiplos pontos de impacto por conectivos de transição (*"Por exemplo"*, *"Veja bem"*, *"O ponto central"*, etc.) e trocas de turno (`>>`), gerando de 2 a 5 cortes virais autônomos por resposta.
   - **Detecção Flexível de Turnos e Perguntas**: Identificação inteligente de perguntas (`?`), saudações e réplicas sem depender de termos rígidos.
+- **👥 Enquadramento de Ambos os Interlocutores / Plano Conjunto & Dual Shot (`core/face_tracker.py`)**:
+  - **Auto-Detecção Espacial de Debate/Sabatina (`is_dual_interlocutor_shot`)**: Identifica automaticamente quando 2 oradores estão enquadrados lado a lado (split-screen de TV ou plano aberto de podcast).
+  - **Fundo Desfocado Perfeito (9:16 Blur)**: Configura `zoom = 1.0` e `pan = 0.0` automaticamente ao detectar ou selecionar *"👥 Ambos os Interlocutores (Plano Conjunto / Dual)"*, preservando o enquadramento 16:9 completo centralizado sem cortar nenhum dos participantes.
+  - **Smart Tracking Composto (9:16)**: Cria *Bounding Box Composta* equilibrando a câmera vertical para abranger os dois rostos simultaneamente.
 - **🎛️ Controles em Massa & Modo Vídeo Normal (16:9)**:
   - Controles de *Marcar Tudo*, *Desmarcar Tudo* e *Inverter Seleção* em Séries e Ganchos Virais, com travas de segurança para desabilitar efeitos verticais de Shorts em vídeos longos 16:9.
-- **🧪 Suíte de 36 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 40 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando toda a suíte do `core/` via `pytest`.
 
 ---

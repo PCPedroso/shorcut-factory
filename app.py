@@ -1457,14 +1457,16 @@ if st.session_state.transcription_done:
                 target_choice = st.selectbox(
                     "👤 Personagem Alvo (Trava de Continuidade):",
                     [
+                        "👥 Ambos os Interlocutores (Plano Conjunto / Dual)",
                         "👉 Personagem da Direita / Entrevistado",
                         "👈 Personagem da Esquerda",
                         "🔍 Personagem Mais Central",
                         "🎯 Automático (Maior Dominância)"
                     ],
-                    help="Trava o rastreamento 100% no interlocutor selecionado, impedindo que a câmera pule para outra pessoa na cena."
+                    help="Trava o rastreamento no interlocutor selecionado ou enquadra ambos em plano conjunto simultaneamente."
                 )
                 target_map = {
+                    "👥 Ambos os Interlocutores (Plano Conjunto / Dual)": "both",
                     "👉 Personagem da Direita / Entrevistado": "right",
                     "👈 Personagem da Esquerda": "left",
                     "🔍 Personagem Mais Central": "center",
@@ -1529,20 +1531,23 @@ if st.session_state.transcription_done:
                     blur_target_choice = st.selectbox(
                         "👤 Personagem Alvo:",
                         [
+                            "👥 Ambos os Interlocutores (Plano Conjunto / Dual)",
+                            "🎯 Automático (Detecta se há 1 ou 2 oradores)",
                             "👉 Personagem da Direita / Entrevistado",
                             "👈 Personagem da Esquerda",
-                            "🔍 Personagem Mais Central",
-                            "🎯 Automático"
+                            "🔍 Personagem Mais Central"
                         ],
                         key="blur_target_sel"
                     )
                     blur_target_map = {
+                        "👥 Ambos os Interlocutores (Plano Conjunto / Dual)": "both",
+                        "🎯 Automático (Detecta se há 1 ou 2 oradores)": "auto",
                         "👉 Personagem da Direita / Entrevistado": "right",
                         "👈 Personagem da Esquerda": "left",
-                        "🔍 Personagem Mais Central": "center",
-                        "🎯 Automático": "auto"
+                        "🔍 Personagem Mais Central": "center"
                     }
                     blur_person_pref = blur_target_map[blur_target_choice]
+                    person_pref_val = blur_person_pref
 
                 with col_ab2:
                     blur_margin_choice = st.select_slider(
@@ -1566,7 +1571,11 @@ if st.session_state.transcription_done:
                     auto_p = calculate_auto_blur_params(v_full, start_time, blur_person_pref, blur_margin_val)
                     blur_zoom_val = auto_p["zoom"]
                     blur_pan_val = auto_p["pan"]
-                    st.caption(f"✨ Auto-Zoom Calculado: **{blur_zoom_val:.2f}x** | Foco Horizontal: **{blur_pan_val:+.2f}**")
+
+                    if auto_p.get("dual_shot"):
+                        st.info("👥 **Plano Conjunto / Dual Detectado!** Enquadramento 16:9 completo centralizado (Zoom 1.00x) para exibir ambos os interlocutores perfeitamente sem cortes laterais.")
+                    else:
+                        st.caption(f"✨ Auto-Zoom Calculado: **{blur_zoom_val:.2f}x** | Foco Horizontal: **{blur_pan_val:+.2f}**")
 
                     if st.button("👁️ Visualizar Prévia com Fundo Desfocado", key="btn_prev_blur"):
                         prev_b_path = os.path.join("data", video_id, "preview_blur.jpg")
@@ -1576,8 +1585,8 @@ if st.session_state.transcription_done:
                         else:
                             st.error(f"Erro na prévia: {p_res.get('error')}")
                 else:
-                    blur_zoom_val = 1.45
-                    blur_pan_val = 0.6 if blur_person_pref == "right" else (-0.6 if blur_person_pref == "left" else 0.0)
+                    blur_zoom_val = 1.0 if blur_person_pref == "both" else (1.45 if blur_person_pref != "center" else 1.35)
+                    blur_pan_val = 0.0 if blur_person_pref == "both" else (0.6 if blur_person_pref == "right" else (-0.6 if blur_person_pref == "left" else 0.0))
 
             else:
                 col_z1, col_z2 = st.columns(2)
