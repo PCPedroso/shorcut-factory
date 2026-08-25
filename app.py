@@ -22,6 +22,7 @@ import core.retention_effects
 import core.integrations
 import core.thumbnail_generator
 import core.quick_editor
+import core.overlay_manager
 
 importlib.reload(core.extractor)
 importlib.reload(core.transcriber)
@@ -39,6 +40,7 @@ importlib.reload(core.retention_effects)
 importlib.reload(core.integrations)
 importlib.reload(core.thumbnail_generator)
 importlib.reload(core.quick_editor)
+importlib.reload(core.overlay_manager)
 
 from core.extractor import download_audio, get_video_metadata
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
@@ -55,6 +57,7 @@ from core.retention_effects import PROGRESS_BAR_COLORS, ENGAGEMENT_CALLOUT_PRESE
 from core.thumbnail_generator import create_cut_thumbnail
 from core.integrations import get_youtube_auth_status, authenticate_youtube_oauth, upload_to_youtube_shorts, send_to_webhook
 from core.quick_editor import get_video_duration, extract_frame_at_timestamp, trim_video, remove_snippet_and_merge
+from core.overlay_manager import apply_overlay_to_video, generate_overlay_preview, OVERLAY_PRESETS
 
 # Carrega todas as configurações persistentes salvas
 _cfg = load_settings()
@@ -145,7 +148,11 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 if not custom_suffix.startswith("_"):
                     custom_suffix = f"_{custom_suffix}"
 
-        tab_trim, tab_snip = st.tabs(["✂️ Aparar Início / Fim (Trim)", "🗑️ Remover Trecho do Meio (Cut & Join)"])
+        tab_trim, tab_snip, tab_overlay = st.tabs([
+            "✂️ Aparar Início / Fim (Trim)", 
+            "🗑️ Remover Trecho do Meio (Cut & Join)",
+            "🎨 Sobrepor Banner / Tarja (Overlay)"
+        ])
 
         with tab_trim:
             st.markdown("##### ✂️ Aparar Vídeo")
@@ -264,6 +271,260 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         else:
                             st.success(f"🎉 Trecho removido e vídeo atualizado com sucesso! Nova duração: {snip_res.get('new_duration', dur_after_snip):.1f}s")
                             st.rerun()
+
+        with tab_overlay:
+            st.markdown("##### 🎨 Sobreposição de Banner, Tarja (GC) e Marca d'Água")
+            st.caption("Adicione tarjas personalizadas, cubra GCs de emissoras de TV ou insira logos com posicionamento e escala customizáveis.")
+
+            # 1. Seleção / Upload de Imagem de Banner
+            v_dir = os.path.dirname(video_path)
+            existing_imgs = []
+            if os.path.exists(v_dir):
+                for f_img in os.listdir(v_dir):
+                    if f_img.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')) and not f_img.startswith('thumbnail') and not f_img.startswith('temp'):
+                        existing_imgs.append(f_img)
+
+            col_src, col_up = st.columns([1.2, 1.8])
+            with col_src:
+                img_source_choice = st.radio(
+                    "Origem da imagem:",
+                    ["📁 Arquivos do Projeto", "📤 Enviar Nova Imagem"],
+                    key=f"ov_src_choice_{unique_key}"
+                )
+
+            selected_banner_path = None
+            with col_up:
+                if "Arquivos do Projeto" in img_source_choice and existing_imgs:
+                    sel_file = st.selectbox(
+                        "Selecione a imagem do projeto:",
+                        existing_imgs,
+                        key=f"ov_sel_file_{unique_key}"
+                    )
+                    selected_banner_path = os.path.join(v_dir, sel_file)
+                else:
+                    up_file = st.file_uploader(
+                        "Upload de imagem (PNG/JPG/WebP):",
+                        type=["png", "jpg", "jpeg", "webp"],
+                        key=f"ov_up_file_{unique_key}"
+                    )
+                    if up_file:
+                        temp_save_path = os.path.join(v_dir, f"uploaded_banner_{up_file.name}")
+                        with open(temp_save_path, "wb") as f_up:
+                            f_up.write(up_file.getbuffer())
+                        selected_banner_path = temp_save_path
+
+            if not selected_banner_path:
+                st.info("ℹ️ Selecione ou envie uma imagem acima para configurar a sobreposição.")
+            else:
+                # 2. Configurações de Formatação e Posicionamento
+                st.markdown("---")
+                col_pre, col_sc = st.columns(2)
+                with col_pre:
+                    preset_keys = list(OVERLAY_PRESETS.keys())
+                    preset_names = [OVERLAY_PRESETS[k]["name"] for k in preset_keys]
+                    sel_preset_idx = st.selectbox(
+                        "🎯 Presets de Posicionamento:",
+                        range(len(preset_keys)),
+                        format_func=lambda i: preset_names[i],
+                        key=f"ov_preset_sel_{unique_key}"
+                    )
+                    active_preset_key = preset_keys[sel_preset_idx]
+                    p_data = OVERLAY_PRESETS[active_preset_key]
+
+                with col_sc:
+                    scale_mode_map = {
+                        "fill": "📏 Esticar para Preencher (Fill)",
+                        "fit": "🔍 Ajustar Proporcional (Fit)",
+                        "cover": "🖼️ Ampliar e Cortar para Preencher (Cover)"
+                    }
+                    def_scale = p_data.get("scale_mode", "fill")
+                    scale_opts = ["fill", "fit", "cover"]
+                    sel_scale_mode = st.selectbox(
+                        "📐 Modo de Adaptação da Imagem:",
+                        scale_opts,
+                        index=scale_opts.index(def_scale) if def_scale in scale_opts else 0,
+                        format_func=lambda x: scale_mode_map[x],
+                        key=f"ov_scale_mode_{unique_key}"
+                    )
+
+                # Sliders de Dimensão e Posição
+                col_dim1, col_dim2 = st.columns(2)
+                with col_dim1:
+                    ov_w_pct = st.slider(
+                        "Largura (% da tela):",
+                        min_value=10,
+                        max_value=100,
+                        value=int(p_data.get("width_pct", 100)),
+                        step=1,
+                        key=f"ov_w_pct_{unique_key}"
+                    )
+                with col_dim2:
+                    ov_h_px = st.slider(
+                        "Altura da Tarja (Pixels):",
+                        min_value=20,
+                        max_value=600,
+                        value=int(p_data.get("height_px", 300)),
+                        step=5,
+                        key=f"ov_h_px_{unique_key}"
+                    )
+
+                col_pos1, col_pos2, col_pos3 = st.columns(3)
+                with col_pos1:
+                    pos_y_opts = ["bottom", "top", "center"]
+                    pos_y_labels = {"bottom": "⬇️ Rodapé (Inferior)", "top": "⬆️ Topo (Superior)", "center": "↕️ Centro"}
+                    def_pos_y = p_data.get("pos_y", "bottom")
+                    sel_pos_y = st.selectbox(
+                        "Posição Vertical (Y):",
+                        pos_y_opts,
+                        index=pos_y_opts.index(def_pos_y) if def_pos_y in pos_y_opts else 0,
+                        format_func=lambda x: pos_y_labels[x],
+                        key=f"ov_pos_y_{unique_key}"
+                    )
+                with col_pos2:
+                    pos_x_opts = ["center", "left", "right"]
+                    pos_x_labels = {"center": "↔️ Centralizado", "left": "⬅️ Esquerda", "right": "➡️ Direita"}
+                    def_pos_x = p_data.get("pos_x", "center")
+                    sel_pos_x = st.selectbox(
+                        "Posição Horizontal (X):",
+                        pos_x_opts,
+                        index=pos_x_opts.index(def_pos_x) if def_pos_x in pos_x_opts else 0,
+                        format_func=lambda x: pos_x_labels[x],
+                        key=f"ov_pos_x_{unique_key}"
+                    )
+                with col_pos3:
+                    ov_opacity = st.slider(
+                        "Opacidade:",
+                        min_value=0.1,
+                        max_value=1.0,
+                        value=float(p_data.get("opacity", 1.0)),
+                        step=0.05,
+                        key=f"ov_opacity_{unique_key}"
+                    )
+
+                # Ajuste fino de offset e logo
+                selected_logo_path = None
+                sel_logo_pos = "left"
+                sel_logo_scale = 0.75
+                with st.expander("⚙️ Ajustes Finos de Margem e Logo Secundário Embutido", expanded=False):
+                    col_off1, col_off2 = st.columns(2)
+                    with col_off1:
+                        ov_off_y = st.number_input(
+                            "Margem / Deslocamento Y (px):",
+                            min_value=-500,
+                            max_value=500,
+                            value=int(p_data.get("offset_y", 0)),
+                            step=5,
+                            key=f"ov_off_y_{unique_key}"
+                        )
+                    with col_off2:
+                        ov_off_x = st.number_input(
+                            "Margem / Deslocamento X (px):",
+                            min_value=-500,
+                            max_value=500,
+                            value=int(p_data.get("offset_x", 0)),
+                            step=5,
+                            key=f"ov_off_x_{unique_key}"
+                        )
+
+                    st.markdown("##### 🏷️ Imagem Secundária Embutida (Logo / Foto / Selo no Banner)")
+                    up_logo = st.file_uploader(
+                        "Logo / Selo interno (Opcional):",
+                        type=["png", "jpg", "jpeg", "webp"],
+                        key=f"ov_logo_up_{unique_key}"
+                    )
+                    if up_logo:
+                        logo_save_p = os.path.join(v_dir, f"temp_logo_{up_logo.name}")
+                        with open(logo_save_p, "wb") as f_l:
+                            f_l.write(up_logo.getbuffer())
+                        selected_logo_path = logo_save_p
+
+                    col_l1, col_l2 = st.columns(2)
+                    with col_l1:
+                        sel_logo_pos = st.selectbox(
+                            "Posição do Logo no Banner:",
+                            ["left", "right", "center"],
+                            format_func=lambda x: {"left": "⬅️ Canto Esquerdo", "right": "➡️ Canto Direito", "center": "↔️ Centro"}[x],
+                            key=f"ov_logo_pos_{unique_key}"
+                        )
+                    with col_l2:
+                        sel_logo_scale = st.slider(
+                            "Tamanho do Logo (% do Banner):",
+                            min_value=0.2,
+                            max_value=1.0,
+                            value=0.75,
+                            step=0.05,
+                            key=f"ov_logo_scale_{unique_key}"
+                        )
+
+                # Dicionário de Configuração
+                current_ov_cfg = {
+                    "width_pct": ov_w_pct,
+                    "height_px": ov_h_px,
+                    "pos_x": sel_pos_x,
+                    "pos_y": sel_pos_y,
+                    "offset_x": ov_off_x if 'ov_off_x' in locals() else 0,
+                    "offset_y": ov_off_y if 'ov_off_y' in locals() else 0,
+                    "scale_mode": sel_scale_mode,
+                    "opacity": ov_opacity,
+                    "logo_pos": sel_logo_pos,
+                    "logo_scale_pct": sel_logo_scale
+                }
+
+                # 3. Prévia Instantânea do Frame
+                st.markdown("---")
+                st.markdown("##### 👁️ Prévia do Encaixe em Tempo Real:")
+                col_prev_t, _ = st.columns([2, 2])
+                with col_prev_t:
+                    ov_preview_sec = st.slider(
+                        "Segundo do vídeo para prévia:",
+                        min_value=0.0,
+                        max_value=float(dur),
+                        value=min(1.0, float(dur * 0.1)),
+                        step=0.5,
+                        key=f"ov_prev_sec_{unique_key}"
+                    )
+
+                prev_frame = generate_overlay_preview(
+                    video_path=video_path,
+                    banner_path_or_array=selected_banner_path,
+                    config=current_ov_cfg,
+                    timestamp_s=ov_preview_sec,
+                    logo_path_or_array=selected_logo_path
+                )
+
+                if prev_frame is not None:
+                    safe_display_image(prev_frame, caption=f"Prévia do Banner aplicado em {ov_preview_sec:.1f}s", use_container_width=True)
+
+                # 4. Botão de Aplicação / Renderização
+                st.markdown("")
+                btn_label_ov = "🎨 Salvar como Novo Vídeo com Banner" if "Salvar como um novo vídeo" in save_mode else "🎨 Aplicar Banner no Vídeo Atual"
+                if st.button(btn_label_ov, key=f"btn_apply_overlay_{unique_key}", type="primary", use_container_width=True):
+                    with st.spinner("Renderizando vídeo com sobreposição acelerada por GPU (NVENC)..."):
+                        out_target = None
+                        if "Salvar como um novo vídeo" in save_mode:
+                            v_dir_edit = os.path.dirname(video_path)
+                            b_name, ext = os.path.splitext(os.path.basename(video_path))
+                            suf = custom_suffix if custom_suffix else "_com_banner"
+                            out_target = os.path.join(v_dir_edit, f"{b_name}{suf}{ext}")
+
+                        ov_res = apply_overlay_to_video(
+                            video_path=video_path,
+                            banner_path=selected_banner_path,
+                            config=current_ov_cfg,
+                            output_path=out_target,
+                            logo_path=selected_logo_path
+                        )
+
+                        if ov_res.get("error"):
+                            st.error(f"Erro ao aplicar banner: {ov_res['error']}")
+                        else:
+                            if out_target:
+                                st.session_state[f"last_edited_video_{unique_key}"] = out_target
+                                st.success(f"🎉 Novo vídeo criado com sucesso! Arquivo: `{os.path.basename(out_target)}`")
+                                st.rerun()
+                            else:
+                                st.success("🎉 Banner aplicado e vídeo atualizado com sucesso!")
+                                st.rerun()
 
         # Se uma nova versão foi gerada recentemente para este componente, exibe player e download
         last_new_v = st.session_state.get(f"last_edited_video_{unique_key}")

@@ -168,9 +168,12 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Auto-Detecção de Status de Live (`is_live`)**: Reconhece transmissões ao vivo ativas do YouTube sem duração fixa final.
   - **Captura do Início ao Momento Atual (`live_from_start`)**: Baixa áudio e vídeo desde o primeiro minuto da transmissão até o momento em que a ação foi disparada sem travar aguardando o encerramento.
   - **Sincronização Contínua**: Permite ao usuário clicar em *"🔄 Sincronizar com o Momento Atual da Live"* para capturar novos minutos conforme a live progride.
-- **🎛️ Controles em Massa & Modo Vídeo Normal (16:9)**:
-  - Controles de *Marcar Tudo*, *Desmarcar Tudo* e *Inverter Seleção* em Séries e Ganchos Virais, com travas de segurança para desabilitar efeitos verticais de Shorts em vídeos longos 16:9.
-- **🧪 Suíte de 45 Testes Unitários Automatizados (`tests/`)**:
+- **🎨 Motor de Sobreposição de Banners, Tarjas (GC) e Logos / Overlays (`core/overlay_manager.py`)**:
+  - **Modos de Escala Adaptativa**: *Esticar para Preencher (`fill`)*, *Ajustar Proporcionalmente (`fit`)* e *Ampliar e Cortar (`cover`)*.
+  - **Posicionamento e Dimensão Milimétricos**: Largura %, Altura em Pixels (para cobertura exata de GCs de TV), alinhamentos Verticais (*Rodapé*, *Topo*, *Centro*) e Horizontais com controle de offset e opacidade.
+  - **Logo / Selo Embutido Secundário**: Suporte a embutir imagem secundária (logo do canal, selo "AO VIVO", foto) posicionada internamente no banner com controle de escala e margem.
+  - **Prévia em Frame em Tempo Real & GPU NVENC**: Visualização instantânea no frame antes da renderização e renderização acelerada por hardware via FFmpeg.
+- **🧪 Suíte de 52 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando toda a suíte do `core/` via `pytest`.
 
 ---
