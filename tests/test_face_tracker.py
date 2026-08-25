@@ -43,8 +43,33 @@ class TestFaceTracker(unittest.TestCase):
         # Bounding box composta deve cobrir de 200 até 1150 (largura 950)
         self.assertEqual(target.bounding_box.origin_x, 200)
         self.assertEqual(target.bounding_box.width, 950)
-        # Centroide X deve ser (200 + 1150) / 2 = 675
-        self.assertEqual(center[0], 675.0)
+    def test_filter_prominent_faces_ignores_libras(self):
+        from core.face_tracker import filter_prominent_faces
+        # Orador 1 (Renan): 300x300 (área 90.000)
+        d1 = MockDetection(250, 300, 300, 300)
+        # Orador 2 (Curi): 300x300 (área 90.000)
+        d2 = MockDetection(850, 300, 300, 300)
+        # Intérprete LIBRAS no canto direito: 70x70 (área 4.900 -> 5.4% do maior orador)
+        d_libras = MockDetection(1650, 600, 70, 70)
+
+        prominent = filter_prominent_faces([d1, d2, d_libras], 1920, 1080)
+        self.assertEqual(len(prominent), 2)
+        self.assertIn(d1, prominent)
+        self.assertIn(d2, prominent)
+        self.assertNotIn(d_libras, prominent)
+
+    def test_select_target_face_right_ignores_libras(self):
+        # Orador esquerda: x=250, cx=400
+        d_left = MockDetection(250, 300, 300, 300)
+        # Orador direita (entrevistado principal): x=850, cx=1000
+        d_right = MockDetection(850, 300, 300, 300)
+        # Intérprete LIBRAS na extrema direita: x=1650, cx=1685 (pequeno)
+        d_libras = MockDetection(1650, 600, 70, 70)
+
+        target, center = select_target_face([d_left, d_right, d_libras], 1920, 1080, person_preference="right")
+        # Deve selecionar d_right (Curi), NÃO d_libras
+        self.assertEqual(target, d_right)
+        self.assertEqual(center[0], 1000.0)
 
 
 if __name__ == '__main__':

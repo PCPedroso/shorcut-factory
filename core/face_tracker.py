@@ -35,26 +35,45 @@ def parse_time_to_seconds(time_str: str) -> float:
     return float(time_str)
 
 
+def filter_prominent_faces(detections, frame_width: int, frame_height: int, min_relative_area: float = 0.28) -> list:
+    """
+    Filtra rostos secundários/irrelevantes (como intérprete de LIBRAS em miniatura no canto,
+    plateia ao fundo ou inserções menores na transmissão).
+    Critérios:
+    - Descarta rostos cuja área seja inferior a 'min_relative_area' (ex: < 28%) da área do maior rosto em cena.
+    - Descarta rostos com área absoluta insignificante (< 0.2% da tela).
+    """
+    if not detections:
+        return []
+
+    min_abs_area = frame_width * frame_height * 0.002
+    candidates = [d for d in detections if (d.bounding_box.width * d.bounding_box.height) >= min_abs_area]
+    if not candidates:
+        return detections
+
+    max_area = max(d.bounding_box.width * d.bounding_box.height for d in candidates)
+    prominent = [d for d in candidates if (d.bounding_box.width * d.bounding_box.height) >= (max_area * min_relative_area)]
+    return prominent if prominent else candidates
+
+
 def is_dual_interlocutor_shot(detections, frame_width: int, frame_height: int) -> bool:
     """
     Detecta se o enquadramento atual possui 2 interlocutores (plano conjunto ou split-screen de debate/sabatina).
     Critérios:
-    - Pelo menos 2 rostos detectados com áreas relevantes (> 0.3% da tela cada).
+    - Pelo menos 2 rostos proeminentes detectados (filtrando LIBRAS/fundo).
     - Ambos os rostos com separação horizontal clara (distância >= 18% da largura).
     - Alinhamento vertical coerente (diferença de altura <= 28% da tela).
     """
-    if not detections or len(detections) < 2:
+    prominent_dets = filter_prominent_faces(detections, frame_width, frame_height, min_relative_area=0.28)
+    if not prominent_dets or len(prominent_dets) < 2:
         return False
 
     valid_faces = []
-    min_face_area = frame_width * frame_height * 0.003
-    for d in detections:
+    for d in prominent_dets:
         bx = d.bounding_box
-        area = bx.width * bx.height
-        if area >= min_face_area:
-            cx = bx.origin_x + bx.width / 2.0
-            cy = bx.origin_y + bx.height / 2.0
-            valid_faces.append((cx, cy, bx.width, bx.height, d))
+        cx = bx.origin_x + bx.width / 2.0
+        cy = bx.origin_y + bx.height / 2.0
+        valid_faces.append((cx, cy, bx.width, bx.height, d))
 
     if len(valid_faces) < 2:
         return False
@@ -85,23 +104,24 @@ def select_target_face(detections, frame_width: int, frame_height: int, last_tra
     """
     Seleciona o rosto alvo respeitando a preferência do usuário e mantendo a
     Trava de Continuidade Espacial (Target Lock) para nunca pular para outra pessoa na cena.
+    Filtra automaticamente rostos desproporcionalmente pequenos (ex: intérpretes de LIBRAS).
     Suporta modo 'both' para enquadrar ambos os interlocutores em plano conjunto simultaneamente.
     """
     if not detections:
         return None, last_tracked_center
 
+    # Filtra rostos irrelevantes/LIBRAS
+    prominent_dets = filter_prominent_faces(detections, frame_width, frame_height, min_relative_area=0.28)
+    if not prominent_dets:
+        prominent_dets = detections
+
     # Modo 'both' (Ambos os Interlocutores em Plano Conjunto / Split-Screen)
     if person_preference == "both":
-        if len(detections) >= 2:
-            min_area = frame_width * frame_height * 0.002
-            valid_dets = [d for d in detections if d.bounding_box.width * d.bounding_box.height >= min_area]
-            if not valid_dets:
-                valid_dets = detections
-
-            min_x = min(d.bounding_box.origin_x for d in valid_dets)
-            max_x = max(d.bounding_box.origin_x + d.bounding_box.width for d in valid_dets)
-            min_y = min(d.bounding_box.origin_y for d in valid_dets)
-            max_y = max(d.bounding_box.origin_y + d.bounding_box.height for d in valid_dets)
+        if len(prominent_dets) >= 2:
+            min_x = min(d.bounding_box.origin_x for d in prominent_dets)
+            max_x = max(d.bounding_box.origin_x + d.bounding_box.width for d in prominent_dets)
+            min_y = min(d.bounding_box.origin_y for d in prominent_dets)
+            max_y = max(d.bounding_box.origin_y + d.bounding_box.height for d in prominent_dets)
 
             comp_bbox = CompositeBoundingBox(min_x, min_y, max(1, max_x - min_x), max(1, max_y - min_y))
             comp_face = CompositeFaceDetection(comp_bbox)
@@ -109,7 +129,7 @@ def select_target_face(detections, frame_width: int, frame_height: int, last_tra
             cy = min_y + comp_bbox.height / 2.0
             return comp_face, (cx, cy)
         else:
-            best_face = detections[0]
+            best_face = prominent_dets[0]
             bx = best_face.bounding_box
             return best_face, (bx.origin_x + bx.width / 2.0, bx.origin_y + bx.height / 2.0)
 
@@ -118,7 +138,7 @@ def select_target_face(detections, frame_width: int, frame_height: int, last_tra
         last_cx, last_cy = last_tracked_center
         best_face = None
         min_dist = float('inf')
-        for d in detections:
+        for d in prominent_dets:
             bx = d.bounding_box
             cx = bx.origin_x + bx.width / 2.0
             cy = bx.origin_y + bx.height / 2.0
@@ -133,18 +153,18 @@ def select_target_face(detections, frame_width: int, frame_height: int, last_tra
 
     # Primeira seleção (baseada na preferência escolhida)
     if person_preference == "right":
-        # Pessoa mais à direita da tela
-        best_face = max(detections, key=lambda d: d.bounding_box.origin_x + d.bounding_box.width / 2.0)
+        # Pessoa principal mais à direita da tela (excluindo LIBRAS)
+        best_face = max(prominent_dets, key=lambda d: d.bounding_box.origin_x + d.bounding_box.width / 2.0)
     elif person_preference == "left":
-        # Pessoa mais à esquerda da tela
-        best_face = min(detections, key=lambda d: d.bounding_box.origin_x + d.bounding_box.width / 2.0)
+        # Pessoa principal mais à esquerda da tela
+        best_face = min(prominent_dets, key=lambda d: d.bounding_box.origin_x + d.bounding_box.width / 2.0)
     elif person_preference == "center":
-        # Pessoa mais próxima do centro da tela
+        # Pessoa principal mais próxima do centro da tela
         center_x = frame_width / 2.0
-        best_face = min(detections, key=lambda d: abs((d.bounding_box.origin_x + d.bounding_box.width / 2.0) - center_x))
+        best_face = min(prominent_dets, key=lambda d: abs((d.bounding_box.origin_x + d.bounding_box.width / 2.0) - center_x))
     else:
         # Modo 'auto': maior área / dominância inicial
-        best_face = max(detections, key=lambda d: d.bounding_box.width * d.bounding_box.height)
+        best_face = max(prominent_dets, key=lambda d: d.bounding_box.width * d.bounding_box.height)
 
     bx = best_face.bounding_box
     return best_face, (bx.origin_x + bx.width / 2.0, bx.origin_y + bx.height / 2.0)
@@ -198,15 +218,25 @@ def generate_face_preview_image(
 
         preview_img = frame.copy()
 
+        prominent_dets = filter_prominent_faces(detections, width, height, min_relative_area=0.28)
+
         # Desenha as caixas dos rostos
         for d in detections:
             is_target = (d == target_face)
+            is_prominent = (d in prominent_dets)
             bx = d.bounding_box
-            color = (0, 255, 0) if is_target else (220, 120, 50)  # Verde para alvo, Laranja para outros
-            cv2.rectangle(preview_img, (bx.origin_x, bx.origin_y), (bx.origin_x + bx.width, bx.origin_y + bx.height), color, 3)
+            if is_target:
+                color = (0, 255, 0)  # Verde
+                label = "ALVO PRINCIPAL"
+            elif is_prominent:
+                color = (220, 120, 50)  # Laranja
+                label = "INTERLOCUTOR"
+            else:
+                color = (120, 120, 120)  # Cinza
+                label = "SECUNDARIO / LIBRAS"
 
-            label = "ALVO PRINCIPAL" if is_target else "OUTRO"
-            cv2.putText(preview_img, label, (bx.origin_x, max(24, bx.origin_y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+            cv2.rectangle(preview_img, (bx.origin_x, bx.origin_y), (bx.origin_x + bx.width, bx.origin_y + bx.height), color, 3 if is_target else 2)
+            cv2.putText(preview_img, label, (bx.origin_x, max(24, bx.origin_y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
         # Desenha a janela do enquadramento vertical 9:16
         if target_face is not None:
