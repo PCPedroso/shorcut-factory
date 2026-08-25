@@ -506,6 +506,7 @@ if st.button("🚀 Processar Vídeo / Atualizar", type="primary"):
                 v_date = meta.get("upload_date")
                 v_thumb = meta.get("thumbnail")
                 v_dur = meta.get("duration")
+                is_live_flag = meta.get("is_live", False)
 
                 add_or_update_video_in_library(
                     video_id=video_id,
@@ -514,13 +515,28 @@ if st.button("🚀 Processar Vídeo / Atualizar", type="primary"):
                     url=video_url,
                     thumbnail_url=v_thumb,
                     duration_sec=v_dur,
-                    channel=meta.get("channel")
+                    channel=meta.get("channel"),
+                    is_live=is_live_flag
                 )
+
+            if is_live_flag:
+                st.warning("🔴 **Transmissão Ao Vivo (LIVE) Detectada!** O vídeo ainda está em andamento no YouTube. O sistema capturará todo o conteúdo transmitido desde o início até o momento atual.")
 
             # CACHE: Verifica se já temos a transcrição pronta
             if os.path.exists(transcript_file):
                 st.success("✅ Cache encontrado! Carregando transcrição e histórico salvo...")
                 load_video_saved_artifacts(video_id)
+                if is_live_flag:
+                    st.info("💡 **Dica de Live**: Como a transmissão continua no YouTube, você pode sincronizar novos minutos a qualquer momento.")
+                    if st.button("🔄 Sincronizar / Atualizar com o Momento Atual da Live", key="btn_sync_live_cache"):
+                        if os.path.exists(transcript_file):
+                            os.remove(transcript_file)
+                        if os.path.exists(audio_path):
+                            os.remove(audio_path)
+                        v_full_cache = os.path.join(data_dir, "video_full.mp4")
+                        if os.path.exists(v_full_cache):
+                            os.remove(v_full_cache)
+                        st.rerun()
             else:
                 st.info("Iniciando extração do YouTube...")
                 if meta.get("title"):
@@ -537,13 +553,27 @@ if st.button("🚀 Processar Vídeo / Atualizar", type="primary"):
                         if os.path.exists(audio_path):
                             audio_res = {"path": audio_path, "error": None}
                         else:
-                            with st.spinner("Baixando áudio para transcrição local..."):
-                                audio_res = download_audio(video_url, output_path=audio_path)
+                            with st.spinner("Baixando áudio gravado até o momento atual..."):
+                                audio_res = download_audio(video_url, output_path=audio_path, is_live=is_live_flag)
                                 
                         if audio_res.get("error"):
                             st.error(f"Erro no download: {audio_res['error']}")
                             transcribe_res = {"error": audio_res["error"]}
                         else:
+                            # Atualiza a duração se era desconhecida
+                            if not v_dur and os.path.exists(audio_path):
+                                v_dur = get_video_duration(audio_path)
+                                add_or_update_video_in_library(
+                                    video_id=video_id,
+                                    title=v_title,
+                                    upload_date_raw=v_date,
+                                    url=video_url,
+                                    thumbnail_url=v_thumb,
+                                    duration_sec=v_dur,
+                                    channel=meta.get("channel"),
+                                    is_live=is_live_flag
+                                )
+
                             with st.spinner(f"Transcrevendo áudio com Whisper ({model_size}) na {device_option.upper()}..."):
                                 transcribe_res = transcribe_audio(
                                     audio_res["path"], 
@@ -2248,7 +2278,15 @@ if st.session_state.transcription_done:
 
                 if need_download:
                     with st.spinner("Baixando vídeo original na máxima resolução disponível (1080p Full HD)..."):
-                        video_res = download_full_video(active_url, video_full_path)
+                        _meta_local = os.path.join(data_dir, "metadata.json")
+                        _is_live_corte = False
+                        if os.path.exists(_meta_local):
+                            try:
+                                with open(_meta_local, "r", encoding="utf-8") as _mf:
+                                    _is_live_corte = bool(json.load(_mf).get("is_live"))
+                            except Exception:
+                                pass
+                        video_res = download_full_video(active_url, video_full_path, is_live=_is_live_corte)
                 else:
                     current_res = get_video_resolution(video_full_path)
                     st.success(f"Vídeo em alta qualidade encontrado no cache ({current_res})!")

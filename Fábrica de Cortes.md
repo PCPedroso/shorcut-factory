@@ -164,9 +164,13 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Auto-Detecção Espacial de Debate/Sabatina (`is_dual_interlocutor_shot`)**: Identifica automaticamente quando 2 oradores estão enquadrados lado a lado (split-screen de TV ou plano aberto de podcast).
   - **Fundo Desfocado Perfeito (9:16 Blur)**: Configura `zoom = 1.0` e `pan = 0.0` automaticamente ao detectar ou selecionar *"👥 Ambos os Interlocutores (Plano Conjunto / Dual)"*, preservando o enquadramento 16:9 completo centralizado sem cortar nenhum dos participantes.
   - **Smart Tracking Composto (9:16)**: Cria *Bounding Box Composta* equilibrando a câmera vertical para abranger os dois rostos simultaneamente.
+- **🔴 Suporte a Transmissões Ao Vivo em Andamento (Live Streams) (`core/extractor.py`, `core/video_processor.py`)**:
+  - **Auto-Detecção de Status de Live (`is_live`)**: Reconhece transmissões ao vivo ativas do YouTube sem duração fixa final.
+  - **Captura do Início ao Momento Atual (`live_from_start`)**: Baixa áudio e vídeo desde o primeiro minuto da transmissão até o momento em que a ação foi disparada sem travar aguardando o encerramento.
+  - **Sincronização Contínua**: Permite ao usuário clicar em *"🔄 Sincronizar com o Momento Atual da Live"* para capturar novos minutos conforme a live progride.
 - **🎛️ Controles em Massa & Modo Vídeo Normal (16:9)**:
   - Controles de *Marcar Tudo*, *Desmarcar Tudo* e *Inverter Seleção* em Séries e Ganchos Virais, com travas de segurança para desabilitar efeitos verticais de Shorts em vídeos longos 16:9.
-- **🧪 Suíte de 40 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 45 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando toda a suíte do `core/` via `pytest`.
 
 ---

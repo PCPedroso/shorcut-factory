@@ -63,10 +63,17 @@ def process_batch_cuts(
     # 1. Garante que o vídeo original Full HD está baixado
     _log(f"Verificando vídeo original em: {video_full_path}")
     if not os.path.exists(video_full_path) or os.path.getsize(video_full_path) == 0:
-        _log("Vídeo original não encontrado localmente. Iniciando download 1080p...")
         if progress_callback:
             progress_callback(0, len(cut_items), "Baixando vídeo original em 1080p Full HD...")
-        dl_res = core.video_processor.download_full_video(active_url, video_full_path)
+        _meta_file = os.path.join(data_dir, "metadata.json")
+        _is_live = False
+        if os.path.exists(_meta_file):
+            try:
+                with open(_meta_file, "r", encoding="utf-8") as _mf:
+                    _is_live = bool(json.load(_mf).get("is_live"))
+            except Exception:
+                pass
+        dl_res = core.video_processor.download_full_video(active_url, video_full_path, is_live=_is_live)
         if dl_res.get("error"):
             err_msg = f"Erro no download do vídeo completo: {dl_res['error']}"
             _log(f"FALHA CRÍTICA: {err_msg}")

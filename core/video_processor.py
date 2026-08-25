@@ -19,11 +19,12 @@ if paths_to_add:
     os.environ["PATH"] = os.pathsep.join(paths_to_add) + os.pathsep + current_path
 
 
-def download_full_video(url: str, output_path: str = "temp_video.mp4") -> dict:
+def download_full_video(url: str, output_path: str = "temp_video.mp4", is_live: bool = False) -> dict:
     """
     Baixa o vídeo na máxima resolução disponível (1080p Full HD / 720p HD).
     Usa o runtime Deno e o solver EJS para decifrar os fluxos 1080p do YouTube,
     mesclando a melhor faixa de vídeo e áudio em MP4 via FFmpeg.
+    Suporta transmissões ao vivo em andamento (live_from_start).
     """
     try:
         out_dir = os.path.dirname(output_path)
@@ -49,6 +50,10 @@ def download_full_video(url: str, output_path: str = "temp_video.mp4") -> dict:
             'no_warnings': True,
             'js_runtimes': js_runtimes_cfg
         }
+
+        if is_live:
+            ydl_opts['live_from_start'] = True
+            ydl_opts['hls_use_mpegts'] = True
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
