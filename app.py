@@ -1656,13 +1656,18 @@ if st.session_state.transcription_done:
     _saved_aspect = _cfg.get("aspect_option", _aspect_list[1])
     _asp_idx = _aspect_list.index(_saved_aspect) if _saved_aspect in _aspect_list else 1
 
+    def _on_aspect_change():
+        if "aspect_ratio_choice" in st.session_state:
+            save_setting("aspect_option", st.session_state.aspect_ratio_choice)
+
     st.markdown("#### 📐 Formato de Exportação do Vídeo")
     aspect_option = st.radio(
         "Escolha o enquadramento:",
         _aspect_list,
         index=_asp_idx,
         horizontal=False,
-        key="aspect_ratio_choice"
+        key="aspect_ratio_choice",
+        on_change=_on_aspect_change
     )
     
     aspect_map = {
@@ -1676,7 +1681,7 @@ if st.session_state.transcription_done:
 
     blur_zoom_val = 1.0
     blur_pan_val = 0.0
-    blur_int_val = 25
+    blur_int_val = _cfg.get("blur_intensity", 25)
     face_zoom_active = True
     face_margin_val = 1.55
     person_pref_val = "auto"
@@ -1689,21 +1694,29 @@ if st.session_state.transcription_done:
 
     if selected_aspect == "9:16_split":
         with st.expander("👥 Ajustes do Layout Dividido (Split Screen 9:16)", expanded=True):
+            saved_split_auto = _cfg.get("split_auto_switch", True)
             split_auto_switch = st.toggle(
                 "🤖 Transição Dinâmica Inteligente (Auto-Switch)",
-                value=True,
+                value=saved_split_auto,
+                key="split_auto_switch_tgl",
+                on_change=lambda: save_setting("split_auto_switch", st.session_state.split_auto_switch_tgl),
                 help="Recomendado: Quando houver 2+ pessoas no enquadramento, aplica o Split Screen. Se a câmera fechar em Close-up de apenas 1 pessoa, expande suavemente para 9:16 Full Screen sem cortar ninguém!"
             )
             col_sp1, col_sp2 = st.columns(2)
             with col_sp1:
+                saved_split_preset = _cfg.get("split_preset", "👈 Entrevistador(es) no Topo | 👉 Entrevistado na Base (Padrão Podpah/Flow)")
+                split_presets_list = [
+                    "👈 Entrevistador(es) no Topo | 👉 Entrevistado na Base (Padrão Podpah/Flow)",
+                    "👉 Entrevistado no Topo | 👈 Entrevistador(es) na Base",
+                    "🎛️ Personalizado (Sliders Manuais)"
+                ]
+                split_p_idx = split_presets_list.index(saved_split_preset) if saved_split_preset in split_presets_list else 0
                 split_preset = st.selectbox(
                     "🎬 Distribuição dos Personagens:",
-                    [
-                        "👈 Entrevistador(es) no Topo | 👉 Entrevistado na Base (Padrão Podpah/Flow)",
-                        "👉 Entrevistado no Topo | 👈 Entrevistador(es) na Base",
-                        "🎛️ Personalizado (Sliders Manuais)"
-                    ],
-                    key="split_preset_choice"
+                    split_presets_list,
+                    index=split_p_idx,
+                    key="split_preset_choice",
+                    on_change=lambda: save_setting("split_preset", st.session_state.split_preset_choice)
                 )
                 
                 if split_preset == "👈 Entrevistador(es) no Topo | 👉 Entrevistado na Base (Padrão Podpah/Flow)":
@@ -1713,24 +1726,52 @@ if st.session_state.transcription_done:
                     split_top_pan = 0.65
                     split_bottom_pan = -0.65
                 else:
-                    split_top_pan = st.slider("↔️ Foco Horizontal do Topo:", -1.0, 1.0, -0.65, 0.05)
-                    split_bottom_pan = st.slider("↔️ Foco Horizontal da Base:", -1.0, 1.0, 0.65, 0.05)
+                    saved_top_pan = float(_cfg.get("split_top_pan", -0.65))
+                    saved_bottom_pan = float(_cfg.get("split_bottom_pan", 0.65))
+                    split_top_pan = st.slider(
+                        "↔️ Foco Horizontal do Topo:", -1.0, 1.0, saved_top_pan, 0.05,
+                        key="split_top_pan_slider",
+                        on_change=lambda: save_setting("split_top_pan", st.session_state.split_top_pan_slider)
+                    )
+                    split_bottom_pan = st.slider(
+                        "↔️ Foco Horizontal da Base:", -1.0, 1.0, saved_bottom_pan, 0.05,
+                        key="split_bottom_pan_slider",
+                        on_change=lambda: save_setting("split_bottom_pan", st.session_state.split_bottom_pan_slider)
+                    )
 
             with col_sp2:
+                saved_split_zoom = float(_cfg.get("split_zoom", 1.15))
                 split_zoom_val = st.slider(
                     "🔍 Zoom / Aproximação dos Quadros:",
                     min_value=1.0,
                     max_value=2.0,
-                    value=1.15,
+                    value=saved_split_zoom,
                     step=0.05,
                     format="%.2fx",
+                    key="split_zoom_slider",
+                    on_change=lambda: save_setting("split_zoom", st.session_state.split_zoom_slider),
                     help="Aumente para aproximar o enquadramento de rosto e busto nos dois quadros."
                 )
                 col_div1, col_div2 = st.columns(2)
                 with col_div1:
-                    split_div_color = st.selectbox("Linha Divisória:", ["black", "white", "gray", "none"], index=0, format_func=lambda x: {"black": "⬛ Preta", "white": "⬜ Branca", "gray": "🔘 Cinza", "none": "🚫 Sem Linha"}[x])
+                    saved_div_col = _cfg.get("split_divider_color", "black")
+                    div_cols_list = ["black", "white", "gray", "none"]
+                    div_c_idx = div_cols_list.index(saved_div_col) if saved_div_col in div_cols_list else 0
+                    split_div_color = st.selectbox(
+                        "Linha Divisória:",
+                        div_cols_list,
+                        index=div_c_idx,
+                        key="split_div_color_sel",
+                        on_change=lambda: save_setting("split_divider_color", st.session_state.split_div_color_sel),
+                        format_func=lambda x: {"black": "⬛ Preta", "white": "⬜ Branca", "gray": "🔘 Cinza", "none": "🚫 Sem Linha"}[x]
+                    )
                 with col_div2:
-                    split_div_w = st.slider("Espessura:", 0, 8, 4)
+                    saved_div_w = int(_cfg.get("split_divider_width", 4))
+                    split_div_w = st.slider(
+                        "Espessura:", 0, 8, saved_div_w,
+                        key="split_div_w_slider",
+                        on_change=lambda: save_setting("split_divider_width", st.session_state.split_div_w_slider)
+                    )
 
             if start_time:
                 if st.button("👁️ Visualizar Prévia do Split Screen", key="btn_prev_split"):
@@ -1761,15 +1802,21 @@ if st.session_state.transcription_done:
         with st.expander("🎯 Ajustes de Rastreamento, Foco e Margens do Personagem", expanded=True):
             col_fz1, col_fz2 = st.columns(2)
             with col_fz1:
+                saved_face_target = _cfg.get("face_target_choice", "🎯 Automático (Maior Dominância)")
+                face_target_list = [
+                    "👥 Ambos os Interlocutores (Plano Conjunto / Dual)",
+                    "👉 Personagem da Direita / Entrevistado",
+                    "👈 Personagem da Esquerda",
+                    "🔍 Personagem Mais Central",
+                    "🎯 Automático (Maior Dominância)"
+                ]
+                face_t_idx = face_target_list.index(saved_face_target) if saved_face_target in face_target_list else 4
                 target_choice = st.selectbox(
                     "👤 Personagem Alvo (Trava de Continuidade):",
-                    [
-                        "👥 Ambos os Interlocutores (Plano Conjunto / Dual)",
-                        "👉 Personagem da Direita / Entrevistado",
-                        "👈 Personagem da Esquerda",
-                        "🔍 Personagem Mais Central",
-                        "🎯 Automático (Maior Dominância)"
-                    ],
+                    face_target_list,
+                    index=face_t_idx,
+                    key="face_target_sel",
+                    on_change=lambda: save_setting("face_target_choice", st.session_state.face_target_sel),
                     help="Trava o rastreamento no interlocutor selecionado ou enquadra ambos em plano conjunto simultaneamente."
                 )
                 target_map = {
@@ -1781,17 +1828,25 @@ if st.session_state.transcription_done:
                 }
                 person_pref_val = target_map[target_choice]
 
+                saved_face_zoom = _cfg.get("face_auto_zoom", True)
                 face_zoom_active = st.toggle(
                     "🔍 Auto-Zoom Máximo no Personagem",
-                    value=True,
+                    value=saved_face_zoom,
+                    key="face_auto_zoom_tgl",
+                    on_change=lambda: save_setting("face_auto_zoom", st.session_state.face_auto_zoom_tgl),
                     help="Aproxima a câmera vertical no interlocutor principal detectado, eliminando espaços vazios com máxima nitidez."
                 )
 
             with col_fz2:
+                saved_face_margin = _cfg.get("face_margin_choice", "Equilibrada (Busto & Rosto - Recomendado)")
+                face_margins_list = ["Estreita (Close-up Máximo)", "Equilibrada (Busto & Rosto - Recomendado)", "Ampla (Plano Médio)"]
+                face_m_val = saved_face_margin if saved_face_margin in face_margins_list else face_margins_list[1]
                 margin_choice = st.select_slider(
                     "📏 Margem Lateral de Segurança:",
-                    options=["Estreita (Close-up Máximo)", "Equilibrada (Busto & Rosto - Recomendado)", "Ampla (Plano Médio)"],
-                    value="Equilibrada (Busto & Rosto - Recomendado)"
+                    options=face_margins_list,
+                    value=face_m_val,
+                    key="face_margin_sel",
+                    on_change=lambda: save_setting("face_margin_choice", st.session_state.face_margin_sel)
                 )
                 if margin_choice == "Estreita (Close-up Máximo)":
                     face_margin_val = 1.30
@@ -1825,26 +1880,36 @@ if st.session_state.transcription_done:
 
     elif selected_aspect == "9:16_blur":
         with st.expander("🌫️ Ajustes do Fundo Desfocado (Auto-Zoom e Margens)", expanded=True):
+            saved_blur_mode = _cfg.get("blur_mode_ctrl", "🤖 Auto-Zoom Inteligente no Personagem (Recomendado)")
+            blur_mode_list = ["🤖 Auto-Zoom Inteligente no Personagem (Recomendado)", "🎛️ Manual (Sliders de Zoom e Posição)"]
+            blur_m_idx = blur_mode_list.index(saved_blur_mode) if saved_blur_mode in blur_mode_list else 0
             mode_blur_ctrl = st.radio(
                 "Modo de Enquadramento:",
-                ["🤖 Auto-Zoom Inteligente no Personagem (Recomendado)", "🎛️ Manual (Sliders de Zoom e Posição)"],
+                blur_mode_list,
+                index=blur_m_idx,
                 horizontal=True,
-                key="mode_blur_ctrl_radio"
+                key="mode_blur_ctrl_radio",
+                on_change=lambda: save_setting("blur_mode_ctrl", st.session_state.mode_blur_ctrl_radio)
             )
 
             if mode_blur_ctrl == "🤖 Auto-Zoom Inteligente no Personagem (Recomendado)":
                 col_ab1, col_ab2 = st.columns(2)
                 with col_ab1:
+                    saved_blur_target = _cfg.get("blur_target_choice", "🎯 Automático (Detecta se há 1 ou 2 oradores)")
+                    blur_target_list = [
+                        "👥 Ambos os Interlocutores (Plano Conjunto / Dual)",
+                        "🎯 Automático (Detecta se há 1 ou 2 oradores)",
+                        "👉 Personagem da Direita / Entrevistado",
+                        "👈 Personagem da Esquerda",
+                        "🔍 Personagem Mais Central"
+                    ]
+                    blur_t_idx = blur_target_list.index(saved_blur_target) if saved_blur_target in blur_target_list else 1
                     blur_target_choice = st.selectbox(
                         "👤 Personagem Alvo:",
-                        [
-                            "👥 Ambos os Interlocutores (Plano Conjunto / Dual)",
-                            "🎯 Automático (Detecta se há 1 ou 2 oradores)",
-                            "👉 Personagem da Direita / Entrevistado",
-                            "👈 Personagem da Esquerda",
-                            "🔍 Personagem Mais Central"
-                        ],
-                        key="blur_target_sel"
+                        blur_target_list,
+                        index=blur_t_idx,
+                        key="blur_target_sel",
+                        on_change=lambda: save_setting("blur_target_choice", st.session_state.blur_target_sel)
                     )
                     blur_target_map = {
                         "👥 Ambos os Interlocutores (Plano Conjunto / Dual)": "both",
@@ -1857,11 +1922,15 @@ if st.session_state.transcription_done:
                     person_pref_val = blur_person_pref
 
                 with col_ab2:
+                    saved_blur_margin = _cfg.get("blur_margin_choice", "Equilibrada (Busto & Rosto)")
+                    blur_margins_list = ["Estreita (Close-up Máximo / Menor Desfoque)", "Equilibrada (Busto & Rosto)", "Ampla (Plano Médio)"]
+                    blur_m_val = saved_blur_margin if saved_blur_margin in blur_margins_list else blur_margins_list[1]
                     blur_margin_choice = st.select_slider(
                         "📏 Margem Lateral de Segurança:",
-                        options=["Estreita (Close-up Máximo / Menor Desfoque)", "Equilibrada (Busto & Rosto)", "Ampla (Plano Médio)"],
-                        value="Equilibrada (Busto & Rosto)",
-                        key="blur_margin_sel"
+                        options=blur_margins_list,
+                        value=blur_m_val,
+                        key="blur_margin_sel",
+                        on_change=lambda: save_setting("blur_margin_choice", st.session_state.blur_margin_sel)
                     )
                     if blur_margin_choice == "Estreita (Close-up Máximo / Menor Desfoque)":
                         blur_margin_val = 1.30
@@ -1898,26 +1967,35 @@ if st.session_state.transcription_done:
             else:
                 col_z1, col_z2 = st.columns(2)
                 with col_z1:
+                    saved_blur_zoom = float(_cfg.get("blur_zoom_custom", 1.35))
                     blur_zoom_val = st.slider(
                         "🔍 Nível de Aproximação (Zoom Manual):",
                         min_value=1.0,
                         max_value=2.5,
-                        value=1.35,
+                        value=saved_blur_zoom,
                         step=0.05,
                         format="%.2fx",
+                        key="blur_zoom_slider",
+                        on_change=lambda: save_setting("blur_zoom_custom", st.session_state.blur_zoom_slider),
                         help="Aumente para o vídeo preencher mais a tela e diminuir as faixas superior/inferior de desfoque."
                     )
                 with col_z2:
+                    saved_pan_preset = _cfg.get("blur_pan_preset", "Centro (0%)")
+                    pan_presets_list = [
+                        "Centro (0%)",
+                        "Personagem à Esquerda (-60%)",
+                        "Personagem à Direita (+60%)",
+                        "Extrema Esquerda (-100%)",
+                        "Extrema Direita (+100%)",
+                        "Ajuste Fino Personalizado"
+                    ]
+                    pan_p_idx = pan_presets_list.index(saved_pan_preset) if saved_pan_preset in pan_presets_list else 0
                     pan_preset = st.selectbox(
                         "↔️ Posição / Foco Horizontal:",
-                        [
-                            "Centro (0%)",
-                            "Personagem à Esquerda (-60%)",
-                            "Personagem à Direita (+60%)",
-                            "Extrema Esquerda (-100%)",
-                            "Extrema Direita (+100%)",
-                            "Ajuste Fino Personalizado"
-                        ]
+                        pan_presets_list,
+                        index=pan_p_idx,
+                        key="blur_pan_preset_sel",
+                        on_change=lambda: save_setting("blur_pan_preset", st.session_state.blur_pan_preset_sel)
                     )
                     if pan_preset == "Personagem à Esquerda (-60%)":
                         blur_pan_val = -0.6
@@ -1928,7 +2006,12 @@ if st.session_state.transcription_done:
                     elif pan_preset == "Extrema Direita (+100%)":
                         blur_pan_val = 1.0
                     elif pan_preset == "Ajuste Fino Personalizado":
-                        blur_pan_val = st.slider("Deslocamento Horizontal:", -1.0, 1.0, 0.0, 0.05)
+                        saved_pan_custom = float(_cfg.get("blur_pan_custom", 0.0))
+                        blur_pan_val = st.slider(
+                            "Deslocamento Horizontal:", -1.0, 1.0, saved_pan_custom, 0.05,
+                            key="blur_pan_custom_slider",
+                            on_change=lambda: save_setting("blur_pan_custom", st.session_state.blur_pan_custom_slider)
+                        )
                     else:
                         blur_pan_val = 0.0
 

@@ -19,13 +19,15 @@ DEFAULT_SETTINGS = {
     # Enquadramento selecionado (índice da lista)
     "aspect_option": "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)",
 
-    # Rastreamento Facial Inteligente (Smart Face)
+    # Rastreamento Facial Inteligente (Smart Face 9:16)
+    "face_target_choice": "🎯 Automático (Maior Dominância)",
     "face_auto_zoom": True,
+    "face_margin_choice": "Equilibrada (Busto & Rosto - Recomendado)",
     "face_margin_ratio": 1.55,
     "person_preference": "auto",
 
     # Split Screen 9:16
-    "split_preset": "Entrevistador(es) no Topo / Entrevistado na Base",
+    "split_preset": "👈 Entrevistador(es) no Topo | 👉 Entrevistado na Base (Padrão Podpah/Flow)",
     "split_top_pan": -0.65,
     "split_bottom_pan": 0.65,
     "split_zoom": 1.15,
@@ -33,11 +35,14 @@ DEFAULT_SETTINGS = {
     "split_divider_width": 4,
     "split_auto_switch": True,
 
-    # Fundo Desfocado (Blur)
+    # Fundo Desfocado (Blur 9:16)
+    "blur_mode_ctrl": "🤖 Auto-Zoom Inteligente no Personagem (Recomendado)",
+    "blur_target_choice": "🎯 Automático (Detecta se há 1 ou 2 oradores)",
+    "blur_margin_choice": "Equilibrada (Busto & Rosto)",
     "blur_preset": "Zoom Suave (1.35x) - Padrão",
     "blur_zoom_custom": 1.35,
     "blur_intensity": 25,
-    "blur_pan_preset": "Centralizado (0.0)",
+    "blur_pan_preset": "Centro (0%)",
     "blur_pan_custom": 0.0,
 
     # Legendas Dinâmicas (Fase 2)
