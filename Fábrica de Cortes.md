@@ -170,9 +170,15 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Sincronização Contínua**: Permite ao usuário clicar em *"🔄 Sincronizar com o Momento Atual da Live"* para capturar novos minutos conforme a live progride.
 - **🎨 Motor de Sobreposição de Banners, Tarjas (GC) e Logos / Overlays (`core/overlay_manager.py`)**:
   - **Modos de Escala Adaptativa**: *Esticar para Preencher (`fill`)*, *Ajustar Proporcionalmente (`fit`)* e *Ampliar e Cortar (`cover`)*.
-  - **Posicionamento e Dimensão Milimétricos**: Largura %, Altura em Pixels (para cobertura exata de GCs de TV), alinhamentos Verticais (*Rodapé*, *Topo*, *Centro*) e Horizontais com controle de offset e opacidade.
-  - **Logo / Selo Embutido Secundário**: Suporte a embutir imagem secundária (logo do canal, selo "AO VIVO", foto) posicionada internamente no banner com controle de escala e margem.
+  - **Posicionamento e Dimensão Milimétricos**: Largura %, Altura em Pixels (para cobertura exata de GCs e tarjas de TV), alinhamentos Verticais (*Rodapé*, *Topo*, *Centro*) e Horizontais com controle de offset e opacidade.
+  - **Logo / Selo Embutido Secundário**: Suporte a embutir imagem secundária (logo do canal, selo "AO VIVO", foto) posicionada internamente na faixa do banner com controle de escala e margem.
   - **Prévia em Frame em Tempo Real & GPU NVENC**: Visualização instantânea no frame antes da renderização e renderização acelerada por hardware via FFmpeg.
+- **💾 Persistência Automática de Enquadramentos e Ajustes de Formatação (`core/config_manager.py`, `app.py`)**:
+  - **Memória de Formato Ativo**: Salva o último enquadramento escolhido (`16:9`, `9:16 Smart Face`, `9:16 Blur`, `9:16 Split Screen`, `9:16 Crop`) mantendo-o selecionado entre sessões.
+  - **Configurações Individuais por Layout**: Cada modo de enquadramento memoriza seus próprios parâmetros (sliders de zoom, foco horizontal/pan, transição dinâmica auto-switch, personagem alvo, margens de segurança, cores e espessuras de divisória), restaurando-os instantaneamente ao alternar.
+- **📂 Acesso Direto às Pastas Locais dos Cortes (`app.py`)**:
+  - Botão *"📂 Abrir Pasta"* em todos os cards da **Galeria (Seção 4)** e na **Geração Individual (Seção 3)**, abrindo o Explorador de Arquivos do Windows diretamente na pasta do corte.
+  - Links locais clicáveis `file:///` e caminhos absolutos exibidos para fácil navegação e cópia sem download pelo navegador.
 - **🧪 Suíte de 52 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando toda a suíte do `core/` via `pytest`.
 
