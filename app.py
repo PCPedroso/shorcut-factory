@@ -1872,7 +1872,12 @@ if st.session_state.transcription_done:
                                 margin_ratio=face_margin_val
                             )
                             if p_res.get("path") and os.path.exists(p_res["path"]):
-                                st.image(p_res["path"], caption=f"Prévia em {start_time} (Alvo em Verde, Moldura 9:16 em Ciano)", use_container_width=True)
+                                if p_res.get("dual_shot"):
+                                    if p_res.get("broadcast_split"):
+                                        st.success("🎙️ **Debate TV / Split-Screen Detectado!** Enquadramento Dual Shot aplicado — ambos os interlocutores na moldura. Linha divisória de broadcast identificada por análise estrutural.")
+                                    else:
+                                        st.success("👥 **Dual Shot Detectado!** Bounding box composta englobando ambos os interlocutores.")
+                                st.image(p_res["path"], caption=f"Prévia em {start_time} — Azul: DUAL SHOT | Amarelo: Moldura 9:16 | Verde: Alvo | Laranja: Interlocutor", use_container_width=True)
                             else:
                                 st.error(f"Erro na prévia: {p_res.get('error')}")
                         else:
@@ -1949,7 +1954,10 @@ if st.session_state.transcription_done:
                     blur_pan_val = auto_p["pan"]
 
                     if auto_p.get("dual_shot"):
-                        st.info("👥 **Plano Conjunto / Dual Detectado!** Enquadramento 16:9 completo centralizado (Zoom 1.00x) para exibir ambos os interlocutores perfeitamente sem cortes laterais.")
+                        if auto_p.get("broadcast_split"):
+                            st.success(f"🎙️ **Debate TV / Split-Screen Detectado!** Zoom: **{blur_zoom_val:.2f}x** | Pan: **{blur_pan_val:+.2f}** — Enquadramento calibrado para exibir ambos os candidatos. Linha divisória de broadcast identificada.")
+                        else:
+                            st.info("👥 **Plano Conjunto / Dual Detectado!** Enquadramento calibrado para exibir ambos os interlocutores.")
                     else:
                         st.caption(f"✨ Auto-Zoom Calculado: **{blur_zoom_val:.2f}x** | Foco Horizontal: **{blur_pan_val:+.2f}**")
 
@@ -1957,7 +1965,8 @@ if st.session_state.transcription_done:
                         prev_b_path = os.path.join("data", video_id, "preview_blur.jpg")
                         p_res = generate_blur_preview_image(v_full, start_time, prev_b_path, blur_zoom_val, blur_pan_val, blur_int_val)
                         if p_res.get("path") and os.path.exists(p_res["path"]):
-                            st.image(p_res["path"], caption=f"Prévia 9:16 com Fundo Desfocado em {start_time} (Zoom: {blur_zoom_val:.2f}x)", use_container_width=True)
+                            dual_caption = " [DUAL SHOT]" if auto_p.get("dual_shot") else ""
+                            st.image(p_res["path"], caption=f"Prévia 9:16 Fundo Desfocado em {start_time}{dual_caption} (Zoom: {blur_zoom_val:.2f}x)", use_container_width=True)
                         else:
                             st.error(f"Erro na prévia: {p_res.get('error')}")
                 else:

@@ -8,6 +8,7 @@ import cv2
 import urllib.request
 import subprocess
 import imageio_ffmpeg
+import numpy as np
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
@@ -56,6 +57,37 @@ def filter_prominent_faces(detections, frame_width: int, frame_height: int, min_
     return prominent if prominent else candidates
 
 
+def detect_tv_broadcast_split_screen(frame, frame_width: int, frame_height: int) -> bool:
+    """
+    Detecta se o frame possui layout de split-screen de transmissão de TV (debate/sabatina).
+    Analisa a faixa central do frame procurando por uma linha divisória vertical contínua
+    usando detecção de bordas Canny.
+
+    Estratégia: faixa 25%–75% da largura → Canny → densidade de borda por coluna.
+    Se alguma coluna tiver >28% dos pixels como borda, indica divisória de TV.
+
+    Retorna True se um split-screen de broadcast for detectado.
+    """
+    try:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        # Faixa central onde a divisória de split-screen de TV aparece (25%–75% da largura)
+        x_start = int(frame_width * 0.25)
+        x_end = int(frame_width * 0.75)
+        center_band = gray[:, x_start:x_end]
+
+        # Canny para bordas nítidas
+        edges = cv2.Canny(center_band, 30, 90)
+
+        # Densidade de borda por coluna (proporção de pixels que são borda)
+        col_densities = np.mean(edges > 0, axis=0)
+
+        # Uma linha divisória de TV gera coluna com >28% dos pixels como borda
+        return float(np.max(col_densities)) > 0.28
+    except Exception:
+        return False
+
+
 def is_dual_interlocutor_shot(detections, frame_width: int, frame_height: int) -> bool:
     """
     Detecta se o enquadramento atual possui 2 interlocutores (plano conjunto ou split-screen de debate/sabatina).
@@ -85,6 +117,57 @@ def is_dual_interlocutor_shot(detections, frame_width: int, frame_height: int) -
     cy_diff = abs(f1[1] - f2[1]) / float(frame_height)
 
     return cx_dist >= 0.18 and cy_diff <= 0.28
+
+
+def detect_dual_with_fallback(frame, detections, frame_width: int, frame_height: int) -> tuple:
+    """
+    Detecção robusta de Dual Shot combinando análise facial (BlazeFace) e
+    análise estrutural do frame (split-screen de broadcast).
+
+    Camada 1 — Análise Facial:
+      Verifica se há ≥2 rostos proeminentes com separação horizontal adequada.
+      Thresholds adaptativos: mais permissivos em contexto de broadcast.
+
+    Camada 2 — Fallback Estrutural:
+      Se split-screen de broadcast for detectado mas apenas 1 rosto visível
+      (ex: 2º candidato com cabeça inclinada para baixo), ainda confirma Dual Shot.
+
+    Retorna:
+        (is_dual: bool, is_broadcast_split: bool)
+    """
+    is_broadcast = detect_tv_broadcast_split_screen(frame, frame_width, frame_height)
+
+    # Thresholds adaptativos: broadcast permite rostos parcialmente de perfil
+    min_rel_area = 0.15 if is_broadcast else 0.28
+    min_horiz_sep = 0.12 if is_broadcast else 0.18
+
+    prominent = filter_prominent_faces(detections, frame_width, frame_height,
+                                       min_relative_area=min_rel_area)
+
+    # Critério 1: 2+ rostos proeminentes com separação horizontal e alinhamento vertical ok
+    if len(prominent) >= 2:
+        sorted_faces = sorted(
+            prominent,
+            key=lambda d: d.bounding_box.origin_x + d.bounding_box.width / 2.0
+        )
+        f1, f2 = sorted_faces[0], sorted_faces[-1]
+        cx1 = f1.bounding_box.origin_x + f1.bounding_box.width / 2.0
+        cx2 = f2.bounding_box.origin_x + f2.bounding_box.width / 2.0
+        cy1 = f1.bounding_box.origin_y + f1.bounding_box.height / 2.0
+        cy2 = f2.bounding_box.origin_y + f2.bounding_box.height / 2.0
+
+        cx_dist = abs(cx1 - cx2) / float(frame_width)
+        cy_diff = abs(cy1 - cy2) / float(frame_height)
+
+        if cx_dist >= min_horiz_sep and cy_diff <= 0.35:
+            return True, is_broadcast
+
+    # Critério 2 — Fallback Estrutural: split-screen confirmado + pelo menos 1 rosto detectado
+    # (o 2º personagem pode estar com a cabeça inclinada, fora do campo frontal do BlazeFace)
+    if is_broadcast and len(detections) >= 1:
+        return True, True
+
+    return False, is_broadcast
 
 
 class CompositeBoundingBox:
@@ -214,32 +297,93 @@ def generate_face_preview_image(
         detector.close()
 
         detections = results.detections if results.detections else []
+
+        # ── Detecção de Dual Shot (Debate TV / Split-Screen) ──────────────────────────
+        is_dual, is_broadcast = detect_dual_with_fallback(frame, detections, width, height)
+        use_dual_preview = is_dual and person_preference in ("auto", "both")
+
         target_face, _ = select_target_face(detections, width, height, None, person_preference)
 
         preview_img = frame.copy()
 
-        prominent_dets = filter_prominent_faces(detections, width, height, min_relative_area=0.28)
+        prominent_dets = filter_prominent_faces(
+            detections, width, height,
+            min_relative_area=0.15 if is_broadcast else 0.28
+        )
 
-        # Desenha as caixas dos rostos
+        # Desenha as caixas dos rostos detectados
         for d in detections:
-            is_target = (d == target_face)
+            is_target = (d == target_face) and not use_dual_preview
             is_prominent = (d in prominent_dets)
             bx = d.bounding_box
             if is_target:
-                color = (0, 255, 0)  # Verde
+                color = (0, 255, 0)    # Verde
                 label = "ALVO PRINCIPAL"
             elif is_prominent:
-                color = (220, 120, 50)  # Laranja
+                color = (0, 165, 255)  # Laranja
                 label = "INTERLOCUTOR"
             else:
                 color = (120, 120, 120)  # Cinza
                 label = "SECUNDARIO / LIBRAS"
 
-            cv2.rectangle(preview_img, (bx.origin_x, bx.origin_y), (bx.origin_x + bx.width, bx.origin_y + bx.height), color, 3 if is_target else 2)
-            cv2.putText(preview_img, label, (bx.origin_x, max(24, bx.origin_y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+            cv2.rectangle(preview_img, (bx.origin_x, bx.origin_y),
+                          (bx.origin_x + bx.width, bx.origin_y + bx.height),
+                          color, 3 if is_target else 2)
+            cv2.putText(preview_img, label,
+                        (bx.origin_x, max(24, bx.origin_y - 8)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-        # Desenha a janela do enquadramento vertical 9:16
-        if target_face is not None:
+        # ── Calcula e desenha o enquadramento 9:16 ─────────────────────────────────────
+        if use_dual_preview:
+            # Modo Dual Shot: bounding box composta entre os dois interlocutores
+            if len(prominent_dets) >= 2:
+                sorted_p = sorted(prominent_dets[:2], key=lambda d: d.bounding_box.origin_x)
+                d_min_bb = sorted_p[0].bounding_box
+                d_max_bb = sorted_p[-1].bounding_box
+                comp_min_x = d_min_bb.origin_x
+                comp_max_x = d_max_bb.origin_x + d_max_bb.width
+                comp_min_y = min(d_min_bb.origin_y, d_max_bb.origin_y)
+                comp_max_y = max(d_min_bb.origin_y + d_min_bb.height,
+                                 d_max_bb.origin_y + d_max_bb.height)
+            elif is_broadcast and len(prominent_dets) == 1:
+                # 1 rosto detectado + split-screen confirmado: estende para metade oposta
+                bx_s = prominent_dets[0].bounding_box
+                face_cx_s = bx_s.origin_x + bx_s.width / 2.0
+                if face_cx_s < width * 0.5:
+                    comp_min_x = max(0, int(bx_s.origin_x - bx_s.width * 0.4))
+                    comp_max_x = int(width * 0.90)
+                else:
+                    comp_min_x = int(width * 0.05)
+                    comp_max_x = min(width, int(bx_s.origin_x + bx_s.width + bx_s.width * 0.4))
+                comp_min_y = max(0, bx_s.origin_y - int(bx_s.height * 0.3))
+                comp_max_y = min(height, bx_s.origin_y + bx_s.height + int(bx_s.height * 0.3))
+            else:
+                use_dual_preview = False
+
+        if use_dual_preview:
+            # Bounding Box Composta em azul — envelope dos dois interlocutores
+            cv2.rectangle(preview_img,
+                          (comp_min_x, comp_min_y), (comp_max_x, comp_max_y),
+                          (255, 80, 0), 3)  # Azul BGR
+            dual_label = "DUAL SHOT [BROADCAST TV]" if is_broadcast else "DUAL SHOT"
+            cv2.putText(preview_img, dual_label,
+                        (comp_min_x + 10, comp_min_y + 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 80, 0), 2)
+
+            # Enquadramento 9:16 centrado entre os dois interlocutores (zoom=1.0)
+            comp_face_cx = (comp_min_x + comp_max_x) / 2.0
+            target_w_d = base_crop_w
+            target_x_d = comp_face_cx - (base_crop_w / 2.0)
+            x1 = max(0, min(width - target_w_d, int(target_x_d)))
+            y1 = 0
+            x2 = x1 + target_w_d
+            y2 = height
+            cv2.rectangle(preview_img, (x1, y1), (x2, y2), (255, 255, 0), 4)
+            cv2.putText(preview_img, "ENQUADRAMENTO 9:16 DUAL",
+                        (x1 + 10, y1 + 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+
+        elif target_face is not None:
+            # Modo individual: enquadramento 9:16 no rosto alvo
             bx = target_face.bounding_box
             face_cx = bx.origin_x + bx.width / 2.0
             face_cy = bx.origin_y + bx.height * 0.45
@@ -249,7 +393,6 @@ def generate_face_preview_image(
                 target_w = int(body_width * margin_ratio)
                 target_w = max(min_crop_w, min(base_crop_w, target_w))
                 target_h = int(target_w * 16.0 / 9.0)
-
                 target_x = face_cx - (target_w / 2.0)
                 target_y = face_cy - (target_h * 0.35)
             else:
@@ -262,13 +405,18 @@ def generate_face_preview_image(
             y1 = max(0, min(height - target_h, int(target_y)))
             x2 = x1 + target_w
             y2 = y1 + target_h
-
-            # Desenha moldura de corte 9:16 em ciano
             cv2.rectangle(preview_img, (x1, y1), (x2, y2), (255, 255, 0), 4)
-            cv2.putText(preview_img, "ENQUADRAMENTO 9:16", (x1 + 10, y1 + 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+            cv2.putText(preview_img, "ENQUADRAMENTO 9:16",
+                        (x1 + 10, y1 + 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
 
         cv2.imwrite(output_preview_path, preview_img)
-        return {"path": output_preview_path, "detected_count": len(detections), "error": None}
+        return {
+            "path": output_preview_path,
+            "detected_count": len(detections),
+            "dual_shot": use_dual_preview,
+            "broadcast_split": is_broadcast,
+            "error": None
+        }
 
     except Exception as exc:
         return {"path": None, "error": str(exc)}
@@ -310,10 +458,13 @@ def calculate_auto_blur_params(
         detector.close()
 
         detections = results.detections if results.detections else []
-        prominent = filter_prominent_faces(detections, width, height, min_relative_area=0.28)
 
-        # Caso 1: Preferência explícita por 'both' (Ambos os Interlocutores) ou 'auto' com plano conjunto detectado
-        is_dual = is_dual_interlocutor_shot(detections, width, height)
+        # Detecção de Dual Shot com análise estrutural de broadcast (Canny + facial)
+        is_dual, is_broadcast = detect_dual_with_fallback(frame, detections, width, height)
+        prominent = filter_prominent_faces(detections, width, height,
+                                          min_relative_area=0.15 if is_broadcast else 0.28)
+
+        # Caso 1: Preferência explícita por 'both' ou 'auto' com Dual Shot detectado
         if person_preference == "both" or (person_preference == "auto" and is_dual):
             if len(prominent) >= 2:
                 # Ordena os 2 oradores principais da esquerda para a direita
@@ -322,27 +473,54 @@ def calculate_auto_blur_params(
 
                 cx_left = d_left.bounding_box.origin_x + d_left.bounding_box.width / 2.0
                 cx_right = d_right.bounding_box.origin_x + d_right.bounding_box.width / 2.0
-                span_x = cx_right - cx_left
                 face_avg_w = (d_left.bounding_box.width + d_right.bounding_box.width) / 2.0
 
-                # Margens equilibradas cobrindo as duas molduras do split-screen com precisão
-                margin_left = max(face_avg_w * 1.35, span_x * 0.75) * (margin_ratio / 1.55)
-                margin_right = max(face_avg_w * 1.75, span_x * 0.95) * (margin_ratio / 1.55)
-
-                box_left = max(0.0, cx_left - margin_left)
-                box_right = min(float(width), cx_right + margin_right)
+                # Para split-screen de debate / TV (ex: Band), a área útil dos oradores
+                # vai da borda esquerda do primeiro quadro até a borda direita do segundo quadro.
+                # Exclui a área vazia/Libras da direita e centraliza os dois candidatos preenchendo a largura 9:16.
+                box_left = max(0.0, cx_left - face_avg_w * 1.35)
+                box_right = min(float(width), cx_right + face_avg_w * 1.55)
                 crop_box_w = max(1080.0, min(float(width), box_right - box_left))
-                crop_center_x = (box_left + box_right) / 2.0
 
                 calc_zoom = min(1.85, max(1.0, float(width) / crop_box_w))
-                calc_pan = max(-1.0, min(1.0, (crop_center_x - (width / 2.0)) / (width / 2.0)))
+                w_fg = int(1080 * calc_zoom)
+                max_crop_x = max(1, w_fg - 1080)
+                x_scaled_left = box_left * (w_fg / float(width))
+                calc_pan = max(-1.0, min(1.0, 2.0 * (x_scaled_left / max_crop_x) - 1.0))
 
                 return {
                     "zoom": round(calc_zoom, 2),
                     "pan": round(calc_pan, 2),
                     "face_detected": True,
                     "dual_shot": True,
+                    "broadcast_split": is_broadcast,
                     "notes": "Enquadramento ajustado para englobar ambos os interlocutores com recorte das bordas irrelevantes."
+                }
+            elif is_broadcast and len(prominent) == 1:
+                # Fallback Broadcast: split-screen confirmado mas 2º rosto não detectado
+                # (candidato com cabeça inclinada para baixo). Estende para a metade adjacente.
+                bx_s = prominent[0].bounding_box
+                face_cx_s = bx_s.origin_x + bx_s.width / 2.0
+                face_w_s = bx_s.width
+                if face_cx_s < width * 0.5:
+                    box_left = max(0.0, face_cx_s - face_w_s * 1.35)
+                    box_right = min(float(width), max(width * 0.74, face_cx_s + face_w_s * 1.35 + (width * 0.45)))
+                else:
+                    box_left = max(0.0, min(width * 0.04, face_cx_s - face_w_s * 1.35 - (width * 0.45)))
+                    box_right = min(float(width), face_cx_s + face_w_s * 1.55)
+                crop_box_w = max(1080.0, min(float(width), box_right - box_left))
+                calc_zoom = min(1.85, max(1.0, float(width) / crop_box_w))
+                w_fg = int(1080 * calc_zoom)
+                max_crop_x = max(1, w_fg - 1080)
+                x_scaled_left = box_left * (w_fg / float(width))
+                calc_pan = max(-1.0, min(1.0, 2.0 * (x_scaled_left / max_crop_x) - 1.0))
+                return {
+                    "zoom": round(calc_zoom, 2),
+                    "pan": round(calc_pan, 2),
+                    "face_detected": True,
+                    "dual_shot": True,
+                    "broadcast_split": True,
+                    "notes": "Split-screen de broadcast detectado (1 rosto visível). Enquadramento ajustado para cobrir ambos os interlocutores."
                 }
             elif len(prominent) == 1:
                 target_face = prominent[0]
@@ -534,6 +712,7 @@ def crop_video_with_smart_face_tracking(
         smoothed_y = current_y
         smoothed_w = current_w
         last_tracked_center = None
+        recent_dual_counts = []   # Histerese para estabilizar transições dual/individual
         frame_idx = 0
 
         while frame_idx < total_cut_frames:
@@ -548,23 +727,80 @@ def crop_video_with_smart_face_tracking(
                 results = detector.detect(mp_img)
                 detections = results.detections if results.detections else []
 
-                # Seleciona com Trava de Continuidade Espacial (Target Lock)
-                target_face, last_tracked_center = select_target_face(
-                    detections, width, height, last_tracked_center, person_preference
-                )
+                # ── Detecção de Dual Shot (Debate TV / Split-Screen) ────────────────
+                is_broadcast = False
+                use_dual_mode = False
+
+                if person_preference in ("auto", "both"):
+                    is_dual, is_broadcast = detect_dual_with_fallback(frame, detections, width, height)
+                    # 'both' força o modo dual; 'auto' usa histerese para transições suaves
+                    effective_dual = is_dual or (person_preference == "both")
+                    recent_dual_counts.append(1 if effective_dual else 0)
+                    if len(recent_dual_counts) > 6:
+                        recent_dual_counts.pop(0)
+                    avg_dual = sum(recent_dual_counts) / max(1, len(recent_dual_counts))
+                    use_dual_mode = avg_dual >= 0.5
+
+                if use_dual_mode:
+                    # ── Bounding Box Composta: engloba AMBOS os interlocutores ────
+                    prominent = filter_prominent_faces(
+                        detections, width, height,
+                        min_relative_area=0.15 if is_broadcast else 0.28
+                    )
+                    if len(prominent) >= 2:
+                        min_bx = min(d.bounding_box.origin_x for d in prominent[:2])
+                        max_bx = max(d.bounding_box.origin_x + d.bounding_box.width for d in prominent[:2])
+                        min_by = min(d.bounding_box.origin_y for d in prominent[:2])
+                        max_by = max(d.bounding_box.origin_y + d.bounding_box.height for d in prominent[:2])
+                    elif is_broadcast and len(prominent) == 1:
+                        # Split-screen confirmado mas 2º rosto não detectado (cabeça inclinada):
+                        # estende o bbox para cobrir a metade oposta da tela automaticamente
+                        bx_s = prominent[0].bounding_box
+                        face_cx_s = bx_s.origin_x + bx_s.width / 2.0
+                        if face_cx_s < width * 0.5:
+                            min_bx = max(0, int(bx_s.origin_x - bx_s.width * 0.4))
+                            max_bx = int(width * 0.90)
+                        else:
+                            min_bx = int(width * 0.05)
+                            max_bx = min(width, int(bx_s.origin_x + bx_s.width + bx_s.width * 0.4))
+                        min_by = max(0, bx_s.origin_y - int(bx_s.height * 0.3))
+                        max_by = min(height, bx_s.origin_y + bx_s.height + int(bx_s.height * 0.3))
+                    else:
+                        use_dual_mode = False  # Fallback: rosto único
+
+                    if use_dual_mode:
+                        comp_bbox = CompositeBoundingBox(
+                            min_bx, min_by,
+                            max(1, max_bx - min_bx),
+                            max(1, max_by - min_by)
+                        )
+                        target_face = CompositeFaceDetection(comp_bbox)
+                        last_tracked_center = (min_bx + (max_bx - min_bx) / 2.0,
+                                               min_by + (max_by - min_by) / 2.0)
+
+                if not use_dual_mode:
+                    # Seleciona com Trava de Continuidade Espacial (Target Lock)
+                    target_face, last_tracked_center = select_target_face(
+                        detections, width, height, last_tracked_center, person_preference
+                    )
 
                 if target_face is not None:
                     bx = target_face.bounding_box
                     face_cx = bx.origin_x + bx.width / 2.0
                     face_cy = bx.origin_y + bx.height * 0.45
 
-                    if auto_zoom:
-                        # Estima a largura dos ombros/busto com a margem configurável
+                    if use_dual_mode:
+                        # Dual Shot: zoom=1.0, centraliza entre os dois interlocutores
+                        target_w = base_crop_w
+                        target_h = height
+                        target_x = face_cx - (base_crop_w / 2.0)
+                        target_y = 0.0
+                    elif auto_zoom:
+                        # Modo individual: zoom automático com a margem configurável
                         body_width = bx.width * 2.0
                         target_w = int(body_width * margin_ratio)
                         target_w = max(min_crop_w, min(base_crop_w, target_w))
                         target_h = int(target_w * 16.0 / 9.0)
-
                         target_x = face_cx - (target_w / 2.0)
                         target_y = face_cy - (target_h * 0.35)
                     else:
