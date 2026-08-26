@@ -57,35 +57,42 @@ def filter_prominent_faces(detections, frame_width: int, frame_height: int, min_
     return prominent if prominent else candidates
 
 
-def detect_tv_broadcast_split_screen(frame, frame_width: int, frame_height: int) -> bool:
+def get_tv_broadcast_split_bounds(frame, frame_width: int, frame_height: int):
     """
-    Detecta se o frame possui layout de split-screen de transmissão de TV (debate/sabatina).
-    Analisa a faixa central do frame procurando por uma linha divisória vertical contínua
-    usando detecção de bordas Canny.
-
-    Estratégia: faixa 25%–75% da largura → Canny → densidade de borda por coluna.
-    Se alguma coluna tiver >28% dos pixels como borda, indica divisória de TV.
-
-    Retorna True se um split-screen de broadcast for detectado.
+    Detecta as bordas exatas (colunas esquerda e direita) do quadro de split-screen de TV.
+    Retorna uma tupla (box_left, box_right) em pixels ou None se não for detectado.
     """
     try:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        # Faixa central onde a divisória de split-screen de TV aparece (25%–75% da largura)
-        x_start = int(frame_width * 0.25)
-        x_end = int(frame_width * 0.75)
-        center_band = gray[:, x_start:x_end]
-
-        # Canny para bordas nítidas
-        edges = cv2.Canny(center_band, 30, 90)
-
-        # Densidade de borda por coluna (proporção de pixels que são borda)
+        edges = cv2.Canny(gray, 40, 120)
         col_densities = np.mean(edges > 0, axis=0)
 
-        # Uma linha divisória de TV gera coluna com >28% dos pixels como borda
-        return float(np.max(col_densities)) > 0.28
+        # Divisória central (entre 30% e 70% da largura)
+        center_band = col_densities[int(frame_width * 0.30):int(frame_width * 0.70)]
+        if np.max(center_band) < 0.20:
+            return None
+
+        # Borda esquerda da moldura (entre 2% e 25% da largura)
+        left_region = col_densities[int(frame_width * 0.02):int(frame_width * 0.25)]
+        left_peaks = np.where(left_region > 0.15)[0]
+        box_left = int(frame_width * 0.02) + int(left_peaks[0]) if len(left_peaks) > 0 else 0
+
+        # Borda direita da moldura (entre 65% e 90% da largura, excluindo a área de Libras)
+        right_region = col_densities[int(frame_width * 0.65):int(frame_width * 0.90)]
+        right_peaks = np.where(right_region > 0.15)[0]
+        box_right = int(frame_width * 0.65) + int(right_peaks[-1]) if len(right_peaks) > 0 else frame_width
+
+        return box_left, box_right
     except Exception:
-        return False
+        return None
+
+
+def detect_tv_broadcast_split_screen(frame, frame_width: int, frame_height: int) -> bool:
+    """
+    Detecta se o frame possui layout de split-screen de transmissão de TV (debate/sabatina).
+    """
+    bounds = get_tv_broadcast_split_bounds(frame, frame_width, frame_height)
+    return bounds is not None
 
 
 def is_dual_interlocutor_shot(detections, frame_width: int, frame_height: int) -> bool:
@@ -466,7 +473,28 @@ def calculate_auto_blur_params(
 
         # Caso 1: Preferência explícita por 'both' ou 'auto' com Dual Shot detectado
         if person_preference == "both" or (person_preference == "auto" and is_dual):
-            if len(prominent) >= 2:
+            # Tenta obter as bordas exatas da moldura de TV via detecção de bordas
+            bounds = get_tv_broadcast_split_bounds(frame, width, height) if is_broadcast else None
+
+            if bounds is not None:
+                box_left, box_right = bounds
+                crop_box_w = max(1080.0, min(float(width), float(box_right - box_left)))
+                calc_zoom = min(1.85, max(1.0, float(width) / crop_box_w))
+                w_fg = int(1080 * calc_zoom)
+                max_crop_x = max(1, w_fg - 1080)
+                x_scaled_left = float(box_left) * (w_fg / float(width))
+                calc_pan = max(-1.0, min(1.0, 2.0 * (x_scaled_left / max_crop_x) - 1.0))
+
+                return {
+                    "zoom": round(calc_zoom, 2),
+                    "pan": round(calc_pan, 2),
+                    "face_detected": True,
+                    "dual_shot": True,
+                    "broadcast_split": True,
+                    "notes": "Enquadramento automático pixel-perfect baseado nas bordas estruturais do debate de TV."
+                }
+
+            elif len(prominent) >= 2:
                 # Ordena os 2 oradores principais da esquerda para a direita
                 sorted_dual = sorted(prominent[:2], key=lambda d: d.bounding_box.origin_x)
                 d_left, d_right = sorted_dual[0], sorted_dual[1]
@@ -475,9 +503,6 @@ def calculate_auto_blur_params(
                 cx_right = d_right.bounding_box.origin_x + d_right.bounding_box.width / 2.0
                 face_avg_w = (d_left.bounding_box.width + d_right.bounding_box.width) / 2.0
 
-                # Para split-screen de debate / TV (ex: Band), a área útil dos oradores
-                # vai da borda esquerda do primeiro quadro até a borda direita do segundo quadro.
-                # Exclui a área vazia/Libras da direita e centraliza os dois candidatos preenchendo a largura 9:16.
                 box_left = max(0.0, cx_left - face_avg_w * 1.35)
                 box_right = min(float(width), cx_right + face_avg_w * 1.55)
                 crop_box_w = max(1080.0, min(float(width), box_right - box_left))
@@ -498,7 +523,6 @@ def calculate_auto_blur_params(
                 }
             elif is_broadcast and len(prominent) == 1:
                 # Fallback Broadcast: split-screen confirmado mas 2º rosto não detectado
-                # (candidato com cabeça inclinada para baixo). Estende para a metade adjacente.
                 bx_s = prominent[0].bounding_box
                 face_cx_s = bx_s.origin_x + bx_s.width / 2.0
                 face_w_s = bx_s.width
