@@ -114,6 +114,22 @@ def safe_display_video(video_path: str):
         return
     st.video(video_path)
 
+def open_in_file_explorer(target_path: str) -> bool:
+    """
+    Abre a pasta diretamente no Explorador de Arquivos do Windows (ou seleciona o arquivo).
+    """
+    if not target_path or not os.path.exists(target_path):
+        return False
+    try:
+        norm_p = os.path.normpath(target_path)
+        if os.path.isfile(norm_p):
+            subprocess.Popen(f'explorer /select,"{norm_p}"', shell=True)
+        else:
+            os.startfile(norm_p)
+        return True
+    except Exception:
+        return False
+
 def render_quick_editor_component(video_path: str, unique_key: str):
     """
     Componente interativo de edição rápida / ajuste fino para cortar pequenos trechos do vídeo.
@@ -2472,11 +2488,11 @@ if st.session_state.transcription_done:
                                     use_container_width=True
                                 )
 
-        col_dl1, col_dl2 = st.columns([2, 1.2] if has_cached_thumb else [1, 0.001])
+        col_dl1, col_dl_fol, col_dl2 = st.columns([1.5, 1.2, 1.2] if has_cached_thumb else [1.5, 1.2, 0.001])
         with col_dl1:
             with open(existing_inst["video_path"], "rb") as vf_cached:
                 st.download_button(
-                    label=f"💾 Baixar Vídeo Pronto do Cache ({existing_inst['video_filename']})",
+                    label=f"💾 Baixar Vídeo ({existing_inst['video_filename']})",
                     data=vf_cached,
                     file_name=existing_inst["video_filename"],
                     mime="video/mp4",
@@ -2484,11 +2500,14 @@ if st.session_state.transcription_done:
                     use_container_width=True,
                     key="btn_dl_cached_instance"
                 )
+        with col_dl_fol:
+            if st.button("📂 Abrir Pasta", key="btn_open_fol_cached", use_container_width=True, help="Abre a pasta deste corte no Explorador de Arquivos do Windows"):
+                open_in_file_explorer(existing_inst.get("folder_path") or existing_inst.get("video_path"))
         if has_cached_thumb:
             with col_dl2:
                 with open(cached_thumb, "rb") as tf_cached:
                     st.download_button(
-                        label="🖼️ Baixar Thumbnail Principal (JPG)",
+                        label="🖼️ Baixar Thumbnail (JPG)",
                         data=tf_cached,
                         file_name="thumbnail.jpg",
                         mime="image/jpeg",
@@ -2496,7 +2515,10 @@ if st.session_state.transcription_done:
                         use_container_width=True,
                         key="btn_dl_cached_thumb"
                     )
-        st.caption(f"⚡ Carregado instantaneamente do cache: `{existing_inst['folder_path']}`")
+        
+        abs_fol_c = os.path.abspath(existing_inst.get("folder_path", ""))
+        link_fol_c = abs_fol_c.replace('\\', '/')
+        st.markdown(f"📁 **Pasta Local:** [{existing_inst.get('folder_name', 'Abrir Pasta')}](file:///{link_fol_c}) &nbsp; `📁 {abs_fol_c}`", unsafe_allow_html=True)
         render_quick_editor_component(existing_inst["video_path"], f"cached_{_vid_id_cat}_{start_time}_{end_time}_{selected_aspect}")
 
     st.markdown("")
@@ -2724,9 +2746,9 @@ if st.session_state.transcription_done:
                             has_saved_thumb = saved_thumb and os.path.exists(saved_thumb)
 
                             if has_saved_thumb:
-                                col_b1, col_b_th, col_b2, col_b3 = st.columns([1.5, 1.2, 1.2, 1.2])
+                                col_b1, col_b_fol, col_b_th, col_b2, col_b3 = st.columns([1.5, 1.2, 1.2, 1.2, 1.2])
                             else:
-                                col_b1, col_b2, col_b3 = st.columns([1.5, 1.2, 1.2])
+                                col_b1, col_b_fol, col_b2, col_b3 = st.columns([1.5, 1.2, 1.2, 1.2])
 
                             with col_b1:
                                 with open(package_res["video_dest_path"], "rb") as vf:
@@ -2738,6 +2760,10 @@ if st.session_state.transcription_done:
                                         type="primary",
                                         use_container_width=True
                                     )
+
+                            with col_b_fol:
+                                if st.button("📂 Abrir Pasta", key="btn_open_fol_rendered", use_container_width=True, help="Abre a pasta deste corte no Explorador de Arquivos do Windows"):
+                                    open_in_file_explorer(package_res.get("package_dir"))
 
                             if has_saved_thumb:
                                 with col_b_th:
@@ -2804,7 +2830,10 @@ if st.session_state.transcription_done:
                             # Ferramenta de Edição Rápida / Ajuste Fino
                             render_quick_editor_component(package_res["video_dest_path"], f"newly_rendered_{video_id}_{start_time}_{end_time}_{selected_aspect}")
 
-                            with st.expander(f"📁 Pasta de Publicação Criada em: data/{video_id}/{package_res['folder_name']}/", expanded=True):
+                            abs_pkg_p = os.path.abspath(package_res['package_dir'])
+                            link_pkg_p = abs_pkg_p.replace('\\', '/')
+                            with st.expander(f"📁 Pasta de Publicação Criada em: {package_res['folder_name']}", expanded=True):
+                                st.markdown(f"📂 **Caminho da Pasta:** [{package_res['folder_name']}](file:///{link_pkg_p}) &nbsp; `📁 {abs_pkg_p}`", unsafe_allow_html=True)
                                 st.markdown(f"**🎬 Arquivo de Vídeo:** `{package_res['video_filename']}`")
                                 st.markdown(f"**📌 Título:** `{cut_title_val}`")
                                 st.markdown(f"**📝 Legenda para Redes:**\n```\n{cut_desc_val}\n```")
@@ -2835,8 +2864,8 @@ if st.session_state.transcription_done:
                 with st.container():
                     # Cabeçalho do corte
                     st.subheader(f"📌 {cut_item.get('title', 'Corte sem título')}")
-                    st.caption(f"⏱️ Trecho: `[{cut_item.get('start_time')} → {cut_item.get('end_time')}]` • Atualizado em: `{cut_item.get('updated_at', 'N/D')}`")
-
+                    st.markdown(f"⏱️ Trecho: `[{cut_item.get('start_time')} → {cut_item.get('end_time')}]` • Atualizado em: `{cut_item.get('updated_at', 'N/D')}`")
+                    
                     # Instâncias de formatos renderizadas para esta minutagem
                     formats_dict = cut_item.get("formats", {})
                     if formats_dict:
@@ -2946,7 +2975,7 @@ if st.session_state.transcription_done:
                                                 else:
                                                     st.warning("Vídeo original não encontrado em data.")
 
-                                    col_b_dl, col_b_yt, col_b_wh, col_b_del = st.columns([2, 1.2, 1.2, 0.8])
+                                    col_b_dl, col_b_fol, col_b_yt, col_b_wh, col_b_del = st.columns([1.5, 1.2, 1.0, 1.0, 0.6])
                                     with col_b_dl:
                                         with open(v_file, "rb") as vf_gal:
                                             st.download_button(
@@ -2957,6 +2986,9 @@ if st.session_state.transcription_done:
                                                 key=f"dl_gal_{c_idx}_{f_idx}",
                                                 use_container_width=True
                                             )
+                                    with col_b_fol:
+                                        if st.button("📂 Abrir Pasta", key=f"btn_open_fol_gal_{c_idx}_{f_idx}", use_container_width=True, help="Abre a pasta deste corte no Explorador de Arquivos do Windows"):
+                                            open_in_file_explorer(fmt_data.get("folder_path") or v_file)
                                     with col_b_yt:
                                         with st.popover("🔴 Shorts", use_container_width=True, help="Publicar no YouTube Shorts"):
                                             st.markdown(f"##### 🚀 Upload: {cut_item.get('title', 'Corte')[:30]}...")
@@ -3022,7 +3054,9 @@ if st.session_state.transcription_done:
                                                 delete_format_instance(_vid_id_gal, cut_item.get('start_time'), cut_item.get('end_time'), fmt_key, delete_publication_kit=is_full)
                                                 st.success("Excluído com sucesso.")
                                                 st.rerun()
-                                    st.caption(f"📁 `{fmt_data.get('folder_name')}`")
+                                    abs_fol_g = os.path.abspath(fmt_data.get("folder_path", ""))
+                                    link_fol_g = abs_fol_g.replace('\\', '/')
+                                    st.markdown(f"📁 **Pasta Local:** [{fmt_data.get('folder_name', 'Abrir Pasta')}](file:///{link_fol_g}) &nbsp; `📁 {abs_fol_g}`", unsafe_allow_html=True)
                                     render_quick_editor_component(v_file, f"gal_{_vid_id_gal}_{c_idx}_{f_idx}")
                                 else:
                                     st.warning("Vídeo excluído / não encontrado.")
