@@ -77,9 +77,9 @@ def hex_to_ass_color(hex_color: str, alpha: float = 0.0) -> str:
     return f"&H{a_hex}{b.upper()}{g.upper()}{r.upper()}&"
 
 
-def clean_and_condense_headline(text: str, max_chars: int = 42) -> str:
+def clean_and_condense_headline(text: str, max_chars: int = 75) -> str:
     """
-    Higieniza e sintetiza frases longas para criar uma Headline de topo com pensamento 100% COMPLETO.
+    Higieniza e sintetiza frases para criar uma Headline de topo com pensamento 100% COMPLETO.
     Remove prefixos de orador, prioriza citações diretas e NUNCA deixa preposições ou conjunções cortadas no final.
     """
     if not text:
@@ -89,7 +89,7 @@ def clean_and_condense_headline(text: str, max_chars: int = 42) -> str:
     cleaned = re.sub(r'\s+', ' ', cleaned)
     
     # 1. Se houver aspas com fala direta expressiva, prioriza a citação
-    quote_match = re.search(r'["\']([^"\']{10,50})["\']', cleaned)
+    quote_match = re.search(r'["\']([^"\']{10,75})["\']', cleaned)
     if quote_match:
         cleaned = quote_match.group(1).strip()
     
@@ -101,16 +101,16 @@ def clean_and_condense_headline(text: str, max_chars: int = 42) -> str:
         flags=re.IGNORECASE
     ).strip()
 
-    # 3. Se ainda estiver longo, verifica se há pontuação forte ( ?, !, :, -, , ) para quebrar num pensamento completo
+    # 3. Se ainda ultrapassar max_chars, corta de forma inteligente por palavras sem deixar preposições penduradas
     if len(cleaned) > max_chars:
+        # Se houver pontuação forte ( ?, !, :, -, , ) para quebrar num pensamento completo
         for punct in ['?', '!', ':', '-']:
             if punct in cleaned:
                 parts = cleaned.split(punct)
-                if len(parts[0]) >= 10:
+                if len(parts[0]) >= 15 and len(parts[0]) <= max_chars:
                     cleaned = parts[0] + (punct if punct in ['?', '!'] else '')
                     break
 
-    # 4. Se ainda ultrapassar max_chars, corta de forma inteligente por palavras sem deixar preposições penduradas
     if len(cleaned) > max_chars:
         words = cleaned.split()
         cur_phrase = []
@@ -127,7 +127,7 @@ def clean_and_condense_headline(text: str, max_chars: int = 42) -> str:
         if cur_phrase:
             cleaned = " ".join(cur_phrase)
         else:
-            cleaned = " ".join(words[:4])
+            cleaned = " ".join(words[:6])
 
     cleaned = cleaned.strip(' ,;:-').upper()
     
@@ -140,33 +140,34 @@ def clean_and_condense_headline(text: str, max_chars: int = 42) -> str:
     return cleaned
 
 
-def format_headline_text(text: str, max_width_chars: int = 22, max_lines: int = 2) -> str:
+def format_headline_text(text: str, max_width_chars: int = 27, max_lines: int = 3) -> str:
     """
-    Formata e quebra o texto da headline em até 2 linhas curtas e harmoniosas,
-    garantindo que a frase seja concisa, em caixa alta e com pensamento 100% completo.
+    Formata e quebra o texto da headline em linhas largas e harmoniosas,
+    ocupando bem o espaço horizontal superior do corte vertical 9:16 (sem margens laterais vazias excessivas).
     No ASS, quebras de linha são feitas com \\N.
     """
     if not text:
         return ""
     
-    condensed = clean_and_condense_headline(text, max_chars=44)
+    condensed = clean_and_condense_headline(text, max_chars=75)
     if not condensed:
-        condensed = text.strip().upper()[:40]
+        condensed = text.strip().upper()[:75]
         
     total_len = len(condensed)
-    target_width = max_width_chars
-    if total_len <= 30:
-        target_width = 16
-    elif total_len <= 44:
-        target_width = 22
+    
+    # Distribui a largura por linha para ocupar bem a tela horizontal (24 a 28 caracteres por linha)
+    if total_len <= 26:
+        target_width = 26
+    elif total_len <= 54:
+        target_width = max(24, (total_len // 2) + 2)
     else:
-        target_width = 24
+        target_width = max(25, (total_len // 3) + 2)
         
     wrapped_lines = textwrap.wrap(condensed, width=target_width)
     if not wrapped_lines:
         return condensed
         
-    # Limita ao número máximo de linhas configurado (padrão: 2 linhas)
+    # Limita ao número máximo de linhas configurado (padrão: 3 linhas)
     if len(wrapped_lines) > max_lines:
         wrapped_lines = wrapped_lines[:max_lines]
         # Garante que a última linha não termina com preposição/conjunção cortada
@@ -183,7 +184,7 @@ def build_ass_headline_style(
     preset_key: str = "yellow_black",
     custom_text_color: str = "#FFFFFF",
     custom_bg_color: str = "#000000",
-    font_size: int = 46,
+    font_size: int = 48,
     video_width: int = 1080,
     video_height: int = 1920,
     margin_top: int = 120,
@@ -209,7 +210,7 @@ def build_ass_headline_style(
     ass_outline = hex_to_ass_color(bg_color if border_style == 3 else preset.get("outline_color", "#000000"), alpha=0.0)
     ass_back = hex_to_ass_color(bg_color, alpha=0.05 if border_style == 3 else 0.5)
     
-    margin_lr = int(video_width * 0.06)
+    margin_lr = int(video_width * 0.04)  # Margens laterais compactas (4% = ~43px)
     margin_v = margin_top  # Distância do topo
     
     # Style: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour,

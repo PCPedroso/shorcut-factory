@@ -5,6 +5,7 @@ import json
 import importlib
 import numpy as np
 from urllib.parse import urlparse, parse_qs
+from datetime import datetime
 
 import core.extractor
 import core.transcriber
@@ -45,7 +46,10 @@ importlib.reload(core.overlay_manager)
 from core.extractor import download_audio, get_video_metadata
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
 from core.analyzer import analyze_transcript
-from core.video_processor import download_full_video, cut_video, get_video_resolution
+from core.video_processor import (
+    download_full_video, cut_video, get_video_resolution,
+    extract_audio_from_local_video, extract_thumbnail_from_video, generate_local_video_id
+)
 from core.library_manager import get_library, add_or_update_video_in_library, remove_video_from_library
 from core.config_manager import load_settings, save_all_settings, save_setting
 from core.export_kit import build_cut_folder_name, create_viral_package
@@ -68,12 +72,19 @@ st.set_page_config(page_title="Fábrica de Cortes", layout="wide")
 def get_video_id(url):
     if not url:
         return None
-    query = urlparse(url)
+    url_str = str(url).strip()
+    if url_str.startswith('local://'):
+        return url_str.replace('local://', '')
+    if url_str.startswith('local_'):
+        return url_str
+    query = urlparse(url_str)
     if query.hostname == 'youtu.be': return query.path[1:]
     if query.hostname in ('www.youtube.com', 'youtube.com'):
         if query.path == '/watch': return parse_qs(query.query).get('v', [None])[0]
         if query.path[:7] == '/embed/': return query.path.split('/')[2]
         if query.path[:3] == '/v/': return query.path.split('/')[2]
+    if os.path.exists(os.path.join("data", url_str)):
+        return url_str
     return None
 
 st.title("✂️ ViralCut - Fábrica de Cortes")
@@ -636,15 +647,22 @@ if library_videos:
         v_id = v.get("video_id")
         
         with st.sidebar.expander(f"🎬 {v_title[:35]}...", expanded=False):
+            if v.get("thumbnail"):
+                if os.path.exists(v["thumbnail"]):
+                    safe_display_image(v["thumbnail"], use_container_width=True)
+                elif str(v["thumbnail"]).startswith("http"):
+                    st.image(v["thumbnail"], use_container_width=True)
             st.markdown(f"**Título:** {v_title}")
-            st.markdown(f"📅 **Lançado em:** `{v_date}`")
+            st.markdown(f"📅 **Data:** `{v_date}`")
+            if v.get("channel"):
+                st.caption(f"📺 {v['channel']}")
             if v.get("added_at"):
                 st.caption(f"➕ Adicionado: {v['added_at']}")
             
             col_l1, col_l2 = st.columns(2)
             with col_l1:
                 if st.button("📥 Abrir", key=f"btn_load_{v_id}", use_container_width=True):
-                    v_url = v.get("url", f"https://www.youtube.com/watch?v={v_id}")
+                    v_url = v.get("url") or (f"local://{v_id}" if str(v_id).startswith("local_") else f"https://www.youtube.com/watch?v={v_id}")
                     st.session_state.video_url = v_url
                     st.session_state.input_yt_url = v_url
                     load_video_saved_artifacts(v_id)
@@ -758,122 +776,228 @@ if 'video_url' not in st.session_state:
 if 'input_yt_url' not in st.session_state:
     st.session_state.input_yt_url = st.session_state.video_url
 
+video_url = st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+
 # Seção 1
 st.header("1. Ingestão e Transcrição do Vídeo")
-video_url = st.text_input("Cole a URL do vídeo do YouTube:", key="input_yt_url")
 
-if st.button("🚀 Processar Vídeo / Atualizar", type="primary"):
-    if not video_url:
-        st.warning("Por favor, insira uma URL válida.")
-    else:
-        st.session_state.video_url = video_url
-        video_id = get_video_id(video_url)
-        if not video_id:
-            st.error("URL do YouTube inválida.")
+input_mode = st.radio(
+    "Escolha a Origem do Vídeo:",
+    ["🌐 Link do YouTube", "💻 Carregar Arquivo de Vídeo Local (MP4, MOV, MKV...)"],
+    index=0 if not str(st.session_state.get("video_url", "")).startswith("local://") and not str(st.session_state.get("video_url", "")).startswith("local_") else 1,
+    horizontal=True,
+    key="video_source_mode"
+)
+
+if input_mode == "🌐 Link do YouTube":
+    video_url = st.text_input("Cole a URL do vídeo do YouTube:", key="input_yt_url")
+
+    if st.button("🚀 Processar Vídeo do YouTube", type="primary", key="btn_process_yt"):
+        if not video_url:
+            st.warning("Por favor, insira uma URL válida.")
         else:
+            st.session_state.video_url = video_url
+            video_id = get_video_id(video_url)
+            if not video_id:
+                st.error("URL do YouTube inválida.")
+            else:
+                data_dir = os.path.join("data", video_id)
+                os.makedirs(data_dir, exist_ok=True)
+                transcript_file = os.path.join(data_dir, "transcript.json")
+                audio_path = os.path.join(data_dir, "audio.mp3")
+                
+                # Passo 1: Extrai e Registra Metadados na Biblioteca
+                with st.spinner("Buscando informações e metadados oficiais do vídeo..."):
+                    meta = get_video_metadata(video_url)
+                    v_title = meta.get("title") or f"Vídeo {video_id}"
+                    v_date = meta.get("upload_date")
+                    v_thumb = meta.get("thumbnail")
+                    v_dur = meta.get("duration")
+                    is_live_flag = meta.get("is_live", False)
+
+                    add_or_update_video_in_library(
+                        video_id=video_id,
+                        title=v_title,
+                        upload_date_raw=v_date,
+                        url=video_url,
+                        thumbnail_url=v_thumb,
+                        duration_sec=v_dur,
+                        channel=meta.get("channel"),
+                        is_live=is_live_flag
+                    )
+
+                if is_live_flag:
+                    st.warning("🔴 **Transmissão Ao Vivo (LIVE) Detectada!** O vídeo ainda está em andamento no YouTube. O sistema capturará todo o conteúdo transmitido desde o início até o momento atual.")
+
+                # CACHE: Verifica se já temos a transcrição pronta
+                if os.path.exists(transcript_file):
+                    st.success("✅ Cache encontrado! Carregando transcrição e histórico salvo...")
+                    load_video_saved_artifacts(video_id)
+                    if is_live_flag:
+                        st.info("💡 **Dica de Live**: Como a transmissão continua no YouTube, você pode sincronizar novos minutos a qualquer momento.")
+                        if st.button("🔄 Sincronizar / Atualizar com o Momento Atual da Live", key="btn_sync_live_cache"):
+                            if os.path.exists(transcript_file):
+                                os.remove(transcript_file)
+                            if os.path.exists(audio_path):
+                                os.remove(audio_path)
+                            v_full_cache = os.path.join(data_dir, "video_full.mp4")
+                            if os.path.exists(v_full_cache):
+                                os.remove(v_full_cache)
+                            st.rerun()
+                else:
+                    st.info("Iniciando extração do YouTube...")
+                    if meta.get("title"):
+                        st.success(f"🎬 Vídeo: **{meta['title']}** (Publicado em: `{meta.get('upload_date')}`) ")
+
+                    # Passo 2: Transcrição (Tenta legendas oficiais do YouTube primeiro, fallback para Whisper)
+                    with st.spinner("Buscando transcrição oficial do YouTube (alta precisão e fidelidade)..."):
+                        transcribe_res = fetch_youtube_transcript(video_id)
+                        
+                        if transcribe_res.get("transcript_segments"):
+                            st.success(f"⚡ Transcrição oficial do YouTube carregada ({len(transcribe_res['transcript_segments'])} segmentos)! Máxima precisão.")
+                        else:
+                            st.info("Legendas oficiais não encontradas no YouTube. Processando áudio via Whisper local...")
+                            if os.path.exists(audio_path):
+                                audio_res = {"path": audio_path, "error": None}
+                            else:
+                                with st.spinner("Baixando áudio gravado até o momento atual..."):
+                                    audio_res = download_audio(video_url, output_path=audio_path, is_live=is_live_flag)
+                                    
+                            if audio_res.get("error"):
+                                st.error(f"Erro no download: {audio_res['error']}")
+                                transcribe_res = {"error": audio_res["error"]}
+                            else:
+                                # Atualiza a duração se era desconhecida
+                                if not v_dur and os.path.exists(audio_path):
+                                    v_dur = get_video_duration(audio_path)
+                                    add_or_update_video_in_library(
+                                        video_id=video_id,
+                                        title=v_title,
+                                        upload_date_raw=v_date,
+                                        url=video_url,
+                                        thumbnail_url=v_thumb,
+                                        duration_sec=v_dur,
+                                        channel=meta.get("channel"),
+                                        is_live=is_live_flag
+                                    )
+
+                                with st.spinner(f"Transcrevendo áudio com Whisper ({model_size}) na {device_option.upper()}..."):
+                                    transcribe_res = transcribe_audio(
+                                        audio_res["path"], 
+                                        model_size=model_size, 
+                                        device=device_option
+                                    )
+                                
+                    if transcribe_res.get("error"):
+                        st.error(f"Erro na transcrição: {transcribe_res['error']}")
+                    else:
+                        st.success("Transcrição concluída com sucesso!")
+                        st.session_state.transcription_done = True
+                        st.session_state.full_text = transcribe_res["full_text"]
+                        st.session_state.segments = transcribe_res["transcript_segments"]
+                        st.session_state.transcript_source = transcribe_res.get("source", "YouTube Oficial")
+                        
+                        # Salvar no cache
+                        with open(transcript_file, "w", encoding="utf-8") as f:
+                            json.dump({
+                                "full_text": st.session_state.full_text,
+                                "segments": st.session_state.segments,
+                                "source": st.session_state.transcript_source
+                            }, f, ensure_ascii=False, indent=4)
+
+else:
+    # 💻 Modo Arquivo de Vídeo Local do Computador
+    uploaded_file = st.file_uploader(
+        "Selecione ou arraste um arquivo de vídeo do seu computador:",
+        type=["mp4", "mov", "mkv", "avi", "webm"],
+        key="local_video_uploader",
+        help="Formatos suportados: MP4, MOV, MKV, AVI, WebM"
+    )
+
+    col_loc1, col_loc2 = st.columns([2, 1])
+    with col_loc1:
+        custom_local_title = st.text_input(
+            "Título do Vídeo (Opcional):",
+            value=os.path.splitext(uploaded_file.name)[0] if uploaded_file else "",
+            placeholder="Ex: Entrevista Podcast com Convidado",
+            key="custom_local_title"
+        )
+    with col_loc2:
+        st.caption("📁 Arquivo carregado direto do disco, processado 100% offline com Whisper e GPU.")
+
+    if st.button("🚀 Processar Arquivo de Vídeo Local", type="primary", key="btn_process_local"):
+        if not uploaded_file:
+            st.warning("Por favor, selecione um arquivo de vídeo do seu computador.")
+        else:
+            orig_filename = uploaded_file.name
+            video_id = generate_local_video_id(orig_filename)
+            local_url = f"local://{video_id}"
+            st.session_state.video_url = local_url
+            st.session_state.input_yt_url = local_url
+
             data_dir = os.path.join("data", video_id)
             os.makedirs(data_dir, exist_ok=True)
-            transcript_file = os.path.join(data_dir, "transcript.json")
+            v_full_path = os.path.join(data_dir, "video_full.mp4")
             audio_path = os.path.join(data_dir, "audio.mp3")
-            
-            # Passo 1: Extrai e Registra Metadados na Biblioteca
-            with st.spinner("Buscando informações e metadados oficiais do vídeo..."):
-                meta = get_video_metadata(video_url)
-                v_title = meta.get("title") or f"Vídeo {video_id}"
-                v_date = meta.get("upload_date")
-                v_thumb = meta.get("thumbnail")
-                v_dur = meta.get("duration")
-                is_live_flag = meta.get("is_live", False)
+            thumb_path = os.path.join(data_dir, "thumbnail.jpg")
+            transcript_file = os.path.join(data_dir, "transcript.json")
 
-                add_or_update_video_in_library(
-                    video_id=video_id,
-                    title=v_title,
-                    upload_date_raw=v_date,
-                    url=video_url,
-                    thumbnail_url=v_thumb,
-                    duration_sec=v_dur,
-                    channel=meta.get("channel"),
-                    is_live=is_live_flag
-                )
+            # 1. Salva o arquivo de vídeo na pasta do projeto
+            with st.spinner("Salvando e organizando arquivo de vídeo local..."):
+                file_bytes = uploaded_file.getbuffer()
+                with open(v_full_path, "wb") as f_out:
+                    f_out.write(file_bytes)
 
-            if is_live_flag:
-                st.warning("🔴 **Transmissão Ao Vivo (LIVE) Detectada!** O vídeo ainda está em andamento no YouTube. O sistema capturará todo o conteúdo transmitido desde o início até o momento atual.")
+            # 2. Metadados e Thumbnail
+            v_title = custom_local_title.strip() if custom_local_title.strip() else os.path.splitext(orig_filename)[0]
+            v_dur = get_video_duration(v_full_path)
+            extract_thumbnail_from_video(v_full_path, thumb_path, timestamp_sec=min(2.0, max(0.0, v_dur * 0.1)))
 
-            # CACHE: Verifica se já temos a transcrição pronta
+            add_or_update_video_in_library(
+                video_id=video_id,
+                title=v_title,
+                upload_date_raw=datetime.now().strftime("%d/%m/%Y"),
+                url=local_url,
+                thumbnail_url=thumb_path if os.path.exists(thumb_path) else None,
+                duration_sec=int(v_dur),
+                channel="Vídeo Local (Upload)",
+                is_live=False
+            )
+
+            # 3. Extração de Áudio e Transcrição
             if os.path.exists(transcript_file):
-                st.success("✅ Cache encontrado! Carregando transcrição e histórico salvo...")
+                st.success("✅ Cache de transcrição encontrado para este arquivo! Carregando...")
                 load_video_saved_artifacts(video_id)
-                if is_live_flag:
-                    st.info("💡 **Dica de Live**: Como a transmissão continua no YouTube, você pode sincronizar novos minutos a qualquer momento.")
-                    if st.button("🔄 Sincronizar / Atualizar com o Momento Atual da Live", key="btn_sync_live_cache"):
-                        if os.path.exists(transcript_file):
-                            os.remove(transcript_file)
-                        if os.path.exists(audio_path):
-                            os.remove(audio_path)
-                        v_full_cache = os.path.join(data_dir, "video_full.mp4")
-                        if os.path.exists(v_full_cache):
-                            os.remove(v_full_cache)
-                        st.rerun()
             else:
-                st.info("Iniciando extração do YouTube...")
-                if meta.get("title"):
-                    st.success(f"🎬 Vídeo: **{meta['title']}** (Publicado em: `{meta.get('upload_date')}`) ")
+                with st.spinner("Extraindo áudio do vídeo local com FFmpeg..."):
+                    audio_res = extract_audio_from_local_video(v_full_path, audio_path)
 
-                # Passo 2: Transcrição (Tenta legendas oficiais do YouTube primeiro, fallback para Whisper)
-                with st.spinner("Buscando transcrição oficial do YouTube (alta precisão e fidelidade)..."):
-                    transcribe_res = fetch_youtube_transcript(video_id)
-                    
-                    if transcribe_res.get("transcript_segments"):
-                        st.success(f"⚡ Transcrição oficial do YouTube carregada ({len(transcribe_res['transcript_segments'])} segmentos)! Máxima precisão.")
-                    else:
-                        st.info("Legendas oficiais não encontradas no YouTube. Processando áudio via Whisper local...")
-                        if os.path.exists(audio_path):
-                            audio_res = {"path": audio_path, "error": None}
-                        else:
-                            with st.spinner("Baixando áudio gravado até o momento atual..."):
-                                audio_res = download_audio(video_url, output_path=audio_path, is_live=is_live_flag)
-                                
-                        if audio_res.get("error"):
-                            st.error(f"Erro no download: {audio_res['error']}")
-                            transcribe_res = {"error": audio_res["error"]}
-                        else:
-                            # Atualiza a duração se era desconhecida
-                            if not v_dur and os.path.exists(audio_path):
-                                v_dur = get_video_duration(audio_path)
-                                add_or_update_video_in_library(
-                                    video_id=video_id,
-                                    title=v_title,
-                                    upload_date_raw=v_date,
-                                    url=video_url,
-                                    thumbnail_url=v_thumb,
-                                    duration_sec=v_dur,
-                                    channel=meta.get("channel"),
-                                    is_live=is_live_flag
-                                )
-
-                            with st.spinner(f"Transcrevendo áudio com Whisper ({model_size}) na {device_option.upper()}..."):
-                                transcribe_res = transcribe_audio(
-                                    audio_res["path"], 
-                                    model_size=model_size, 
-                                    device=device_option
-                                )
-                            
-                if transcribe_res.get("error"):
-                    st.error(f"Erro na transcrição: {transcribe_res['error']}")
+                if audio_res.get("error"):
+                    st.error(f"Erro ao extrair áudio: {audio_res['error']}")
                 else:
-                    st.success("Transcrição concluída com sucesso!")
-                    st.session_state.transcription_done = True
-                    st.session_state.full_text = transcribe_res["full_text"]
-                    st.session_state.segments = transcribe_res["transcript_segments"]
-                    st.session_state.transcript_source = transcribe_res.get("source", "YouTube Oficial")
-                    
-                    # Salvar no cache
-                    with open(transcript_file, "w", encoding="utf-8") as f:
-                        json.dump({
-                            "full_text": st.session_state.full_text,
-                            "segments": st.session_state.segments,
-                            "source": st.session_state.transcript_source
-                        }, f, ensure_ascii=False, indent=4)
+                    with st.spinner(f"Transcrevendo áudio com Whisper ({model_size}) na {device_option.upper()}..."):
+                        transcribe_res = transcribe_audio(
+                            audio_path,
+                            model_size=model_size,
+                            device=device_option
+                        )
+
+                    if transcribe_res.get("error"):
+                        st.error(f"Erro na transcrição: {transcribe_res['error']}")
+                    else:
+                        st.success("🎉 Transcrição do vídeo local concluída com sucesso!")
+                        st.session_state.transcription_done = True
+                        st.session_state.full_text = transcribe_res["full_text"]
+                        st.session_state.segments = transcribe_res["transcript_segments"]
+                        st.session_state.transcript_source = "Whisper Local (Arquivo do Computador)"
+
+                        with open(transcript_file, "w", encoding="utf-8") as f:
+                            json.dump({
+                                "full_text": st.session_state.full_text,
+                                "segments": st.session_state.segments,
+                                "source": st.session_state.transcript_source
+                            }, f, ensure_ascii=False, indent=4)
+
 
 if st.session_state.transcription_done:
     def format_time(seconds):
@@ -1679,9 +1803,11 @@ if st.session_state.transcription_done:
     }
     selected_aspect = aspect_map[aspect_option]
 
+    horizontal_zoom_val = float(_cfg.get("horizontal_zoom", 1.0))
     blur_zoom_val = 1.0
     blur_pan_val = 0.0
     blur_int_val = _cfg.get("blur_intensity", 25)
+    mode_blur_ctrl = _cfg.get("blur_mode_ctrl", "🤖 Auto-Zoom Inteligente no Personagem (Recomendado)")
     face_zoom_active = True
     face_margin_val = 1.55
     person_pref_val = "auto"
@@ -1858,7 +1984,8 @@ if st.session_state.transcription_done:
                 # Botão de prévia instantânea de enquadramento
                 if start_time:
                     if st.button("👁️ Visualizar Prévia do Enquadramento", key="btn_preview_face"):
-                        video_id = get_video_id(video_url)
+                        _active_preview_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                        video_id = get_video_id(_active_preview_url)
                         v_full = os.path.join("data", video_id, "video_full.mp4") if video_id else ""
                         if os.path.exists(v_full):
                             from core.face_tracker import generate_face_preview_image
@@ -1945,7 +2072,8 @@ if st.session_state.transcription_done:
                         blur_margin_val = 1.55
 
                 # Calcula automaticamente o Zoom e Pan
-                video_id = get_video_id(video_url)
+                _active_blur_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                video_id = get_video_id(_active_blur_url)
                 v_full = os.path.join("data", video_id, "video_full.mp4") if video_id else ""
                 if os.path.exists(v_full) and start_time:
                     from core.face_tracker import calculate_auto_blur_params, generate_blur_preview_image
@@ -1960,6 +2088,8 @@ if st.session_state.transcription_done:
                             st.info("👥 **Plano Conjunto / Dual Detectado!** Enquadramento calibrado para exibir ambos os interlocutores.")
                     else:
                         st.caption(f"✨ Auto-Zoom Calculado: **{blur_zoom_val:.2f}x** | Foco Horizontal: **{blur_pan_val:+.2f}**")
+
+                    st.info("🎥 **Rastreamento Dinâmico Ativo**: A câmera acompanhará o orador suavemente durante todo o corte, mantendo-o enquadrado e centralizado.")
 
                     if st.button("👁️ Visualizar Prévia com Fundo Desfocado", key="btn_prev_blur"):
                         prev_b_path = os.path.join("data", video_id, "preview_blur.jpg")
@@ -2023,6 +2153,44 @@ if st.session_state.transcription_done:
                         )
                     else:
                         blur_pan_val = 0.0
+
+    elif selected_aspect == "16:9":
+        with st.expander("🔍 Ajustes do Modo Horizontal 16:9 (Aproximação / Zoom Geral)", expanded=True):
+            col_hz1, col_hz2 = st.columns([2, 1])
+            with col_hz1:
+                saved_hz_zoom = float(_cfg.get("horizontal_zoom", 1.0))
+                horizontal_zoom_val = st.slider(
+                    "🔎 Nível de Aproximação (Zoom):",
+                    min_value=1.00,
+                    max_value=1.50,
+                    value=saved_hz_zoom,
+                    step=0.02,
+                    format="%.2fx",
+                    key="hz_zoom_slider",
+                    on_change=lambda: save_setting("horizontal_zoom", st.session_state.hz_zoom_slider),
+                    help="Aproxima o enquadramento horizontal centralizado (ideal para focar nos oradores ou remover marcas d'água e barras pretas das bordas)."
+                )
+            with col_hz2:
+                if horizontal_zoom_val > 1.00:
+                    st.caption(f"✨ Zoom ativo: **{horizontal_zoom_val:.2f}x** (+{int((horizontal_zoom_val - 1.0) * 100)}% de aproximação)")
+                else:
+                    st.caption("✨ Enquadramento original 1:1 (Sem zoom)")
+
+            if start_time:
+                if st.button("👁️ Visualizar Prévia com Aproximação 16:9", key="btn_prev_169"):
+                    _active_preview_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                    video_id = get_video_id(_active_preview_url)
+                    v_full = os.path.join("data", video_id, "video_full.mp4") if video_id else ""
+                    if os.path.exists(v_full):
+                        from core.face_tracker import generate_169_preview_image
+                        prev_169_path = os.path.join("data", video_id, "preview_169.jpg")
+                        p_res = generate_169_preview_image(v_full, start_time, prev_169_path, zoom_factor=horizontal_zoom_val)
+                        if p_res.get("path") and os.path.exists(p_res["path"]):
+                            st.image(p_res["path"], caption=f"Prévia 16:9 em {start_time} com Zoom {horizontal_zoom_val:.2f}x", use_container_width=True)
+                        else:
+                            st.error(f"Erro na prévia: {p_res.get('error')}")
+                    else:
+                        st.info("O vídeo precisa ser baixado para gerar a prévia.")
 
     # ─────────────────────────────────────────────────────────────────
     # Legendas Dinâmicas (Fase 2)
@@ -2671,7 +2839,9 @@ if st.session_state.transcription_done:
                     st.error(f"Erro ao baixar vídeo: {video_res['error']}")
                 else:
                     extra_info = ""
-                    if selected_aspect == "9:16_blur":
+                    if selected_aspect == "16:9" and horizontal_zoom_val > 1.00:
+                        extra_info = f" (Zoom: {horizontal_zoom_val:.2f}x)"
+                    elif selected_aspect == "9:16_blur":
                         extra_info = f" (Zoom: {blur_zoom_val:.2f}x)"
                     elif selected_aspect == "9:16_smart_face" and face_zoom_active:
                         extra_info = f" (Auto-Zoom Inteligente)"
@@ -2692,9 +2862,11 @@ if st.session_state.transcription_done:
                             end_time,
                             corte_output_path,
                             aspect_ratio_mode=selected_aspect,
+                            horizontal_zoom=horizontal_zoom_val,
                             blur_zoom=blur_zoom_val,
                             blur_pan=blur_pan_val,
                             blur_intensity=blur_int_val,
+                            blur_auto_tracking=(mode_blur_ctrl == "🤖 Auto-Zoom Inteligente no Personagem (Recomendado)"),
                             face_auto_zoom=face_zoom_active,
                             face_margin_ratio=face_margin_val,
                             person_preference=person_pref_val,

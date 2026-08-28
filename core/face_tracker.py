@@ -1205,3 +1205,308 @@ def crop_video_with_dynamic_auto_switch(
     except Exception as exc:
         return {"path": None, "error": str(exc)}
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Pipeline 9:16 Fundo Desfocado com Rastreamento Inteligente de Personagem
+# (Dynamic Auto-Reframing com Blur no Background)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def crop_video_with_smart_blur_tracking(
+    input_video_path: str,
+    start_time_str: str,
+    end_time_str: str,
+    output_video_path: str,
+    blur_zoom: float = 1.35,
+    person_preference: str = "auto",
+    face_margin_ratio: float = 1.55,
+    auto_tracking: bool = True
+) -> dict:
+    """
+    Renderiza vídeo vertical 9:16 (1080x1920) com fundo desfocado dinâmico e
+    Auto-Reframing contínuo no foreground, mantendo o personagem principal (ou ambos em Dual Shot)
+    perfeitamente enquadrado e centralizado com movimento cinematográfico suave (sem tremulações).
+    """
+    try:
+        ensure_face_model()
+
+        start_sec = parse_time_to_seconds(start_time_str)
+        end_sec = parse_time_to_seconds(end_time_str)
+        duration_sec = max(0.5, end_sec - start_sec)
+
+        cap = cv2.VideoCapture(input_video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps <= 0 or np.isnan(fps):
+            fps = 30.0
+
+        total_input_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        start_frame = int(start_sec * fps)
+        total_cut_frames = int(duration_sec * fps)
+
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+        out_dir = os.path.dirname(output_video_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
+        temp_audio_cut = os.path.join(out_dir, "temp_blur_audio.m4a") if out_dir else "temp_blur_audio.m4a"
+        temp_video_raw = os.path.join(out_dir, "temp_blur_raw.mp4") if out_dir else "temp_blur_raw.mp4"
+
+        # Extrai áudio sincronizado do corte
+        cmd_audio = [
+            FFMPEG_EXE, "-y",
+            "-ss", start_time_str,
+            "-to", end_time_str,
+            "-i", input_video_path,
+            "-vn", "-c:a", "aac", "-b:a", "192k",
+            temp_audio_cut
+        ]
+        subprocess.run(cmd_audio, capture_output=True)
+
+        # Inicia processo FFmpeg para receber os frames 1080x1920 via stdin
+        cmd_ffmpeg = [
+            FFMPEG_EXE, "-y",
+            "-f", "rawvideo",
+            "-vcodec", "rawvideo",
+            "-s", "1080x1920",
+            "-pix_fmt", "bgr24",
+            "-r", str(fps),
+            "-i", "-",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "20",
+            "-pix_fmt", "yuv420p",
+            temp_video_raw
+        ]
+        ffmpeg_proc = subprocess.Popen(cmd_ffmpeg, stdin=subprocess.PIPE)
+
+        base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
+        options = vision.FaceDetectorOptions(base_options=base_options, min_detection_confidence=0.35)
+        detector = vision.FaceDetector.create_from_options(options)
+
+        # Inicialização do Rastreamento com Zona Morta (Deadband Anchor) e Trava de Estabilidade
+        anchor_crop_x = None
+        smoothed_crop_x = None
+        last_tracked_center = None
+        recent_dual_counts = []
+        deadband_px = 90  # Zona de conforto: 90px no foreground onde a câmera fica 100% estática
+
+        smoothing_alpha = 0.025  # Transição imperceptivelmente suave e cinematográfica
+
+        frame_idx = 0
+        while frame_idx < total_cut_frames:
+            ret, frame = cap.read()
+            if not ret or frame is None:
+                break
+
+            height, width = frame.shape[:2]
+
+            # Dimensões do foreground ampliado
+            effective_zoom = max(1.0, blur_zoom)
+            w_fg = int(round(1080 * effective_zoom))
+            if w_fg % 2 != 0:
+                w_fg += 1
+            h_fg = int(round(w_fg * (height / float(width))))
+            if h_fg % 2 != 0:
+                h_fg += 1
+            max_crop_x = max(0, w_fg - 1080)
+
+            # Rastreamento a cada 2 frames para máxima performance e estabilidade
+            if auto_tracking and (frame_idx % 2 == 0 or anchor_crop_x is None):
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                results = detector.detect(mp_img)
+                detections = results.detections if results.detections else []
+
+                # Detecção de Dual Shot com histerese estrita (mínimo de 10 amostras confirmadas)
+                is_broadcast = False
+                use_dual_mode = False
+                if person_preference in ("auto", "both"):
+                    is_dual, is_broadcast = detect_dual_with_fallback(frame, detections, width, height)
+                    effective_dual = is_dual or (person_preference == "both")
+                    recent_dual_counts.append(1 if effective_dual else 0)
+                    if len(recent_dual_counts) > 12:
+                        recent_dual_counts.pop(0)
+                    avg_dual = sum(recent_dual_counts) / max(1, len(recent_dual_counts))
+                    use_dual_mode = avg_dual >= 0.70  # Exige 70% de consistência para alternar modo
+
+                target_face = None
+                if use_dual_mode:
+                    prominent = filter_prominent_faces(
+                        detections, width, height,
+                        min_relative_area=0.15 if is_broadcast else 0.28
+                    )
+                    if len(prominent) >= 2:
+                        min_bx = min(d.bounding_box.origin_x for d in prominent[:2])
+                        max_bx = max(d.bounding_box.origin_x + d.bounding_box.width for d in prominent[:2])
+                        min_by = min(d.bounding_box.origin_y for d in prominent[:2])
+                        max_by = max(d.bounding_box.origin_y + d.bounding_box.height for d in prominent[:2])
+                    elif is_broadcast and len(prominent) == 1:
+                        bx_s = prominent[0].bounding_box
+                        face_cx_s = bx_s.origin_x + bx_s.width / 2.0
+                        if face_cx_s < width * 0.5:
+                            min_bx = max(0, int(bx_s.origin_x - bx_s.width * 0.4))
+                            max_bx = int(width * 0.90)
+                        else:
+                            min_bx = int(width * 0.05)
+                            max_bx = min(width, int(bx_s.origin_x + bx_s.width + bx_s.width * 0.4))
+                        min_by = max(0, bx_s.origin_y - int(bx_s.height * 0.3))
+                        max_by = min(height, bx_s.origin_y + bx_s.height + int(bx_s.height * 0.3))
+                    else:
+                        use_dual_mode = False
+
+                    if use_dual_mode:
+                        comp_bbox = CompositeBoundingBox(
+                            min_bx, min_by,
+                            max(1, max_bx - min_bx),
+                            max(1, max_by - min_by)
+                        )
+                        target_face = CompositeFaceDetection(comp_bbox)
+                        last_tracked_center = (min_bx + (max_bx - min_bx) / 2.0,
+                                               min_by + (max_by - min_by) / 2.0)
+
+                if not use_dual_mode:
+                    target_face, last_tracked_center = select_target_face(
+                        detections, width, height, last_tracked_center, person_preference
+                    )
+
+                if target_face is not None:
+                    bx = target_face.bounding_box
+                    face_cx = bx.origin_x + bx.width / 2.0
+                    raw_target_x = int(round((face_cx / float(width)) * w_fg - 540.0))
+                    raw_target_x = max(0, min(max_crop_x, raw_target_x))
+
+                    if anchor_crop_x is None:
+                        anchor_crop_x = raw_target_x
+                    else:
+                        # Corte de Cena (Shot Transition): se pular mais de 45% da tela, reposiciona imediatamente
+                        if abs(raw_target_x - anchor_crop_x) > (max_crop_x * 0.45):
+                            anchor_crop_x = raw_target_x
+                            smoothed_crop_x = float(raw_target_x)
+                        else:
+                            # Zona Morta (Deadband): se o orador estiver dentro da zona de conforto, a câmera NÃO se move!
+                            diff = abs(raw_target_x - anchor_crop_x)
+                            if diff > deadband_px:
+                                if raw_target_x > anchor_crop_x:
+                                    anchor_crop_x = raw_target_x - deadband_px
+                                else:
+                                    anchor_crop_x = raw_target_x + deadband_px
+                else:
+                    # Rosto temporariamente não detectado (olhando para baixo / b-roll): MANTÉM a posição anterior travada!
+                    if anchor_crop_x is None:
+                        anchor_crop_x = max_crop_x // 2
+
+            if anchor_crop_x is None:
+                anchor_crop_x = max_crop_x // 2
+            if smoothed_crop_x is None:
+                smoothed_crop_x = float(anchor_crop_x)
+
+            # Suavização imperceptível e livre de micro-tremores
+            smoothed_crop_x = smoothing_alpha * anchor_crop_x + (1.0 - smoothing_alpha) * smoothed_crop_x
+            sx = max(0, min(max_crop_x, int(round(smoothed_crop_x))))
+
+
+            # ── 1. GERAÇÃO DO FUNDO DESFOCADO (1080x1920) ────────────────────
+            bg_scale = max(1080.0 / float(width), 1920.0 / float(height))
+            bg_w = int(round(width * bg_scale))
+            bg_h = int(round(height * bg_scale))
+            bg_resized = cv2.resize(frame, (bg_w, bg_h), interpolation=cv2.INTER_LINEAR)
+            bg_x = max(0, (bg_w - 1080) // 2)
+            bg_y = max(0, (bg_h - 1920) // 2)
+            bg_cropped = bg_resized[bg_y : bg_y + 1920, bg_x : bg_x + 1080]
+
+            # Fast Bokeh Blur (Downscale + Blur + Upscale) + leve escurecimento de contraste
+            bg_small = cv2.resize(bg_cropped, (108, 192), interpolation=cv2.INTER_LINEAR)
+            bg_blur = cv2.GaussianBlur(bg_small, (15, 15), 0)
+            bg_full = cv2.resize(bg_blur, (1080, 1920), interpolation=cv2.INTER_LINEAR)
+            bg_full = cv2.convertScaleAbs(bg_full, alpha=0.88, beta=-10)
+
+            # ── 2. GERAÇÃO DO FOREGROUND NÍTIDO ENQUADRADO ───────────────────
+            fg_scaled = cv2.resize(frame, (w_fg, h_fg), interpolation=cv2.INTER_LINEAR)
+            fg_cropped = fg_scaled[0 : h_fg, sx : sx + 1080]
+
+            # ── 3. COMPOSIÇÃO: FOREGROUND SOBREPOSTO NO CENTRO DO BACKGROUND ──
+            y_offset = max(0, (1920 - h_fg) // 2)
+            bg_full[y_offset : y_offset + h_fg, 0 : 1080] = fg_cropped
+
+            ffmpeg_proc.stdin.write(bg_full.tobytes())
+            frame_idx += 1
+
+        cap.release()
+        detector.close()
+        ffmpeg_proc.stdin.close()
+        ffmpeg_proc.wait()
+
+        # Mescla vídeo renderizado com a faixa de áudio sincronizada
+        if os.path.exists(temp_audio_cut) and os.path.getsize(temp_audio_cut) > 0:
+            cmd_merge = [
+                FFMPEG_EXE, "-y",
+                "-i", temp_video_raw,
+                "-i", temp_audio_cut,
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-shortest",
+                output_video_path
+            ]
+        else:
+            cmd_merge = [
+                FFMPEG_EXE, "-y",
+                "-i", temp_video_raw,
+                "-c:v", "copy",
+                output_video_path
+            ]
+        subprocess.run(cmd_merge, capture_output=True)
+
+        # Limpeza segura de arquivos temporários
+        for tmp_f in [temp_video_raw, temp_audio_cut]:
+            if tmp_f and os.path.exists(tmp_f):
+                try:
+                    os.remove(tmp_f)
+                except Exception:
+                    pass
+
+        if os.path.exists(output_video_path) and os.path.getsize(output_video_path) > 0:
+            return {"path": output_video_path, "error": None}
+        else:
+            return {"path": None, "error": "Falha ao gerar o corte vertical com fundo desfocado e rastreamento."}
+
+    except Exception as exc:
+        return {"path": None, "error": str(exc)}
+
+
+def generate_169_preview_image(
+    video_path: str,
+    timestamp_str: str,
+    output_path: str,
+    zoom_factor: float = 1.0
+) -> dict:
+    """
+    Gera uma prévia visual instantânea do enquadramento horizontal 16:9 com zoom/aproximação.
+    """
+    try:
+        t_sec = parse_time_to_seconds(timestamp_str)
+        cap = cv2.VideoCapture(video_path)
+        cap.set(cv2.CAP_PROP_POS_MSEC, t_sec * 1000.0)
+        ret, frame = cap.read()
+        cap.release()
+
+        if not ret or frame is None:
+            return {"path": None, "error": "Não foi possível capturar o frame para a prévia 16:9."}
+
+        h, w = frame.shape[:2]
+        effective_zoom = max(1.0, float(zoom_factor))
+        if effective_zoom > 1.001:
+            crop_w = int(round(w / effective_zoom))
+            crop_h = int(round(h / effective_zoom))
+            x1 = max(0, (w - crop_w) // 2)
+            y1 = max(0, (h - crop_h) // 2)
+            cropped = frame[y1 : y1 + crop_h, x1 : x1 + crop_w]
+            resized = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+        else:
+            resized = frame
+
+        cv2.imwrite(output_path, resized, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+        return {"path": output_path, "error": None}
+    except Exception as exc:
+        return {"path": None, "error": str(exc)}
+

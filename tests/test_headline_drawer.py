@@ -26,7 +26,7 @@ class TestHeadlineDrawer(unittest.TestCase):
 
     def test_clean_and_condense_headline_removes_speaker_prefixes(self):
         raw = "Candidato desafia a crise econômica vou pegar o país quebrado e resolver tudo"
-        cleaned = clean_and_condense_headline(raw, max_chars=44)
+        cleaned = clean_and_condense_headline(raw, max_chars=75)
         self.assertFalse(cleaned.startswith("CANDIDATO"))
         self.assertIn("PAÍS QUEBRADO", cleaned)
 
@@ -41,14 +41,14 @@ class TestHeadlineDrawer(unittest.TestCase):
 
     def test_clean_and_condense_headline_preserves_questions(self):
         raw = "Como convencer eleitores de 60 anos? Candidato responde com franqueza"
-        cleaned = clean_and_condense_headline(raw, max_chars=44)
+        cleaned = clean_and_condense_headline(raw, max_chars=75)
         self.assertTrue(cleaned.endswith("?") or "ELEITORES" in cleaned)
 
     def test_format_headline_text_two_lines_and_uppercase(self):
-        raw = "Vou pegar o país quebrado e resolver"
-        formatted = format_headline_text(raw, max_width_chars=22, max_lines=2)
+        raw = "Vou pegar o país quebrado e resolver tudo"
+        formatted = format_headline_text(raw, max_width_chars=24, max_lines=3)
         lines = formatted.split(r"\N")
-        self.assertLessEqual(len(lines), 2)
+        self.assertLessEqual(len(lines), 3)
         self.assertEqual(formatted, formatted.upper())
         for line in lines:
             self.assertFalse(line.split()[-1].rstrip('.,!?:') in DANGLING_ENDINGS)

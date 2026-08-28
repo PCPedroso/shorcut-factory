@@ -13,11 +13,15 @@ LIBRARY_FILE = os.path.join(DATA_DIR, "library.json")
 
 
 def format_upload_date(raw_date: str) -> str:
-    """Formata YYYYMMDD para DD/MM/YYYY."""
-    if not raw_date or len(str(raw_date)) != 8:
-        return "Data desconhecida"
-    s = str(raw_date)
-    return f"{s[6:8]}/{s[4:6]}/{s[0:4]}"
+    """Formata YYYYMMDD para DD/MM/YYYY ou mantém se já for string formatada."""
+    if not raw_date:
+        return "Arquivo Local"
+    s = str(raw_date).strip()
+    if "/" in s or "-" in s and len(s) == 10:
+        return s
+    if len(s) == 8 and s.isdigit():
+        return f"{s[6:8]}/{s[4:6]}/{s[0:4]}"
+    return s
 
 
 def get_library() -> list:

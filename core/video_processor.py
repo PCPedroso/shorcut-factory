@@ -8,15 +8,97 @@ import yt_dlp
 import imageio_ffmpeg
 from moviepy.video.io.VideoFileClip import VideoFileClip
 
+import re
+import hashlib
+
 # Garante que o Deno e o FFmpeg estejam no PATH do processo
 DENO_DIR = os.path.expanduser(r"~/.deno/bin")
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 FFMPEG_DIR = os.path.dirname(FFMPEG_EXE)
 
+# Garante que exista um executável chamado ffmpeg.exe na pasta para ferramentas que buscam pelo nome padrão
+ffmpeg_alias = os.path.join(FFMPEG_DIR, "ffmpeg.exe")
+if not os.path.exists(ffmpeg_alias) and os.path.exists(FFMPEG_EXE):
+    try:
+        import shutil
+        shutil.copy2(FFMPEG_EXE, ffmpeg_alias)
+    except Exception:
+        pass
+
 current_path = os.environ.get("PATH", "")
 paths_to_add = [p for p in [DENO_DIR, FFMPEG_DIR] if os.path.exists(p) and p not in current_path]
 if paths_to_add:
     os.environ["PATH"] = os.pathsep.join(paths_to_add) + os.pathsep + current_path
+
+
+def generate_local_video_id(filename_or_path: str) -> str:
+    """
+    Gera um identificador único e seguro para vídeos locais do computador.
+    Exemplo: 'Entrevista Podcast.mp4' -> 'local_entrevista_podcast_a1b2c3d4'
+    """
+    base_name = os.path.splitext(os.path.basename(filename_or_path))[0]
+    # Sanitiza o nome para caracteres alfanuméricos e underscores
+    slug = re.sub(r'[^a-zA-Z0-9_]+', '_', base_name).strip('_').lower()
+    if not slug:
+        slug = "video"
+    if len(slug) > 35:
+        slug = slug[:35]
+
+    # Gera hash curto de 8 caracteres baseado no nome
+    hash_str = hashlib.md5(filename_or_path.encode('utf-8')).hexdigest()[:8]
+    return f"local_{slug}_{hash_str}"
+
+
+def extract_audio_from_local_video(video_path: str, output_path: str = "temp_audio.mp3") -> dict:
+    """
+    Extrai a faixa de áudio em MP3 a partir de um arquivo de vídeo local usando FFmpeg.
+    """
+    try:
+        out_dir = os.path.dirname(os.path.abspath(output_path))
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
+        cmd = [
+            FFMPEG_EXE, "-y",
+            "-i", video_path,
+            "-vn",
+            "-acodec", "libmp3lame",
+            "-b:a", "192k",
+            output_path
+        ]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if res.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            return {"path": output_path, "error": None}
+        else:
+            return {"path": None, "error": f"Falha ao extrair áudio: {res.stderr[-200:] if res.stderr else 'Erro desconhecido'}"}
+    except Exception as exc:
+        return {"path": None, "error": str(exc)}
+
+
+def extract_thumbnail_from_video(video_path: str, output_path: str = "temp_thumb.jpg", timestamp_sec: float = 2.0) -> dict:
+    """
+    Captura e salva um frame do vídeo local em formato JPG para servir de thumbnail.
+    """
+    try:
+        out_dir = os.path.dirname(os.path.abspath(output_path))
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
+        cmd = [
+            FFMPEG_EXE, "-y",
+            "-ss", str(max(0.0, float(timestamp_sec))),
+            "-i", video_path,
+            "-vframes", "1",
+            "-q:v", "2",
+            output_path
+        ]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if res.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            return {"path": output_path, "error": None}
+        else:
+            return {"path": None, "error": "Falha ao gerar thumbnail."}
+    except Exception as exc:
+        return {"path": None, "error": str(exc)}
 
 
 def download_full_video(url: str, output_path: str = "temp_video.mp4", is_live: bool = False) -> dict:
@@ -45,7 +127,7 @@ def download_full_video(url: str, output_path: str = "temp_video.mp4", is_live: 
             'format': 'bestvideo[height<=1080]+bestaudio/best',
             'outtmpl': output_path,
             'merge_output_format': 'mp4',
-            'ffmpeg_location': FFMPEG_DIR,
+            'ffmpeg_location': FFMPEG_EXE,
             'quiet': False,
             'no_warnings': True,
             'js_runtimes': js_runtimes_cfg
@@ -106,9 +188,11 @@ def cut_video(
     end_time_str: str,
     output_path: str = "corte_final.mp4",
     aspect_ratio_mode: str = "16:9",
+    horizontal_zoom: float = 1.0,
     blur_zoom: float = 1.0,
     blur_pan: float = 0.0,
     blur_intensity: int = 25,
+    blur_auto_tracking: bool = True,
     face_auto_zoom: bool = True,
     face_margin_ratio: float = 1.55,
     person_preference: str = "auto",
@@ -155,8 +239,8 @@ def cut_video(
     
     Parâmetros:
     - aspect_ratio_mode:
-        - '16:9': Horizontal original (1080p Full HD)
-        - '9:16_blur': Vertical 1080x1920 com fundo ampliado e desfocado
+        - '16:9': Horizontal original (1080p Full HD com suporte a zoom/aproximação geral)
+        - '9:16_blur': Vertical 1080x1920 com fundo ampliado e desfocado (Auto-Reframing dinâmico ou manual)
         - '9:16_crop': Vertical 1080x1920 com corte central preenchendo 100% da tela
         - '9:16_smart_face': Vertical 1080x1920 com rastreamento inteligente de rosto
         - '9:16_split': Vertical 1080x1920 Dividido (Topo: Entrevistador / Base: Entrevistado - Estilo Podcasts/Flow)
@@ -185,7 +269,11 @@ def cut_video(
                 result, output_path, start_time_str, end_time_str,
                 subtitle_enabled, subtitle_transcript_path, subtitle_highlight_color, subtitle_base_color, subtitle_font_size,
                 headline_enabled, headline_text, headline_preset, headline_text_color, headline_bg_color, headline_font_size, headline_margin_top,
-                emojis_enabled, zoom_punch_enabled, bg_music_enabled, bg_music_track_path, bg_music_volume, ducking_preset
+                emojis_enabled, zoom_punch_enabled, bg_music_enabled, bg_music_track_path, bg_music_volume, ducking_preset,
+                progress_bar_enabled, progress_bar_color, progress_bar_height,
+                callout_enabled, callout_text, callout_duration,
+                climax_zoom_enabled, climax_zoom_factor,
+                thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path
             )
 
         elif aspect_ratio_mode == "9:16_split":
@@ -207,45 +295,75 @@ def cut_video(
                 result, output_path, start_time_str, end_time_str,
                 subtitle_enabled, subtitle_transcript_path, subtitle_highlight_color, subtitle_base_color, subtitle_font_size,
                 headline_enabled, headline_text, headline_preset, headline_text_color, headline_bg_color, headline_font_size, headline_margin_top,
-                emojis_enabled, zoom_punch_enabled, bg_music_enabled, bg_music_track_path, bg_music_volume, ducking_preset
+                emojis_enabled, zoom_punch_enabled, bg_music_enabled, bg_music_track_path, bg_music_volume, ducking_preset,
+                progress_bar_enabled, progress_bar_color, progress_bar_height,
+                callout_enabled, callout_text, callout_duration,
+                climax_zoom_enabled, climax_zoom_factor,
+                thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path
             )
 
         elif aspect_ratio_mode == "9:16_blur":
-            # Pipeline 9:16 Fundo Desfocado com Zoom e Pan configuráveis
-            w_fg = int(1080 * blur_zoom)
-            if w_fg % 2 != 0:
-                w_fg += 1
-
-            if w_fg > 1080:
-                max_crop_x = w_fg - 1080
-                crop_x = int(max_crop_x * (blur_pan + 1.0) / 2.0)
-                fg_filter = f"[0:v]scale={w_fg}:-2,crop=1080:ih:{crop_x}:0[fg]"
-                overlay_filter = "[bg][fg]overlay=0:(H-h)/2[v]"
+            # Pipeline 9:16 Fundo Desfocado
+            if blur_auto_tracking:
+                # Modo Inteligente: Dynamic Auto-Reframing com rastreamento de rosto no foreground
+                from core.face_tracker import crop_video_with_smart_blur_tracking
+                result = crop_video_with_smart_blur_tracking(
+                    input_video_path=input_path,
+                    start_time_str=start_time_str,
+                    end_time_str=end_time_str,
+                    output_video_path=output_path,
+                    blur_zoom=blur_zoom,
+                    person_preference=person_preference,
+                    face_margin_ratio=face_margin_ratio,
+                    auto_tracking=True
+                )
+                return _apply_all_post_processing(
+                    result, output_path, start_time_str, end_time_str,
+                    subtitle_enabled, subtitle_transcript_path, subtitle_highlight_color, subtitle_base_color, subtitle_font_size,
+                    headline_enabled, headline_text, headline_preset, headline_text_color, headline_bg_color, headline_font_size, headline_margin_top,
+                    emojis_enabled, zoom_punch_enabled, bg_music_enabled, bg_music_track_path, bg_music_volume, ducking_preset,
+                    progress_bar_enabled, progress_bar_color, progress_bar_height,
+                    callout_enabled, callout_text, callout_duration,
+                    climax_zoom_enabled, climax_zoom_factor,
+                    thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path
+                )
             else:
-                fg_filter = f"[0:v]scale={w_fg}:-2[fg]"
-                overlay_filter = "[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+                # Modo Manual Estático
+                w_fg = int(1080 * blur_zoom)
+                if w_fg % 2 != 0:
+                    w_fg += 1
 
-            filter_complex = (
-                f"[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur={blur_intensity}:5,eq=brightness=-0.10[bg];"
-                f"{fg_filter};"
-                f"{overlay_filter}"
-            )
-            cmd = [
-                FFMPEG_EXE, "-y",
-                "-ss", start_time_str,
-                "-to", end_time_str,
-                "-i", input_path,
-                "-filter_complex", filter_complex,
-                "-map", "[v]",
-                "-map", "0:a?",
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-crf", "20",
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-pix_fmt", "yuv420p",
-                output_path
-            ]
+                if w_fg > 1080:
+                    max_crop_x = w_fg - 1080
+                    crop_x = int(max_crop_x * (blur_pan + 1.0) / 2.0)
+                    fg_filter = f"[0:v]scale={w_fg}:-2,crop=1080:ih:{crop_x}:0[fg]"
+                    overlay_filter = "[bg][fg]overlay=0:(H-h)/2[v]"
+                else:
+                    fg_filter = f"[0:v]scale={w_fg}:-2[fg]"
+                    overlay_filter = "[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+
+                filter_complex = (
+                    f"[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur={blur_intensity}:5,eq=brightness=-0.10[bg];"
+                    f"{fg_filter};"
+                    f"{overlay_filter}"
+                )
+                cmd = [
+                    FFMPEG_EXE, "-y",
+                    "-ss", start_time_str,
+                    "-to", end_time_str,
+                    "-i", input_path,
+                    "-filter_complex", filter_complex,
+                    "-map", "[v]",
+                    "-map", "0:a?",
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-crf", "20",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-pix_fmt", "yuv420p",
+                    output_path
+                ]
+
         elif aspect_ratio_mode == "9:16_crop":
             # Pipeline 9:16 Corte Central (1080x1920 preenchendo 100% da tela)
             filter_complex = "[0:v]crop=ih*(9/16):ih:(iw-ow)/2:0,scale=1080:1920[v]"
@@ -267,21 +385,43 @@ def cut_video(
                 output_path
             ]
         else:
-            # Padrão 16:9 Horizontal (Cópia rápida com recodificação precisa)
-            cmd = [
-                FFMPEG_EXE, "-y",
-                "-ss", start_time_str,
-                "-to", end_time_str,
-                "-i", input_path,
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-crf", "20",
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-pix_fmt", "yuv420p",
-                "-movflags", "+faststart",
-                output_path
-            ]
+            # Padrão 16:9 Horizontal (Com suporte a aproximação / zoom geral)
+            effective_hz_zoom = max(1.0, float(horizontal_zoom))
+            if effective_hz_zoom > 1.001:
+                filter_complex = f"[0:v]crop=iw/{effective_hz_zoom}:ih/{effective_hz_zoom}:(in_w-out_w)/2:(in_h-out_h)/2,scale=1920:1080[v]"
+                cmd = [
+                    FFMPEG_EXE, "-y",
+                    "-ss", start_time_str,
+                    "-to", end_time_str,
+                    "-i", input_path,
+                    "-filter_complex", filter_complex,
+                    "-map", "[v]",
+                    "-map", "0:a?",
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-crf", "20",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-pix_fmt", "yuv420p",
+                    "-movflags", "+faststart",
+                    output_path
+                ]
+            else:
+                cmd = [
+                    FFMPEG_EXE, "-y",
+                    "-ss", start_time_str,
+                    "-to", end_time_str,
+                    "-i", input_path,
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-crf", "20",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-pix_fmt", "yuv420p",
+                    "-movflags", "+faststart",
+                    output_path
+                ]
+
 
         result = subprocess.run(cmd, capture_output=True, text=True)
 

@@ -1,5 +1,12 @@
 import yt_dlp
 import os
+import imageio_ffmpeg
+
+FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
+FFMPEG_DIR = os.path.dirname(FFMPEG_EXE)
+current_path = os.environ.get("PATH", "")
+if FFMPEG_DIR and os.path.exists(FFMPEG_DIR) and FFMPEG_DIR not in current_path:
+    os.environ["PATH"] = FFMPEG_DIR + os.pathsep + current_path
 
 def get_video_metadata(url: str):
     """
