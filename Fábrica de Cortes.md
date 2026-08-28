@@ -179,8 +179,22 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 - **📂 Acesso Direto às Pastas Locais dos Cortes (`app.py`)**:
   - Botão *"📂 Abrir Pasta"* em todos os cards da **Galeria (Seção 4)** e na **Geração Individual (Seção 3)**, abrindo o Explorador de Arquivos do Windows diretamente na pasta do corte.
   - Links locais clicáveis `file:///` e caminhos absolutos exibidos para fácil navegação e cópia sem download pelo navegador.
-- **🧪 Suíte de 52 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando toda a suíte do `core/` via `pytest`.
+- **💻 Carregamento de Vídeos Locais do Computador (`core/video_processor.py`, `app.py`)**:
+  - **Seletor de Entrada Duplo**: Alternância fluida entre `🌐 Link do YouTube` e `💻 Carregar Arquivo de Vídeo Local (.mp4, .mov, .mkv, .avi, .webm)`.
+  - **Extração Autônoma**: Extração de áudio MP3 192k e thumbnail diretamente do arquivo local via FFmpeg (`generate_local_video_id`, `extract_audio_from_local_video`, `extract_thumbnail_from_video`), integrando-se 100% à esteira de transcrição Faster-Whisper e mineração de cortes.
+- **🔍 Aproximação / Zoom no Modo Horizontal 16:9 (`core/video_processor.py`, `core/face_tracker.py`, `app.py`)**:
+  - **Zoom Proporcional (1.00x a 1.50x)**: Ajuste milimétrico para aproximação de oradores e corte de bordas/barras pretas/marcas d'água de transmissões.
+  - **Prévia Visual 16:9**: Geração de imagem em alta definição (`generate_169_preview_image`) para conferência imediata do enquadramento antes da renderização.
+  - **Suporte em Lote**: Parâmetro integrado ao `core/batch_processor.py`.
+- **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (`core/face_tracker.py`)**:
+  - **Zona Morta de Conforto (90px)**: A câmera permanece 100% estática como tripé fixo enquanto o orador estiver dentro da margem central de conforto, eliminando oscilações e caça de foco indesejada.
+  - **Memória de Posição (Position Hold)**: Mantém o enquadramento travado caso o rosto fique temporariamente oculto por b-rolls ou rotação de cabeça.
+  - **Transição Cinematográfica**: Suavização exponencial aveludada (`alpha = 0.025`) para ajustes orgânicos e imperceptíveis.
+- **🏷️ Expansão e Preenchimento de Headlines Magnéticas (`core/headline_drawer.py`)**:
+  - **Capacidade Expandida para 75 Caracteres**: Suporte a pensamentos longos e completos sem cortes ou truncamentos.
+  - **Largura Otimizada por Linha (26 a 28 caracteres)**: Quebras harmoniosas que preenchem de 75% a 85% da largura da tela 9:16, eliminando margens laterais vazias excessivas.
+- **🧪 Suíte de 58 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando toda a suíte do `core/` via `pytest` (incluindo `test_local_video.py`, `test_blur_tracker.py` e `test_horizontal_zoom.py`).
 
 ---
 
@@ -197,6 +211,9 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
    - Inserção de imagens/vídeos de apoio na metade superior do Split Screen ou em overlays curtos de 2 a 3 segundos (cutaways).
 3. **🎨 Aperfeiçoamento de Capas 9:16 & Zooms de Retenção**:
    - Refinamento de presets visuais de capas, templates e ajustes finos de transição de zoom.
+
+---
+
 
 ---
 
