@@ -128,8 +128,11 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Direção Editorial Personalizada (`user_guidance`)**: Campo dedicado para instruir a IA sobre tom (ex: polêmico, indignado, bem-humorado, sério, urgente) e assunto ou gancho central a priorizar na geração dos textos.
 - **Exportação Padronizada com Nomenclatura Estrita** (`core/export_kit.py`):
   - Prefixos de 5 letras (`VLDSS`, `VRIRA`, `VFDBS`, `VCCFT`, `HOFHD`) + limite de 25 caracteres em palavras completas do título.
-  - Criação da pasta `data/<video_id>/<PREFIXO>_<Palavras>/` com `.mp4`, `info_publicacao.txt`, `descricao.txt` e `tags.txt`.
 - **Catálogo & Cache Inteligente por Minutagem e Formato** (`core/cuts_catalog.py`):
+  - Rastreamento em `data/<video_id>/cuts_catalog.json` de múltiplas instâncias de enquadramento com abertura instantânea (0s).
+
+---
+
 ## ⚡ Recursos Implementados & Em Produção
 
 - **✂️ Ferramenta Integrada de Edição Rápida, Ajuste Fino & Histórico Persistente (`core/quick_editor.py`, `app.py`)**:
