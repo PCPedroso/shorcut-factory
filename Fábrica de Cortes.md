@@ -130,23 +130,20 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Prefixos de 5 letras (`VLDSS`, `VRIRA`, `VFDBS`, `VCCFT`, `HOFHD`) + limite de 25 caracteres em palavras completas do título.
   - Criação da pasta `data/<video_id>/<PREFIXO>_<Palavras>/` com `.mp4`, `info_publicacao.txt`, `descricao.txt` e `tags.txt`.
 - **Catálogo & Cache Inteligente por Minutagem e Formato** (`core/cuts_catalog.py`):
-  - Rastreamento em `data/<video_id>/cuts_catalog.json` de múltiplas instâncias de enquadramento com abertura instantânea (0s).
+## ⚡ Recursos Implementados & Em Produção
 
-### 🔹 Fase 3 — Retenção de Topo, Áudio Ducking & Integrações
-- **🏷️ Headline / Título Fixo de Retenção no Topo (9:16)** (`core/headline_drawer.py`):
-  - Presets (Amarelo, Red, Dark, Branco, Flutuante, Custom), margem de Safe Zone, IA focada em pensamento completo sem cortes no final e quebra harmoniosa em 2 linhas.
-- **🎵 Trilha Sonora de Fundo & Audio Ducking Inteligente** (`core/audio_mixer.py`):
-  - 4 trilhas royalty-free (`lofi_chill`, `dynamic_pulse`, `tension_suspense`, `inspirational_epic`) + suporte a MP3s customizados.
-  - Atenuação fluida da música enquanto o orador fala via sidechain FFmpeg (`suave`, `medio`, `intenso`).
-- **🔍 Efeitos Visuais de Retenção** (`core/retention_effects.py`):
-  - Zoom Punch periódico sutil (1.08x) a cada ~8.5s e injeção de emojis contextuais nas legendas.
-- **🌐 Exportação Direta & Integrações** (`core/integrations.py`):
-  - Upload para o YouTube Shorts via OAuth2 e disparo estruturado para Webhooks (n8n/Make/Zapier).
-
-### 🔹 Fase 4 — Polimento Visual, Thumbnails Multicamadas, Ferramentas Pós-Corte & Engenharia de Áudio
-- **🏷️ Editor de Headline de Topo no Pós-Corte com Prévia em Tempo Real (`core/headline_drawer.py`, `app.py`)**:
-  - Nova aba integrada na ferramenta de **Edição Rápida** de qualquer vídeo gerado ou na galeria.
-  - Modos de container: **Caixa por Linha (destaque individual estilo viral TikTok/Reels)**, **Card Único** e **Sem Caixa (Contorno)**.
+- **✂️ Ferramenta Integrada de Edição Rápida, Ajuste Fino & Histórico Persistente (`core/quick_editor.py`, `app.py`)**:
+  - **Sinalização Persistente de Conclusão**: Após qualquer ajuste pós-corte (*Trim*, *Remover Trecho*, *Banner*, *Headline*, *Equalização de Áudio*), um card verde de confirmação permanece no topo do componente com carimbo de data/hora, ação realizada, detalhes dos parâmetros e arquivo gerado.
+  - **Histórico Completo de Edições (`historico_edicoes.json`)**: Cada pasta de corte armazena o histórico em JSON de todos os ajustes aplicados cronologicamente, com visualizador em expander exibindo a linha do tempo de alterações.
+  - **5 Abas de Pós-Corte**:
+    1. *✂️ Aparar (Trim)* com prévia de frames de início e fim.
+    2. *🗑️ Remover Trecho (Snip & Merge)* para corte de gafes e silêncios.
+    3. *🎨 Banner / Tarja (Overlay)* com suporte a logo embutido.
+    4. *🏷️ Headline de Topo* com renderização acelerada por GPU.
+    5. *🎙️ Equalizador & Áudio* com preset para lives/estouro e torcida/ambiente.
+- **🏷️ Headline / Título de Topo Magnético Pós-Corte (`core/headline_drawer.py`, `app.py`)**:
+  - Adição ou troca do título fixo do corte sem necessidade de reprocessar o vídeo do zero.
+  - Modos de container: *Caixa por Linha (TikTok/Reels)*, *Card Único (Bloco)* e *Sem Caixa (Contorno/Outline)*.
   - Controle completo de margem do topo (Offset Y), tamanho de fonte, largura do container, padding horizontal/vertical, espaçamento entre linhas, cantos arredondados, alinhamento, opacidade e sombra projetada.
   - **Prévia visual instantânea no frame em tempo real** e queima no vídeo acelerada por GPU (NVENC).
 - **🎙️ Equalizador, Anti-Estouro & Nivelador Dinâmico de Áudio no Pós-Corte (`core/audio_processor.py`, `app.py`)**:
@@ -168,15 +165,13 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Isolamento de sujeito por IA via `Rembg` (U2-Net) + micro-contraste adaptativo `OpenCV CLAHE` + Unsharp Mask.
   - Geração automática das 3 variações: `⚡ Impacto Neon (Glow)`, `✨ Clean Focus (Sombra 3D)` e `🎬 Moldura Dinâmica (HDR)`.
 - **⏳ Barra de Progresso Animada & Banner de Chamada (Lower Third)** (`core/retention_effects.py`).
-- **✂️ Ferramenta Integrada de Edição Rápida & Ajuste Fino (`core/quick_editor.py`)**:
-  - 5 abas integradas: *Aparar (Trim)*, *Remover Trecho (Snip & Merge)*, *Banner (Overlay)*, *Headline de Topo* e *Equalizador & Áudio*.
 - **👥 Enquadramento Plano Conjunto & Dual Shot (`core/face_tracker.py`)**:
   - Auto-detecção espacial de debate/sabatina com Bounding Box composta.
 - **🎨 Motor de Sobreposição de Banners, Tarjas (GC) e Logos (`core/overlay_manager.py`)**:
   - Modos `fill`, `fit`, `cover`, logo embutido secundário e prévia instantânea de frame.
 - **🔍 Aproximação / Zoom no Modo Horizontal 16:9 (1.0x a 1.5x)** (`core/video_processor.py`).
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
-- **🧪 Suíte de 68 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 69 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest`.
 
 ---

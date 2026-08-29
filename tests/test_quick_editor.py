@@ -64,6 +64,34 @@ class TestQuickEditor(unittest.TestCase):
         dur = get_video_duration(out_snip)
         self.assertAlmostEqual(dur, 4.0, delta=0.8)
 
+    def test_edit_history_logging(self):
+        from core.quick_editor import get_edit_history_path, load_edit_history, record_quick_edit
+        
+        log_path = get_edit_history_path(self.sample_video)
+        self.assertTrue(log_path.endswith("historico_edicoes.json"))
+
+        entry1 = record_quick_edit(
+            video_path=self.sample_video,
+            action_name="✂️ Aparar (Trim)",
+            details="Início: 1.0s | Fim: 4.0s (Duração: 3.0s)",
+            output_path=None
+        )
+        self.assertEqual(entry1["action"], "✂️ Aparar (Trim)")
+        self.assertEqual(entry1["mode"], "Substituição Direta")
+
+        entry2 = record_quick_edit(
+            video_path=self.sample_video,
+            action_name="🏷️ Headline de Topo",
+            details="Texto: 'TESTE HEADLINE'",
+            output_path=os.path.join(self.test_dir, "sample_test_headline.mp4")
+        )
+        self.assertEqual(entry2["mode"], "Nova Versão")
+
+        history = load_edit_history(self.sample_video)
+        self.assertGreaterEqual(len(history), 2)
+        self.assertEqual(history[0]["action"], "🏷️ Headline de Topo")
+        self.assertEqual(history[1]["action"], "✂️ Aparar (Trim)")
+
 
 if __name__ == '__main__':
     unittest.main()

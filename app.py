@@ -62,8 +62,10 @@ from core.headline_drawer import (
 from core.audio_mixer import list_available_tracks, DUCKING_PRESETS
 from core.retention_effects import PROGRESS_BAR_COLORS, ENGAGEMENT_CALLOUT_PRESETS
 from core.thumbnail_generator import create_cut_thumbnail
-from core.integrations import get_youtube_auth_status, authenticate_youtube_oauth, upload_to_youtube_shorts, send_to_webhook
-from core.quick_editor import get_video_duration, extract_frame_at_timestamp, trim_video, remove_snippet_and_merge
+from core.quick_editor import (
+    get_video_duration, extract_frame_at_timestamp, trim_video, remove_snippet_and_merge,
+    load_edit_history, record_quick_edit
+)
 from core.overlay_manager import apply_overlay_to_video, generate_overlay_preview, OVERLAY_PRESETS
 from core.audio_processor import (
     AUDIO_EQUALIZER_PRESETS, equalize_video_audio, generate_audio_preview_sample
@@ -169,8 +171,40 @@ def render_quick_editor_component(video_path: str, unique_key: str):
     if dur < 0.5:
         return
 
-    with st.expander(f"✂️ Edição Rápida / Ajuste Fino de Trechos (Duração: {dur:.1f}s)", expanded=False):
+    # Carrega histórico de edições persistente do vídeo
+    edit_history = load_edit_history(video_path)
+    latest_edit = edit_history[0] if edit_history else st.session_state.get(f"last_edit_status_{unique_key}")
+
+    # Título dinâmico do Expander sinalizando se houve edição
+    expander_label = f"✂️ Edição Rápida / Ajuste Fino de Trechos (Duração: {dur:.1f}s)"
+    if latest_edit:
+        expander_label += f" — 🟢 Último Ajuste: {latest_edit['action']} ({latest_edit['timestamp']})"
+
+    should_expand = bool(st.session_state.get(f"just_edited_{unique_key}", False))
+
+    with st.expander(expander_label, expanded=should_expand):
         st.caption("Ajuste o vídeo diretamente sem precisar abrir softwares externos:")
+
+        # ── SINALIZAÇÃO CLARA E PERSISTENTE DA ÚLTIMA EDIÇÃO ─────────────────
+        if latest_edit:
+            st.success(
+                f"✅ **Edição Rápida Concluída com Sucesso!**\n\n"
+                f"• **Ação Realizada:** `{latest_edit['action']}` ({latest_edit['mode']})\n\n"
+                f"• **Detalhes do Ajuste:** {latest_edit['details']}\n\n"
+                f"• **Arquivo Afetado:** `{latest_edit['output_file']}` — *Concluído em {latest_edit['timestamp']}*"
+            )
+
+        # ── HISTÓRICO DE EDIÇÕES DESTE VÍDEO ─────────────────────────────────
+        if edit_history:
+            with st.expander(f"📜 Histórico de Edições Deste Vídeo ({len(edit_history)} registro{'s' if len(edit_history) > 1 else ''})", expanded=False):
+                st.markdown("Veja abaixo todos os ajustes e edições aplicados a este corte:")
+                for idx_h, item_h in enumerate(edit_history):
+                    st.markdown(
+                        f"**{idx_h + 1}. {item_h['action']}** — `{item_h['timestamp']}` (`{item_h['mode']}`)\n\n"
+                        f"↳ **Detalhes:** {item_h['details']}  |  **Arquivo:** `{item_h['output_file']}`"
+                    )
+                    if idx_h < len(edit_history) - 1:
+                        st.markdown("---")
 
         col_mode, col_suf = st.columns([1.5, 1.0])
         with col_mode:
@@ -251,13 +285,17 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     if trim_res.get("error"):
                         st.error(f"Erro ao aparar vídeo: {trim_res['error']}")
                     else:
+                        entry = record_quick_edit(
+                            video_path=video_path,
+                            action_name="✂️ Aparar (Trim)",
+                            details=f"Início: {start_trim:.1f}s | Fim: {end_trim:.1f}s | Nova Duração: {trim_res.get('new_duration', dur_result):.1f}s",
+                            output_path=out_target
+                        )
+                        st.session_state[f"last_edit_status_{unique_key}"] = entry
+                        st.session_state[f"just_edited_{unique_key}"] = True
                         if out_target:
                             st.session_state[f"last_edited_video_{unique_key}"] = out_target
-                            st.success(f"🎉 Novo vídeo criado com sucesso! Nova duração: {trim_res.get('new_duration', dur_result):.1f}s")
-                            st.rerun()
-                        else:
-                            st.success(f"🎉 Vídeo atualizado com sucesso! Nova duração: {trim_res.get('new_duration', dur_result):.1f}s")
-                            st.rerun()
+                        st.rerun()
 
         with tab_snip:
             st.markdown("##### 🗑️ Remover Trecho do Meio")
@@ -310,13 +348,17 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     if snip_res.get("error"):
                         st.error(f"Erro ao remover trecho: {snip_res['error']}")
                     else:
+                        entry = record_quick_edit(
+                            video_path=video_path,
+                            action_name="🗑️ Remover Trecho (Snip & Merge)",
+                            details=f"Trecho Removido: {snip_start:.1f}s a {snip_end:.1f}s ({snip_end - snip_start:.1f}s) | Nova Duração: {snip_res.get('new_duration', dur_after_snip):.1f}s",
+                            output_path=out_target
+                        )
+                        st.session_state[f"last_edit_status_{unique_key}"] = entry
+                        st.session_state[f"just_edited_{unique_key}"] = True
                         if out_target:
                             st.session_state[f"last_edited_video_{unique_key}"] = out_target
-                            st.success(f"🎉 Novo vídeo criado com sucesso! Nova duração: {snip_res.get('new_duration', dur_after_snip):.1f}s")
-                            st.rerun()
-                        else:
-                            st.success(f"🎉 Trecho removido e vídeo atualizado com sucesso! Nova duração: {snip_res.get('new_duration', dur_after_snip):.1f}s")
-                            st.rerun()
+                        st.rerun()
 
         with tab_overlay:
             st.markdown("##### 🎨 Sobreposição de Banner, Tarja (GC) e Marca d'Água")
@@ -359,177 +401,113 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                             f_up.write(up_file.getbuffer())
                         selected_banner_path = temp_save_path
 
-            if not selected_banner_path:
-                st.info("ℹ️ Selecione ou envie uma imagem acima para configurar a sobreposição.")
-            else:
-                # 2. Configurações de Formatação e Posicionamento
-                st.markdown("---")
-                col_pre, col_sc = st.columns(2)
-                with col_pre:
-                    preset_keys = list(OVERLAY_PRESETS.keys())
-                    preset_names = [OVERLAY_PRESETS[k]["name"] for k in preset_keys]
-                    sel_preset_idx = st.selectbox(
-                        "🎯 Presets de Posicionamento:",
-                        range(len(preset_keys)),
-                        format_func=lambda i: preset_names[i],
-                        key=f"ov_preset_sel_{unique_key}"
-                    )
-                    active_preset_key = preset_keys[sel_preset_idx]
-                    p_data = OVERLAY_PRESETS[active_preset_key]
+            # Presets Rápidos
+            ov_preset_keys = list(OVERLAY_PRESETS.keys())
+            ov_preset_labels = [OVERLAY_PRESETS[k]["name"] for k in ov_preset_keys]
+            sel_ov_lbl = st.selectbox(
+                "Estilo / Preset Rápido:",
+                ov_preset_labels,
+                index=0,
+                key=f"ov_preset_sel_{unique_key}"
+            )
+            sel_ov_key = ov_preset_keys[ov_preset_labels.index(sel_ov_lbl)]
+            ov_preset_data = OVERLAY_PRESETS[sel_ov_key]
 
-                with col_sc:
-                    scale_mode_map = {
-                        "fill": "📏 Esticar para Preencher (Fill)",
-                        "fit": "🔍 Ajustar Proporcional (Fit)",
-                        "cover": "🖼️ Ampliar e Cortar para Preencher (Cover)"
-                    }
-                    def_scale = p_data.get("scale_mode", "fill")
-                    scale_opts = ["fill", "fit", "cover"]
+            # Ajustes Finos (Expander)
+            with st.expander("⚙️ Ajustes Finos de Posição, Escala e Logo Embutido", expanded=(sel_ov_key == "custom")):
+                col_ov1, col_ov2, col_ov3 = st.columns(3)
+                with col_ov1:
+                    sel_valign = st.selectbox(
+                        "Alinhamento Vertical:",
+                        ["bottom", "top", "center"],
+                        index=["bottom", "top", "center"].index(ov_preset_data.get("valign", "bottom")),
+                        key=f"ov_valign_{unique_key}"
+                    )
+                with col_ov2:
                     sel_scale_mode = st.selectbox(
-                        "📐 Modo de Adaptação da Imagem:",
-                        scale_opts,
-                        index=scale_opts.index(def_scale) if def_scale in scale_opts else 0,
-                        format_func=lambda x: scale_mode_map[x],
+                        "Modo de Escala:",
+                        ["fill", "fit", "cover"],
+                        index=["fill", "fit", "cover"].index(ov_preset_data.get("scale_mode", "fill")),
+                        format_func=lambda x: {
+                            "fill": "Esticar para Preencher (100% largura)",
+                            "fit": "Ajustar Proporcionalmente",
+                            "cover": "Cobrir e Cortar Excedente"
+                        }[x],
                         key=f"ov_scale_mode_{unique_key}"
                     )
+                with col_ov3:
+                    sel_height_px = st.number_input(
+                        "Altura em Pixels (0 = automático):",
+                        min_value=0, max_value=1920,
+                        value=int(ov_preset_data.get("height_px", 0)),
+                        step=10,
+                        key=f"ov_hpx_{unique_key}",
+                        help="Defina uma altura exata em pixels (ex: 220px para tarjas de TV) quando usar modo 'Esticar'."
+                    )
 
-                # Sliders de Dimensão e Posição
-                col_dim1, col_dim2 = st.columns(2)
-                with col_dim1:
-                    ov_w_pct = st.slider(
+                col_ov4, col_ov5, col_ov6 = st.columns(3)
+                with col_ov4:
+                    sel_width_pct = st.slider(
                         "Largura (% da tela):",
-                        min_value=10,
-                        max_value=100,
-                        value=int(p_data.get("width_pct", 100)),
-                        step=1,
-                        key=f"ov_w_pct_{unique_key}"
-                    )
-                with col_dim2:
-                    ov_h_px = st.slider(
-                        "Altura da Tarja (Pixels):",
-                        min_value=20,
-                        max_value=600,
-                        value=int(p_data.get("height_px", 300)),
+                        min_value=10, max_value=100,
+                        value=int(ov_preset_data.get("width_pct", 100)),
                         step=5,
-                        key=f"ov_h_px_{unique_key}"
+                        key=f"ov_wpct_{unique_key}"
                     )
-
-                col_pos1, col_pos2, col_pos3 = st.columns(3)
-                with col_pos1:
-                    pos_y_opts = ["bottom", "top", "center"]
-                    pos_y_labels = {"bottom": "⬇️ Rodapé (Inferior)", "top": "⬆️ Topo (Superior)", "center": "↕️ Centro"}
-                    def_pos_y = p_data.get("pos_y", "bottom")
-                    sel_pos_y = st.selectbox(
-                        "Posição Vertical (Y):",
-                        pos_y_opts,
-                        index=pos_y_opts.index(def_pos_y) if def_pos_y in pos_y_opts else 0,
-                        format_func=lambda x: pos_y_labels[x],
-                        key=f"ov_pos_y_{unique_key}"
+                with col_ov5:
+                    sel_offset_y = st.number_input(
+                        "Margem Vertical Y (px):",
+                        min_value=-500, max_value=500,
+                        value=int(ov_preset_data.get("offset_y", 0)),
+                        step=10,
+                        key=f"ov_offy_{unique_key}"
                     )
-                with col_pos2:
-                    pos_x_opts = ["center", "left", "right"]
-                    pos_x_labels = {"center": "↔️ Centralizado", "left": "⬅️ Esquerda", "right": "➡️ Direita"}
-                    def_pos_x = p_data.get("pos_x", "center")
-                    sel_pos_x = st.selectbox(
-                        "Posição Horizontal (X):",
-                        pos_x_opts,
-                        index=pos_x_opts.index(def_pos_x) if def_pos_x in pos_x_opts else 0,
-                        format_func=lambda x: pos_x_labels[x],
-                        key=f"ov_pos_x_{unique_key}"
-                    )
-                with col_pos3:
-                    ov_opacity = st.slider(
-                        "Opacidade:",
-                        min_value=0.1,
-                        max_value=1.0,
-                        value=float(p_data.get("opacity", 1.0)),
-                        step=0.05,
-                        key=f"ov_opacity_{unique_key}"
-                    )
+                with col_ov6:
+                    sel_opacity = st.slider(
+                        "Opacidade do Banner (%):",
+                        min_value=10, max_value=100,
+                        value=int(ov_preset_data.get("opacity", 1.0) * 100),
+                        step=5,
+                        key=f"ov_opac_{unique_key}"
+                    ) / 100.0
 
-                # Ajuste fino de offset e logo
-                selected_logo_path = None
-                sel_logo_pos = "left"
-                sel_logo_scale = 0.75
-                with st.expander("⚙️ Ajustes Finos de Margem e Logo Secundário Embutido", expanded=False):
-                    col_off1, col_off2 = st.columns(2)
-                    with col_off1:
-                        ov_off_y = st.number_input(
-                            "Margem / Deslocamento Y (px):",
-                            min_value=-500,
-                            max_value=500,
-                            value=int(p_data.get("offset_y", 0)),
-                            step=5,
-                            key=f"ov_off_y_{unique_key}"
-                        )
-                    with col_off2:
-                        ov_off_x = st.number_input(
-                            "Margem / Deslocamento X (px):",
-                            min_value=-500,
-                            max_value=500,
-                            value=int(p_data.get("offset_x", 0)),
-                            step=5,
-                            key=f"ov_off_x_{unique_key}"
-                        )
-
-                    st.markdown("##### 🏷️ Imagem Secundária Embutida (Logo / Foto / Selo no Banner)")
-                    up_logo = st.file_uploader(
-                        "Logo / Selo interno (Opcional):",
-                        type=["png", "jpg", "jpeg", "webp"],
-                        key=f"ov_logo_up_{unique_key}"
-                    )
-                    if up_logo:
-                        logo_save_p = os.path.join(v_dir, f"temp_logo_{up_logo.name}")
-                        with open(logo_save_p, "wb") as f_l:
-                            f_l.write(up_logo.getbuffer())
-                        selected_logo_path = logo_save_p
-
-                    col_l1, col_l2 = st.columns(2)
-                    with col_l1:
-                        sel_logo_pos = st.selectbox(
-                            "Posição do Logo no Banner:",
-                            ["left", "right", "center"],
-                            format_func=lambda x: {"left": "⬅️ Canto Esquerdo", "right": "➡️ Canto Direito", "center": "↔️ Centro"}[x],
-                            key=f"ov_logo_pos_{unique_key}"
-                        )
-                    with col_l2:
-                        sel_logo_scale = st.slider(
-                            "Tamanho do Logo (% do Banner):",
-                            min_value=0.2,
-                            max_value=1.0,
-                            value=0.75,
-                            step=0.05,
-                            key=f"ov_logo_scale_{unique_key}"
-                        )
-
-                # Dicionário de Configuração
-                current_ov_cfg = {
-                    "width_pct": ov_w_pct,
-                    "height_px": ov_h_px,
-                    "pos_x": sel_pos_x,
-                    "pos_y": sel_pos_y,
-                    "offset_x": ov_off_x if 'ov_off_x' in locals() else 0,
-                    "offset_y": ov_off_y if 'ov_off_y' in locals() else 0,
-                    "scale_mode": sel_scale_mode,
-                    "opacity": ov_opacity,
-                    "logo_pos": sel_logo_pos,
-                    "logo_scale_pct": sel_logo_scale
-                }
-
-                # 3. Prévia Instantânea do Frame
+                # Configuração de Logo / Imagem Secundária Embutida
                 st.markdown("---")
-                st.markdown("##### 👁️ Prévia do Encaixe em Tempo Real:")
-                col_prev_t, _ = st.columns([2, 2])
-                with col_prev_t:
-                    ov_preview_sec = st.slider(
-                        "Segundo do vídeo para prévia:",
-                        min_value=0.0,
-                        max_value=float(dur),
-                        value=min(1.0, float(dur * 0.1)),
-                        step=0.5,
-                        key=f"ov_prev_sec_{unique_key}"
-                    )
+                st.markdown("###### 🏷️ Logo / Selo Embutido na Faixa:")
+                col_lg1, col_lg2 = st.columns([1.5, 1.5])
+                with col_lg1:
+                    enable_logo = st.toggle("Adicionar Logo ou Selo Secundário", value=False, key=f"ov_en_logo_{unique_key}")
+                    selected_logo_path = None
+                    if enable_logo:
+                        if existing_imgs:
+                            sel_lg_file = st.selectbox("Selecione a imagem do Logo:", existing_imgs, key=f"ov_sel_logo_{unique_key}")
+                            selected_logo_path = os.path.join(v_dir, sel_lg_file)
+                with col_lg2:
+                    if enable_logo:
+                        logo_pos = st.selectbox("Posição do Logo no Banner:", ["left", "right", "center"], index=0, key=f"ov_lg_pos_{unique_key}")
+                        logo_scale = st.slider("Escala do Logo (% da altura do banner):", min_value=30, max_value=95, value=75, step=5, key=f"ov_lg_scale_{unique_key}") / 100.0
+                    else:
+                        logo_pos = "left"
+                        logo_scale = 0.75
 
+            current_ov_cfg = {
+                "valign": sel_valign,
+                "halign": "center",
+                "scale_mode": sel_scale_mode,
+                "width_pct": sel_width_pct,
+                "height_px": sel_height_px,
+                "offset_x": 0,
+                "offset_y": sel_offset_y,
+                "opacity": sel_opacity,
+                "logo_pos": logo_pos,
+                "logo_scale": logo_scale
+            }
+
+            # 3. Prévia Visual Instantânea
+            if selected_banner_path and os.path.exists(selected_banner_path):
+                st.markdown("---")
+                st.markdown("##### 👁️ Prévia em Tempo Real:")
+                ov_preview_sec = st.slider("Segundo do vídeo para prévia:", min_value=0.0, max_value=float(dur), value=min(2.0, float(dur/2)), step=0.5, key=f"ov_prev_sec_{unique_key}")
                 prev_frame = generate_overlay_preview(
                     video_path=video_path,
                     banner_path_or_array=selected_banner_path,
@@ -537,40 +515,43 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     timestamp_s=ov_preview_sec,
                     logo_path_or_array=selected_logo_path
                 )
-
                 if prev_frame is not None:
                     safe_display_image(prev_frame, caption=f"Prévia do Banner aplicado em {ov_preview_sec:.1f}s", use_container_width=True)
 
-                # 4. Botão de Aplicação / Renderização
-                st.markdown("")
-                btn_label_ov = "🎨 Salvar como Novo Vídeo com Banner" if "Salvar como um novo vídeo" in save_mode else "🎨 Aplicar Banner no Vídeo Atual"
-                if st.button(btn_label_ov, key=f"btn_apply_overlay_{unique_key}", type="primary", use_container_width=True):
-                    with st.spinner("Renderizando vídeo com sobreposição acelerada por GPU (NVENC)..."):
-                        out_target = None
-                        if "Salvar como um novo vídeo" in save_mode:
-                            v_dir_edit = os.path.dirname(video_path)
-                            b_name, ext = os.path.splitext(os.path.basename(video_path))
-                            suf = custom_suffix if custom_suffix else "_com_banner"
-                            out_target = os.path.join(v_dir_edit, f"{b_name}{suf}{ext}")
+            # 4. Botão de Aplicação / Renderização
+            st.markdown("")
+            btn_label_ov = "🎨 Salvar como Novo Vídeo com Banner" if "Salvar como um novo vídeo" in save_mode else "🎨 Aplicar Banner no Vídeo Atual"
+            if st.button(btn_label_ov, key=f"btn_apply_overlay_{unique_key}", type="primary", use_container_width=True):
+                with st.spinner("Renderizando vídeo com sobreposição acelerada por GPU (NVENC)..."):
+                    out_target = None
+                    if "Salvar como um novo vídeo" in save_mode:
+                        v_dir_edit = os.path.dirname(video_path)
+                        b_name, ext = os.path.splitext(os.path.basename(video_path))
+                        suf = custom_suffix if custom_suffix else "_com_banner"
+                        out_target = os.path.join(v_dir_edit, f"{b_name}{suf}{ext}")
 
-                        ov_res = apply_overlay_to_video(
+                    ov_res = apply_overlay_to_video(
+                        video_path=video_path,
+                        banner_path=selected_banner_path,
+                        config=current_ov_cfg,
+                        output_path=out_target,
+                        logo_path=selected_logo_path
+                    )
+
+                    if ov_res.get("error"):
+                        st.error(f"Erro ao aplicar banner: {ov_res['error']}")
+                    else:
+                        entry = record_quick_edit(
                             video_path=video_path,
-                            banner_path=selected_banner_path,
-                            config=current_ov_cfg,
-                            output_path=out_target,
-                            logo_path=selected_logo_path
+                            action_name="🎨 Banner / Tarja (Overlay)",
+                            details=f"Banner: {os.path.basename(selected_banner_path) if selected_banner_path else 'N/A'} | Modo: {current_ov_cfg.get('scale_mode', 'fill')} | Posição Y: {current_ov_cfg.get('valign', 'bottom')}",
+                            output_path=out_target
                         )
-
-                        if ov_res.get("error"):
-                            st.error(f"Erro ao aplicar banner: {ov_res['error']}")
-                        else:
-                            if out_target:
-                                st.session_state[f"last_edited_video_{unique_key}"] = out_target
-                                st.success(f"🎉 Novo vídeo criado com sucesso! Arquivo: `{os.path.basename(out_target)}`")
-                                st.rerun()
-                            else:
-                                st.success("🎉 Banner aplicado e vídeo atualizado com sucesso!")
-                                st.rerun()
+                        st.session_state[f"last_edit_status_{unique_key}"] = entry
+                        st.session_state[f"just_edited_{unique_key}"] = True
+                        if out_target:
+                            st.session_state[f"last_edited_video_{unique_key}"] = out_target
+                        st.rerun()
 
         # ── TAB 4: HEADLINE / TÍTULO DE TOPO (PÓS-CORTE) ──────────────────────
         with tab_headline:
@@ -596,32 +577,20 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         st.session_state[f"hl_post_text_{unique_key}"] = format_headline_text(cleaned_hl).replace(r"\N", "\n")
                         st.rerun()
 
-            # 2. Estilos e Cores
-            col_hp1, col_hp2, col_hp3 = st.columns([1.6, 1.2, 1.2])
-            with col_hp1:
-                hl_preset_keys = list(HEADLINE_PRESETS.keys())
-                hl_preset_labels = [HEADLINE_PRESETS[k]["name"] for k in hl_preset_keys]
-                saved_hl_preset = _cfg.get("headline_preset", "yellow_black")
-                def_hl_idx = hl_preset_keys.index(saved_hl_preset) if saved_hl_preset in hl_preset_keys else 0
-                sel_hl_preset_lbl = st.selectbox(
-                    "Estilo Visual:",
-                    hl_preset_labels,
-                    index=def_hl_idx,
-                    key=f"hl_post_preset_sel_{unique_key}"
-                )
-                sel_hl_preset_key = hl_preset_keys[hl_preset_labels.index(sel_hl_preset_lbl)]
-                p_hl_data = HEADLINE_PRESETS[sel_hl_preset_key]
+            # 2. Preset de Estilo Rápido
+            hl_preset_keys = list(HEADLINE_PRESETS.keys())
+            hl_preset_labels = [HEADLINE_PRESETS[k]["name"] for k in hl_preset_keys]
+            sel_hl_preset_lbl = st.selectbox(
+                "Preset de Estilo da Headline:",
+                hl_preset_labels,
+                index=0,
+                key=f"hl_post_preset_{unique_key}"
+            )
+            sel_hl_preset_key = hl_preset_keys[hl_preset_labels.index(sel_hl_preset_lbl)]
+            sel_hl_preset_data = HEADLINE_PRESETS[sel_hl_preset_key]
 
-            with col_hp2:
-                def_txt_col = _cfg.get("headline_text_color") or p_hl_data["text_color"]
-                sel_txt_col = st.color_picker("Cor do Texto:", def_txt_col, key=f"hl_post_txt_col_{unique_key}")
-
-            with col_hp3:
-                def_bg_col = _cfg.get("headline_bg_color") or p_hl_data["bg_color"]
-                sel_bg_col = st.color_picker("Cor da Caixa (Fundo):", def_bg_col, key=f"hl_post_bg_col_{unique_key}")
-
-            # 3. Layout e Dimensões
-            col_hl_m1, col_hl_m2, col_hl_m3, col_hl_m4 = st.columns(4)
+            # 3. Controles Customizáveis e Modo de Container
+            col_hl_m1, col_hl_m2, col_hl_m3 = st.columns(3)
             with col_hl_m1:
                 sel_hl_mode = st.selectbox(
                     "Modo do Container:",
@@ -653,87 +622,92 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     max_value=200,
                     value=saved_font_size,
                     step=2,
-                    key=f"hl_post_fsz_{unique_key}"
-                )
-            with col_hl_m4:
-                sel_hl_width_pct = st.slider(
-                    "Largura Máxima (% da tela):",
-                    min_value=50,
-                    max_value=100,
-                    value=92,
-                    step=1,
-                    key=f"hl_post_wpct_{unique_key}"
+                    key=f"hl_post_fsize_{unique_key}"
                 )
 
-            # 4. Ajustes Finos (Expander)
-            with st.expander("⚙️ Ajustes Finos de Espaçamento, Cantos Arredondados e Alinhamento", expanded=False):
-                col_fin1, col_fin2, col_fin3, col_fin4 = st.columns(4)
-                with col_fin1:
-                    sel_hl_pad_x = st.slider("Padding Horizontal (px):", 4, 80, 28, 2, key=f"hl_post_padx_{unique_key}")
-                with col_fin2:
-                    sel_hl_pad_y = st.slider("Padding Vertical (px):", 2, 60, 16, 2, key=f"hl_post_pady_{unique_key}")
-                with col_fin3:
-                    sel_hl_linesp = st.slider("Espaçamento de Linhas (px):", 0, 50, 14, 2, key=f"hl_post_linesp_{unique_key}")
-                with col_fin4:
-                    sel_hl_radius = st.slider("Cantos Arredondados (px):", 0, 50, 14, 2, key=f"hl_post_radius_{unique_key}")
-
-                col_fin5, col_fin6, col_fin7 = st.columns(3)
-                with col_fin5:
+            with st.expander("⚙️ Ajustes Finos de Cores, Padding, Cantos e Sombra", expanded=False):
+                col_hl_c1, col_hl_c2, col_hl_c3, col_hl_c4 = st.columns(4)
+                with col_hl_c1:
+                    sel_hl_text_color = st.color_picker(
+                        "Cor do Texto:",
+                        value=sel_hl_preset_data.get("primary_color", "#FFFFFF"),
+                        key=f"hl_post_tcolor_{unique_key}"
+                    )
+                with col_hl_c2:
+                    sel_hl_bg_color = st.color_picker(
+                        "Cor do Fundo / Caixa:",
+                        value=sel_hl_preset_data.get("box_color", "#E62117"),
+                        key=f"hl_post_bgcolor_{unique_key}"
+                    )
+                with col_hl_c3:
+                    sel_hl_bg_alpha = st.slider(
+                        "Opacidade do Fundo (%):",
+                        min_value=0, max_value=100,
+                        value=95 if sel_hl_preset_key != "floating_bold" else 0,
+                        step=5,
+                        key=f"hl_post_bgalpha_{unique_key}"
+                    ) / 100.0
+                with col_hl_c4:
                     sel_hl_align = st.selectbox(
                         "Alinhamento:",
                         ["center", "left", "right"],
-                        format_func=lambda x: {"center": "↔️ Centralizado", "left": "⬅️ Esquerda", "right": "➡️ Direita"}[x],
+                        index=0,
+                        format_func=lambda x: {"center": "Centralizado", "left": "Esquerda", "right": "Direita"}[x],
                         key=f"hl_post_align_{unique_key}"
                     )
-                with col_fin6:
-                    sel_hl_bg_op = st.slider("Opacidade da Caixa:", 0.0, 1.0, 1.0, 0.05, key=f"hl_post_bgop_{unique_key}")
-                with col_fin7:
-                    sel_hl_shadow = st.toggle("Sombra Projetada", value=True, key=f"hl_post_shadow_{unique_key}")
 
-            # Dicionário de Configuração
+                col_hl_p1, col_hl_p2, col_hl_p3, col_hl_p4 = st.columns(4)
+                with col_hl_p1:
+                    sel_hl_pad_h = st.slider("Padding Horizontal:", 10, 80, 28, 2, key=f"hl_post_padh_{unique_key}")
+                with col_hl_p2:
+                    sel_hl_pad_v = st.slider("Padding Vertical:", 5, 50, 16, 2, key=f"hl_post_padv_{unique_key}")
+                with col_hl_p3:
+                    sel_hl_line_spacing = st.slider("Espaçamento Linhas:", 0, 50, 14, 2, key=f"hl_post_linesp_{unique_key}")
+                with col_hl_p4:
+                    sel_hl_corner = st.slider("Cantos Arredondados:", 0, 50, 12, 2, key=f"hl_post_corner_{unique_key}")
+
+                col_hl_s1, col_hl_s2 = st.columns(2)
+                with col_hl_s1:
+                    sel_hl_max_w_pct = st.slider("Largura Máxima do Bloco (% da tela):", 50, 100, 90, 5, key=f"hl_post_maxw_{unique_key}") / 100.0
+                with col_hl_s2:
+                    sel_hl_shadow = st.toggle("Sombra Projetada Suave (Drop Shadow)", value=True, key=f"hl_post_shadow_{unique_key}")
+
             current_hl_cfg = {
-                "preset_key": sel_hl_preset_key,
-                "text_color": sel_txt_col,
-                "bg_color": sel_bg_col,
-                "bg_opacity": sel_hl_bg_op if 'sel_hl_bg_op' in locals() else 1.0,
-                "font_size": sel_hl_font_size,
+                "mode": sel_hl_mode,
                 "margin_top": sel_hl_margin_top,
-                "container_mode": sel_hl_mode,
-                "container_width_pct": sel_hl_width_pct,
-                "box_padding_x": sel_hl_pad_x if 'sel_hl_pad_x' in locals() else 28,
-                "box_padding_y": sel_hl_pad_y if 'sel_hl_pad_y' in locals() else 16,
-                "line_spacing": sel_hl_linesp if 'sel_hl_linesp' in locals() else 14,
-                "corner_radius": sel_hl_radius if 'sel_hl_radius' in locals() else 14,
-                "alignment": sel_hl_align if 'sel_hl_align' in locals() else "center",
-                "shadow_enabled": sel_hl_shadow if 'sel_hl_shadow' in locals() else True,
-                "shadow_offset_y": 6
+                "font_size": sel_hl_font_size,
+                "text_color": sel_hl_text_color,
+                "bg_color": sel_hl_bg_color,
+                "bg_alpha": sel_hl_bg_alpha,
+                "alignment": sel_hl_align,
+                "padding_h": sel_hl_pad_h,
+                "padding_v": sel_hl_pad_v,
+                "line_spacing": sel_hl_line_spacing,
+                "corner_radius": sel_hl_corner,
+                "max_width_pct": sel_hl_max_w_pct,
+                "shadow": sel_hl_shadow,
+                "stroke_color": "#000000",
+                "stroke_width": 2 if sel_hl_mode == "outline_only" else 0
             }
 
-            # 5. Prévia Instantânea do Frame
+            # 4. Prévia Visual Instantânea do Frame em Tempo Real
             st.markdown("---")
             st.markdown("##### 👁️ Prévia da Headline em Tempo Real:")
-            col_hl_prev_t, _ = st.columns([2, 2])
-            with col_hl_prev_t:
-                hl_preview_sec = st.slider(
-                    "Segundo do vídeo para prévia:",
-                    min_value=0.0,
-                    max_value=float(dur),
-                    value=min(1.0, float(dur * 0.1)),
-                    step=0.5,
-                    key=f"hl_post_prev_sec_{unique_key}"
+            col_hl_prev_ctrl, col_hl_prev_view = st.columns([1.5, 2.5])
+            with col_hl_prev_ctrl:
+                hl_preview_sec = st.slider("Segundo para visualização:", 0.0, float(dur), min(1.5, float(dur/2)), 0.5, key=f"hl_post_prev_sec_{unique_key}")
+                st.caption("Ajuste qualquer parâmetro acima e a prévia será atualizada instantaneamente!")
+            with col_hl_prev_view:
+                prev_hl_frame = generate_headline_preview(
+                    video_path=video_path,
+                    text=hl_text_input,
+                    config=current_hl_cfg,
+                    timestamp_s=hl_preview_sec
                 )
+                if prev_hl_frame is not None:
+                    safe_display_image(prev_hl_frame, caption=f"Prévia com Headline aos {hl_preview_sec:.1f}s", use_container_width=True)
 
-            prev_hl_frame = generate_headline_preview(
-                video_path=video_path,
-                text=hl_text_input,
-                config=current_hl_cfg,
-                timestamp_s=hl_preview_sec
-            )
-
-            if prev_hl_frame is not None:
-                safe_display_image(prev_hl_frame, caption=f"Prévia da Headline em {hl_preview_sec:.1f}s", use_container_width=True)
-
-            # 6. Botão de Aplicação / Renderização Ultra-Rápida
+            # 5. Botão de Aplicação no Vídeo
             st.markdown("")
             btn_label_hl = "🚀 Salvar como Novo Vídeo com Headline" if "Salvar como um novo vídeo" in save_mode else "🚀 Aplicar Headline no Vídeo Atual"
             if st.button(btn_label_hl, key=f"btn_apply_headline_post_{unique_key}", type="primary", use_container_width=True):
@@ -755,13 +729,17 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     if hl_res.get("error"):
                         st.error(f"Erro ao aplicar headline: {hl_res['error']}")
                     else:
+                        entry = record_quick_edit(
+                            video_path=video_path,
+                            action_name="🏷️ Headline de Topo",
+                            details=f"Texto: '{hl_text_input.replace(chr(10), ' ')}' | Modo: {current_hl_cfg.get('mode', 'line_boxes')} | Preset: {sel_hl_preset_data['name']}",
+                            output_path=out_target_hl
+                        )
+                        st.session_state[f"last_edit_status_{unique_key}"] = entry
+                        st.session_state[f"just_edited_{unique_key}"] = True
                         if out_target_hl:
                             st.session_state[f"last_edited_video_{unique_key}"] = out_target_hl
-                            st.success(f"🎉 Novo vídeo criado com sucesso! Arquivo: `{os.path.basename(out_target_hl)}`")
-                            st.rerun()
-                        else:
-                            st.success("🎉 Headline aplicada e vídeo atualizado com sucesso!")
-                            st.rerun()
+                        st.rerun()
 
         # ── TAB 5: EQUALIZADOR & TRATAMENTO DE ÁUDIO (PÓS-CORTE) ──────────────
         with tab_audio:
@@ -885,13 +863,17 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     if eq_res.get("error"):
                         st.error(f"Erro ao equalizar áudio: {eq_res['error']}")
                     else:
+                        entry = record_quick_edit(
+                            video_path=video_path,
+                            action_name="🎙️ Equalizador & Tratamento de Áudio",
+                            details=f"Perfil: {eq_preset_data['name']} | Highpass: {current_eq_cfg.get('highpass_hz')}Hz | De-Harsh: {current_eq_cfg.get('deharsh_eq_db')}dB | Limiter: {current_eq_cfg.get('limiter_limit_db')}dB",
+                            output_path=out_target_eq
+                        )
+                        st.session_state[f"last_edit_status_{unique_key}"] = entry
+                        st.session_state[f"just_edited_{unique_key}"] = True
                         if out_target_eq:
                             st.session_state[f"last_edited_video_{unique_key}"] = out_target_eq
-                            st.success(f"🎉 Novo vídeo criado com sucesso! Arquivo: `{os.path.basename(out_target_eq)}`")
-                            st.rerun()
-                        else:
-                            st.success("🎉 Áudio equalizado e vídeo atualizado com sucesso!")
-                            st.rerun()
+                        st.rerun()
 
         # Se uma nova versão foi gerada recentemente para este componente, exibe player e download
         last_new_v = st.session_state.get(f"last_edited_video_{unique_key}")

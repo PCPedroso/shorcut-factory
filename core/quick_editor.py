@@ -258,3 +258,86 @@ def remove_snippet_and_merge(
                 pass
         err_msg = res.stderr[-1000:] if res.stderr else "Erro desconhecido no FFmpeg ao remover trecho."
         return {"path": None, "error": err_msg}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Histórico de Ajustes e Sinalização de Conclusão da Edição Rápida
+# ──────────────────────────────────────────────────────────────────────────────
+
+EDIT_LOG_FILENAME = "historico_edicoes.json"
+
+
+def get_edit_history_path(video_path: str) -> str:
+    """
+    Retorna o caminho do arquivo de histórico de edições do vídeo.
+    Salva no mesmo diretório do arquivo de vídeo.
+    """
+    if not video_path:
+        return None
+    v_dir = os.path.dirname(video_path)
+    if not v_dir:
+        v_dir = "."
+    return os.path.join(v_dir, EDIT_LOG_FILENAME)
+
+
+def load_edit_history(video_path: str) -> list:
+    """
+    Carrega a lista de edições já realizadas neste vídeo.
+    """
+    log_p = get_edit_history_path(video_path)
+    if log_p and os.path.exists(log_p):
+        try:
+            import json
+            with open(log_p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+        except Exception:
+            pass
+    return []
+
+
+def record_quick_edit(
+    video_path: str,
+    action_name: str,
+    details: str,
+    output_path: str = None,
+    extra_info: dict = None
+) -> dict:
+    """
+    Registra um novo ajuste de edição rápida no histórico persistente do vídeo.
+    Retorna a entrada registrada.
+    """
+    log_p = get_edit_history_path(video_path)
+    if not log_p:
+        return {}
+
+    import datetime
+    import json
+
+    now_str = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    target_out = output_path if output_path else video_path
+    is_new_version = bool(output_path and os.path.abspath(output_path) != os.path.abspath(video_path))
+
+    entry = {
+        "timestamp": now_str,
+        "action": action_name,
+        "details": details,
+        "source_file": os.path.basename(video_path),
+        "output_file": os.path.basename(target_out),
+        "output_path": target_out,
+        "mode": "Nova Versão" if is_new_version else "Substituição Direta",
+        "extra_info": extra_info or {}
+    }
+
+    history = load_edit_history(video_path)
+    history.insert(0, entry)  # Mais recente no topo
+
+    try:
+        os.makedirs(os.path.dirname(log_p), exist_ok=True)
+        with open(log_p, "w", encoding="utf-8") as f:
+            json.dump(history, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+    return entry
