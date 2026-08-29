@@ -156,7 +156,8 @@ def process_batch_cuts(
         if snippet_text:
             _log(f"Solicitando metadados de IA via Ollama (modelo: {ollama_model})...")
             try:
-                meta_res = core.analyzer.generate_viral_cut_metadata(snippet_text, model=ollama_model)
+                _b_guidance = cut_info.get("guidance", "") or cut_info.get("user_guidance", "")
+                meta_res = core.analyzer.generate_viral_cut_metadata(snippet_text, model=ollama_model, user_guidance=_b_guidance)
                 cut_title = meta_res.get("titulo_principal") or base_title
                 cut_headline = meta_res.get("headline_topo") or cut_title
                 cut_desc = meta_res.get("descricao") or "Confira este momento imperdível! Curta e comente."

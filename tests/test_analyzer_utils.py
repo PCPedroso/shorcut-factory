@@ -68,6 +68,34 @@ class TestAnalyzerUtils(unittest.TestCase):
             self.assertGreaterEqual(c["duration_s"], 20.0)
             self.assertLessEqual(c["duration_s"], 85.0)
 
+    def test_generate_viral_cut_metadata_empty_and_signature(self):
+        from core.analyzer import (
+            generate_viral_cut_metadata,
+            generate_title_individual,
+            generate_headline_individual,
+            generate_description_individual,
+            generate_hashtags_individual,
+            generate_tags_seo_individual
+        )
+        # Transcrição vazia deve retornar estrutura com fallback sem quebrar
+        meta = generate_viral_cut_metadata("", user_guidance="Tom urgente sobre eleições")
+        self.assertIn("titulo_principal", meta)
+        self.assertIn("descricao", meta)
+        self.assertIn("hashtags", meta)
+        self.assertIn("tags_seo", meta)
+
+        # Teste de assinaturas aceitando user_guidance
+        t = generate_title_individual("", user_guidance="Tom polêmico")
+        self.assertIn("titulo_principal", t)
+        hl = generate_headline_individual("", user_guidance="Curto e impactante")
+        self.assertIn("headline_topo", hl)
+        d = generate_description_individual("", user_guidance="Com CTA")
+        self.assertIn("descricao", d)
+        h = generate_hashtags_individual("", user_guidance="Tema política")
+        self.assertIn("hashtags", h)
+        s = generate_tags_seo_individual("", user_guidance="Palavras chave")
+        self.assertIn("tags_seo", s)
+
 
 if __name__ == '__main__':
     unittest.main()

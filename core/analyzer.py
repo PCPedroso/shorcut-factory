@@ -573,13 +573,14 @@ def analyze_transcript(
 # Geração de Metadados Virais para Cortes Individuais (Kit de Publicação)
 # ──────────────────────────────────────────────────────────────────────────────
 
-def generate_viral_cut_metadata(transcript_snippet: str, model: str = "llama3") -> dict:
+def generate_viral_cut_metadata(transcript_snippet: str, model: str = "llama3", user_guidance: str = "") -> dict:
     """
     Analisa a transcrição real do trecho do corte e gera um kit de publicação contextual e não-genérico:
     - Título principal magnético com alto CTR citando o fato real
     - 2 títulos alternativos (foco na declaração forte / foco na pergunta ou confronto)
     - Descrição persuasiva detalhada contextualizando o que foi dito com CTA
     - Hashtags e tags de SEO específicas ao tema abordado
+    - Orientação opcional do usuário sobre tom, foco e assunto desejados
     """
     snippet_clean = transcript_snippet.strip()
     if not snippet_clean:
@@ -595,6 +596,14 @@ def generate_viral_cut_metadata(transcript_snippet: str, model: str = "llama3") 
     # Limita o tamanho do texto para o prompt se o corte for muito longo
     snippet_prompt = snippet_clean[:3500]
 
+    guidance_block = ""
+    if user_guidance and user_guidance.strip():
+        guidance_block = f"""
+DIREÇÃO EDITORIAL DO EDITOR / ORIENTAÇÃO DE TOM E ASSUNTO:
+\"\"\"{user_guidance.strip()}\"\"\"
+-> OBRIGATÓRIO: Conduza o tom (ex: provocativo, urgente, humorístico, analítico), a ênfase e o assunto principal de acordo com as instruções acima ao redigir títulos, headline, descrição e tags.
+"""
+
     prompt = f"""Você é um editor-chefe e estrategista de conteúdo viral de canais de cortes de notícias, podcasts e debates.
 Analise a transcrição real abaixo e crie um pacote de publicação de alto impacto e jornalisticamente atraente em Português.
 
@@ -602,7 +611,7 @@ Transcrição do trecho do vídeo:
 \"\"\"
 {snippet_prompt}
 \"\"\"
-
+{guidance_block}
 DIRETRIZES OBRIGATÓRIAS:
 1. NUNCA use títulos genéricos como 'Corte Viral', 'Momento Imperdível' ou 'Declaração Forte'. O título DEVE citar o fato, pergunta ou declaração central real que aconteceu no trecho (ex: 'Como convencer eleitores de 60 anos? Candidato responde com franqueza').
 2. Crie 1 título principal e 2 títulos alternativos com abordagens distintas (uma focada na declaração mais contundente, outra na pergunta/confronto).
@@ -759,15 +768,26 @@ def _call_ollama_json(prompt: str, model: str) -> dict:
     return {}
 
 
-def generate_title_individual(transcript_snippet: str, model: str = "llama3") -> dict:
+def generate_title_individual(transcript_snippet: str, model: str = "llama3", user_guidance: str = "") -> dict:
     """Gera apenas o Título Principal e Títulos Alternativos."""
-    snippet_prompt = transcript_snippet.strip()[:3500]
+    snippet_clean = transcript_snippet.strip()
+    if not snippet_clean:
+        return {"titulo_principal": "Declaração em Destaque", "titulos_alternativos": [], "error": "Texto da transcrição vazio."}
+
+    snippet_prompt = snippet_clean[:3500]
+    guidance_block = ""
+    if user_guidance and user_guidance.strip():
+        guidance_block = f"""
+DIREÇÃO EDITORIAL DO USUÁRIO (TOM E ASSUNTO A PRIORIZAR):
+\"\"\"{user_guidance.strip()}\"\"\"
+-> Siga rigorosamente este direcionamento de tom e assunto nos títulos criados.
+"""
     prompt = f"""Você é um editor-chefe especialista em títulos virais para YouTube e Redes Sociais.
 Analise a transcrição real abaixo e crie um título magnético em Português.
 
 Transcrição:
 \"\"\"{snippet_prompt}\"\"\"
-
+{guidance_block}
 REGRAS: O título DEVE citar o fato real. NUNCA use termos genéricos. Máx 65 caracteres.
 Crie também 2 títulos alternativos com abordagens distintas.
 
@@ -789,15 +809,26 @@ Responda APENAS em JSON:
         return {"titulo_principal": " ".join(words[:8]) if words else "Declaração em Destaque", "titulos_alternativos": [], "error": str(exc)}
 
 
-def generate_headline_individual(transcript_snippet: str, model: str = "llama3") -> dict:
+def generate_headline_individual(transcript_snippet: str, model: str = "llama3", user_guidance: str = "") -> dict:
     """Gera apenas a Headline de Topo 9:16 (curta, impactante)."""
-    snippet_prompt = transcript_snippet.strip()[:3500]
+    snippet_clean = transcript_snippet.strip()
+    if not snippet_clean:
+        return {"headline_topo": "DECLARAÇÃO EM DESTAQUE", "error": "Texto da transcrição vazio."}
+
+    snippet_prompt = snippet_clean[:3500]
+    guidance_block = ""
+    if user_guidance and user_guidance.strip():
+        guidance_block = f"""
+DIREÇÃO EDITORIAL DO USUÁRIO (TOM E FOCO):
+\"\"\"{user_guidance.strip()}\"\"\"
+-> Use este tom e assunto como base para o gancho magnético.
+"""
     prompt = f"""Você é especialista em hooks virais para TikTok e Shorts.
 Analise a transcrição abaixo e crie uma frase de gancho (headline) magnética para o topo do vídeo 9:16.
 
 Transcrição:
 \"\"\"{snippet_prompt}\"\"\"
-
+{guidance_block}
 REGRAS OBRIGATÓRIAS:
 - Entre 4 e 7 palavras (MÁXIMO 38 caracteres)
 - Pensamento 100% fechado e completo — NUNCA corte no meio de orações
@@ -821,15 +852,26 @@ Responda APENAS em JSON:
         return {"headline_topo": clean_and_condense_headline(" ".join(words[:6]).upper() if words else "DECLARAÇÃO EM DESTAQUE", max_chars=40), "error": str(exc)}
 
 
-def generate_description_individual(transcript_snippet: str, model: str = "llama3") -> dict:
+def generate_description_individual(transcript_snippet: str, model: str = "llama3", user_guidance: str = "") -> dict:
     """Gera apenas a Descrição / Legenda com CTA."""
-    snippet_prompt = transcript_snippet.strip()[:3500]
+    snippet_clean = transcript_snippet.strip()
+    if not snippet_clean:
+        return {"descricao": "Confira este momento e dê sua opinião nos comentários!", "error": "Texto da transcrição vazio."}
+
+    snippet_prompt = snippet_clean[:3500]
+    guidance_block = ""
+    if user_guidance and user_guidance.strip():
+        guidance_block = f"""
+DIREÇÃO EDITORIAL DO USUÁRIO (TOM E ASSUNTO):
+\"\"\"{user_guidance.strip()}\"\"\"
+-> Redija a descrição/legenda refletindo este tom e destacando este ponto principal.
+"""
     prompt = f"""Você é um copywriter especialista em descrições virais para YouTube Shorts, Reels e TikTok.
 Analise a transcrição abaixo e crie uma descrição persuasiva em Português.
 
 Transcrição:
 \"\"\"{snippet_prompt}\"\"\"
-
+{guidance_block}
 REGRAS:
 - Contextualize exatamente o que foi dito, citando o tema abordado
 - Termine com uma pergunta provocativa para gerar debate nos comentários
@@ -848,15 +890,26 @@ Responda APENAS em JSON:
         return {"descricao": "Confira este momento e dê sua opinião nos comentários!", "error": str(exc)}
 
 
-def generate_hashtags_individual(transcript_snippet: str, model: str = "llama3") -> dict:
+def generate_hashtags_individual(transcript_snippet: str, model: str = "llama3", user_guidance: str = "") -> dict:
     """Gera apenas as Hashtags contextuais."""
-    snippet_prompt = transcript_snippet.strip()[:3500]
+    snippet_clean = transcript_snippet.strip()
+    if not snippet_clean:
+        return {"hashtags": ["#shorts", "#viral", "#cortes", "#reels"], "error": "Texto da transcrição vazio."}
+
+    snippet_prompt = snippet_clean[:3500]
+    guidance_block = ""
+    if user_guidance and user_guidance.strip():
+        guidance_block = f"""
+DIREÇÃO EDITORIAL DO USUÁRIO (ASSUNTO PRINCIPAL):
+\"\"\"{user_guidance.strip()}\"\"\"
+-> Certifique-se de incluir hashtags direcionadas a estes termos e temas.
+"""
     prompt = f"""Você é especialista em SEO e alcance orgânico em redes sociais.
 Analise a transcrição abaixo e crie hashtags estratégicas em Português para maximizar o alcance.
 
 Transcrição:
 \"\"\"{snippet_prompt}\"\"\"
-
+{guidance_block}
 REGRAS:
 - Entre 6 e 10 hashtags
 - Misture hashtags temáticas (específicas ao assunto) com hashtags de formato (#shorts, #reels, #tiktok)
@@ -877,15 +930,26 @@ Responda APENAS em JSON:
         return {"hashtags": ["#shorts", "#viral", "#cortes", "#reels"], "error": str(exc)}
 
 
-def generate_tags_seo_individual(transcript_snippet: str, model: str = "llama3") -> dict:
+def generate_tags_seo_individual(transcript_snippet: str, model: str = "llama3", user_guidance: str = "") -> dict:
     """Gera apenas as Tags SEO (palavras-chave separadas por vírgula)."""
-    snippet_prompt = transcript_snippet.strip()[:3500]
+    snippet_clean = transcript_snippet.strip()
+    if not snippet_clean:
+        return {"tags_seo": "cortes, viral, shorts, podcast, debate", "error": "Texto da transcrição vazio."}
+
+    snippet_prompt = snippet_clean[:3500]
+    guidance_block = ""
+    if user_guidance and user_guidance.strip():
+        guidance_block = f"""
+DIREÇÃO EDITORIAL DO USUÁRIO (ASSUNTO E TERMOS CHAVE):
+\"\"\"{user_guidance.strip()}\"\"\"
+-> Inclua termos e variações semânticas alinhados a esta direção.
+"""
     prompt = f"""Você é especialista em SEO para YouTube e plataformas de vídeo.
 Analise a transcrição abaixo e crie tags de SEO relevantes em Português.
 
 Transcrição:
 \"\"\"{snippet_prompt}\"\"\"
-
+{guidance_block}
 REGRAS:
 - Entre 8 e 15 palavras-chave
 - Separadas por vírgula

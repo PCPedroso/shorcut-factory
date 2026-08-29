@@ -3132,6 +3132,15 @@ if st.session_state.transcription_done:
         st.session_state["meta_alt_titles"] = st.session_state.pop("_pending_alt_titles")
 
     with st.expander("🚀 Kit de Publicação Viral (Título, Descrição & Tags para Redes)", expanded=True):
+        # ── Campo de Orientação Editorial / Tom e Assunto para IA ────────────
+        user_guidance_val = st.text_input(
+            "🎯 Guia Editorial para IA (Tom, Assunto e Foco do Corte - Opcional):",
+            value=st.session_state.get("input_viral_kit_guidance", ""),
+            placeholder="Ex: Foque na resposta sobre corrupção com tom polêmico e urgente; enfatize a frase de fechamento...",
+            key="input_viral_kit_guidance",
+            help="Instrua a IA sobre o tom desejado (ex: polêmico, indignado, bem-humorado, sério, urgente, reflexivo) e o assunto ou frase central que você quer priorizar no título, headline, descrição e tags."
+        )
+
         col_meta_btn, col_meta_status = st.columns([1.8, 2.2])
         with col_meta_btn:
             if st.button("✨ Gerar Título e Textos com IA", use_container_width=True, type="secondary", help="Analisa o trecho exato do corte e gera Título Viral específico, Descrição contextualizada com CTA e Hashtags estratégicas."):
@@ -3150,7 +3159,11 @@ if st.session_state.transcription_done:
                             st.warning("Nenhuma fala encontrada no intervalo selecionado.")
                         else:
                             model_for_meta = ollama_model if 'ollama_model' in locals() and ollama_model else "llama3"
-                            meta_res = core.analyzer.generate_viral_cut_metadata(snippet_text, model=model_for_meta)
+                            meta_res = core.analyzer.generate_viral_cut_metadata(
+                                snippet_text,
+                                model=model_for_meta,
+                                user_guidance=user_guidance_val
+                            )
                             
                             st.session_state["input_cut_title"] = meta_res.get("titulo_principal", "Corte Selecionado")
                             st.session_state["input_cut_headline"] = meta_res.get("headline_topo") or meta_res.get("titulo_principal", "Corte Selecionado")
@@ -3215,7 +3228,7 @@ if st.session_state.transcription_done:
                     if _snip:
                         with st.spinner("Gerando título..."):
                             import core.analyzer
-                            _r = core.analyzer.generate_title_individual(_snip, model=_model_ind)
+                            _r = core.analyzer.generate_title_individual(_snip, model=_model_ind, user_guidance=user_guidance_val)
                         st.session_state["_pending_cut_title"] = _r.get("titulo_principal", st.session_state.get("input_cut_title", ""))
                         st.session_state["_pending_alt_titles"] = _r.get("titulos_alternativos", [])
                         st.rerun()
@@ -3235,7 +3248,7 @@ if st.session_state.transcription_done:
                     if _snip:
                         with st.spinner("Gerando headline..."):
                             import core.analyzer
-                            _r = core.analyzer.generate_headline_individual(_snip, model=_model_ind)
+                            _r = core.analyzer.generate_headline_individual(_snip, model=_model_ind, user_guidance=user_guidance_val)
                         st.session_state["_pending_cut_headline"] = _r.get("headline_topo", st.session_state.get("input_cut_headline", ""))
                         st.rerun()
 
@@ -3272,7 +3285,7 @@ if st.session_state.transcription_done:
                     if _snip:
                         with st.spinner("Gerando descrição..."):
                             import core.analyzer
-                            _r = core.analyzer.generate_description_individual(_snip, model=_model_ind)
+                            _r = core.analyzer.generate_description_individual(_snip, model=_model_ind, user_guidance=user_guidance_val)
                         st.session_state["_pending_cut_desc"] = _r.get("descricao", st.session_state.get("input_cut_desc", ""))
                         st.rerun()
         with col_tags:
@@ -3290,7 +3303,7 @@ if st.session_state.transcription_done:
                     if _snip:
                         with st.spinner("Gerando hashtags..."):
                             import core.analyzer
-                            _r = core.analyzer.generate_hashtags_individual(_snip, model=_model_ind)
+                            _r = core.analyzer.generate_hashtags_individual(_snip, model=_model_ind, user_guidance=user_guidance_val)
                         st.session_state["_pending_cut_hashtags"] = " ".join(_r.get("hashtags", []))
                         st.rerun()
             col_s_field, col_s_btn = st.columns([5, 1])
@@ -3307,7 +3320,7 @@ if st.session_state.transcription_done:
                     if _snip:
                         with st.spinner("Gerando tags SEO..."):
                             import core.analyzer
-                            _r = core.analyzer.generate_tags_seo_individual(_snip, model=_model_ind)
+                            _r = core.analyzer.generate_tags_seo_individual(_snip, model=_model_ind, user_guidance=user_guidance_val)
                         st.session_state["_pending_cut_tags_seo"] = _r.get("tags_seo", st.session_state.get("input_cut_tags_seo", ""))
                         st.rerun()
 

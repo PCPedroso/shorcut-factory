@@ -18,7 +18,7 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
 | **Processamento de Vídeo** | `FFmpeg` (com `libass` e NVENC) | Recorte, filtros complexos, sidechain compress, equalização e queima de legendas/overlays |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
-| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (67 testes) |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (68 testes) |
 
 ---
 
@@ -31,7 +31,7 @@ shorcut-factory/
 ├── assets/
 │   ├── audio/                 # Trilhas sonoras royalty-free categorizadas (.wav / .mp3)
 │   └── fonts/                 # Tipografias bundled (Montserrat-ExtraBold)
-├── tests/                     # Suíte de Testes Unitários Automatizados (67 testes)
+├── tests/                     # Suíte de Testes Unitários Automatizados (68 testes)
 │   ├── test_quick_editor.py      # Testes de duração, trim, corte cirúrgico e concatenação
 │   ├── test_thumbnail_generator.py # Testes de frames, nitidez e capas 9:16
 │   ├── test_headline_drawer.py   # Testes de headlines, quebras, presets ASS e overlay visual
@@ -123,8 +123,9 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 - **Legendas Dinâmicas Estilo CapCut / Alex Hormozi** (`core/subtitle_burner.py`):
   - Renderização nativa em ASS (`libass` do FFmpeg) com efeito karaokê palavra-a-palavra sincronizado.
   - Cores configuráveis (Destaque e Base), sliders de fonte e contorno nítido.
-- **Kit de Publicação Viral com IA** (`core/analyzer.py`):
+- **Kit de Publicação Viral com IA com Guia Editorial (`core/analyzer.py`, `app.py`)**:
   - Título Magnético, Variações Alternativas, Legenda com CTA e Hashtags/SEO contextuais. Geração individualizada de cada texto sob demanda.
+  - **Direção Editorial Personalizada (`user_guidance`)**: Campo dedicado para instruir a IA sobre tom (ex: polêmico, indignado, bem-humorado, sério, urgente) e assunto ou gancho central a priorizar na geração dos textos.
 - **Exportação Padronizada com Nomenclatura Estrita** (`core/export_kit.py`):
   - Prefixos de 5 letras (`VLDSS`, `VRIRA`, `VFDBS`, `VCCFT`, `HOFHD`) + limite de 25 caracteres em palavras completas do título.
   - Criação da pasta `data/<video_id>/<PREFIXO>_<Palavras>/` com `.mp4`, `info_publicacao.txt`, `descricao.txt` e `tags.txt`.
@@ -175,7 +176,7 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Modos `fill`, `fit`, `cover`, logo embutido secundário e prévia instantânea de frame.
 - **🔍 Aproximação / Zoom no Modo Horizontal 16:9 (1.0x a 1.5x)** (`core/video_processor.py`).
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
-- **🧪 Suíte de 67 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 68 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest`.
 
 ---
