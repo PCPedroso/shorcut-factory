@@ -320,14 +320,14 @@ def build_micro_pautas(topics: list, chunks_list: list) -> list:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Sugestões de Séries (10+ min) e Ganchos Virais (Shorts)
+# Sugestões de Séries e Ganchos Virais (Shorts)
 # ──────────────────────────────────────────────────────────────────────────────
 
-def build_suggested_bundles(pautas: list, min_minutes: int = 10) -> list:
+def build_suggested_bundles(pautas: list, min_minutes: float = 10.0) -> list:
     if not pautas:
         return []
 
-    min_duration_s = min_minutes * 60
+    min_duration_s = float(min_minutes) * 60.0
     bundles = []
     current_pautas = []
     current_duration = 0.0
@@ -530,7 +530,8 @@ def analyze_transcript(
     model: str = "llama3",
     chunks_list: list = None,
     segments: list = None,
-    strategy: str = "qa_interview"
+    strategy: str = "qa_interview",
+    min_series_minutes: float = 10.0
 ) -> dict:
     """
     Executa a identificação de pautas ou ganchos adaptando-se ao tipo de vídeo.
@@ -545,7 +546,7 @@ def analyze_transcript(
         else:
             pautas = detect_semantic_topics(chunks_list, model=model)
 
-        bundles = build_suggested_bundles(pautas, min_minutes=10)
+        bundles = build_suggested_bundles(pautas, min_minutes=min_series_minutes)
         micro_cuts = build_golden_rule_micro_cuts(pautas, segments)
 
         return {
@@ -727,3 +728,178 @@ Responda ESTRITAMENTE em formato JSON com as seguintes chaves (sem texto introdu
             "tags_seo": "shorts, cortes, viral",
             "error": str(exc)
         }
+
+
+def _call_ollama_json(prompt: str, model: str) -> dict:
+    """Utilitário interno: chama Ollama e faz parse do JSON retornado."""
+    try:
+        models_res = ollama.list()
+        avail = [m.model if hasattr(m, 'model') else m.get('name', '') for m in (models_res.models if hasattr(models_res, 'models') else models_res.get('models', []))]
+        matched_model = model
+        for a in avail:
+            if a.startswith(model) or model.startswith(a.split(':')[0]):
+                matched_model = a
+                break
+    except Exception:
+        matched_model = model
+
+    res = ollama.chat(
+        model=matched_model,
+        messages=[{"role": "user", "content": prompt}],
+        format="json",
+        options={"temperature": 0.7}
+    )
+    raw = res.get("message", {}).get("content", "").strip()
+    match = re.search(r'\{[\s\S]*\}', raw)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except Exception:
+            pass
+    return {}
+
+
+def generate_title_individual(transcript_snippet: str, model: str = "llama3") -> dict:
+    """Gera apenas o Título Principal e Títulos Alternativos."""
+    snippet_prompt = transcript_snippet.strip()[:3500]
+    prompt = f"""Você é um editor-chefe especialista em títulos virais para YouTube e Redes Sociais.
+Analise a transcrição real abaixo e crie um título magnético em Português.
+
+Transcrição:
+\"\"\"{snippet_prompt}\"\"\"
+
+REGRAS: O título DEVE citar o fato real. NUNCA use termos genéricos. Máx 65 caracteres.
+Crie também 2 títulos alternativos com abordagens distintas.
+
+Responda APENAS em JSON:
+{{
+  "titulo_principal": "Título principal (máx 65 chars)",
+  "titulos_alternativos": ["Alternativa 1", "Alternativa 2"]
+}}"""
+    try:
+        parsed = _call_ollama_json(prompt, model)
+        t = _clean_ai_title(parsed.get("titulo_principal", "")).strip(" \t\n\r{}[]\"'")
+        alts = [_clean_ai_title(a).strip(" \t\n\r{}[]\"'") for a in parsed.get("titulos_alternativos", []) if len(a) > 5]
+        if not t or len(t) < 5:
+            words = transcript_snippet.split()
+            t = " ".join(words[:8]) if words else "Declaração em Destaque"
+        return {"titulo_principal": t, "titulos_alternativos": alts, "error": None}
+    except Exception as exc:
+        words = transcript_snippet.split()
+        return {"titulo_principal": " ".join(words[:8]) if words else "Declaração em Destaque", "titulos_alternativos": [], "error": str(exc)}
+
+
+def generate_headline_individual(transcript_snippet: str, model: str = "llama3") -> dict:
+    """Gera apenas a Headline de Topo 9:16 (curta, impactante)."""
+    snippet_prompt = transcript_snippet.strip()[:3500]
+    prompt = f"""Você é especialista em hooks virais para TikTok e Shorts.
+Analise a transcrição abaixo e crie uma frase de gancho (headline) magnética para o topo do vídeo 9:16.
+
+Transcrição:
+\"\"\"{snippet_prompt}\"\"\"
+
+REGRAS OBRIGATÓRIAS:
+- Entre 4 e 7 palavras (MÁXIMO 38 caracteres)
+- Pensamento 100% fechado e completo — NUNCA corte no meio de orações
+- Sem reticências ou frases incompletas
+- Em maiúsculas
+- Exemplos: 'O BRASIL VAI ENTRAR EM RECESSÃO?', 'VOU PEGAR O PAÍS QUEBRADO!', 'ESTAMOS DESTRUÍDOS POR ELES!'
+
+Responda APENAS em JSON:
+{{"headline_topo": "FRASE COMPLETA AQUI"}}"""
+    try:
+        parsed = _call_ollama_json(prompt, model)
+        from core.headline_drawer import clean_and_condense_headline
+        hl = parsed.get("headline_topo", "").strip()
+        if not hl or len(hl) < 4:
+            words = transcript_snippet.split()
+            hl = " ".join(words[:6]).upper() if words else "DECLARAÇÃO EM DESTAQUE"
+        return {"headline_topo": clean_and_condense_headline(hl, max_chars=40), "error": None}
+    except Exception as exc:
+        from core.headline_drawer import clean_and_condense_headline
+        words = transcript_snippet.split()
+        return {"headline_topo": clean_and_condense_headline(" ".join(words[:6]).upper() if words else "DECLARAÇÃO EM DESTAQUE", max_chars=40), "error": str(exc)}
+
+
+def generate_description_individual(transcript_snippet: str, model: str = "llama3") -> dict:
+    """Gera apenas a Descrição / Legenda com CTA."""
+    snippet_prompt = transcript_snippet.strip()[:3500]
+    prompt = f"""Você é um copywriter especialista em descrições virais para YouTube Shorts, Reels e TikTok.
+Analise a transcrição abaixo e crie uma descrição persuasiva em Português.
+
+Transcrição:
+\"\"\"{snippet_prompt}\"\"\"
+
+REGRAS:
+- Contextualize exatamente o que foi dito, citando o tema abordado
+- Termine com uma pergunta provocativa para gerar debate nos comentários
+- Entre 2 e 4 frases
+- Não use asteriscos, markdown ou formatação especial
+
+Responda APENAS em JSON:
+{{"descricao": "Texto da descrição aqui."}}"""
+    try:
+        parsed = _call_ollama_json(prompt, model)
+        desc = parsed.get("descricao", "").strip()
+        if not desc or len(desc) < 10:
+            desc = "Confira este momento e dê sua opinião nos comentários!"
+        return {"descricao": desc, "error": None}
+    except Exception as exc:
+        return {"descricao": "Confira este momento e dê sua opinião nos comentários!", "error": str(exc)}
+
+
+def generate_hashtags_individual(transcript_snippet: str, model: str = "llama3") -> dict:
+    """Gera apenas as Hashtags contextuais."""
+    snippet_prompt = transcript_snippet.strip()[:3500]
+    prompt = f"""Você é especialista em SEO e alcance orgânico em redes sociais.
+Analise a transcrição abaixo e crie hashtags estratégicas em Português para maximizar o alcance.
+
+Transcrição:
+\"\"\"{snippet_prompt}\"\"\"
+
+REGRAS:
+- Entre 6 e 10 hashtags
+- Misture hashtags temáticas (específicas ao assunto) com hashtags de formato (#shorts, #reels, #tiktok)
+- Sem espaços dentro das hashtags
+- Inclua nomes próprios e temas relevantes citados
+
+Responda APENAS em JSON:
+{{"hashtags": ["#tag1", "#tag2", "#tag3", "#tag4", "#tag5", "#tag6"]}}"""
+    try:
+        parsed = _call_ollama_json(prompt, model)
+        tags = parsed.get("hashtags", [])
+        if not tags:
+            tags = re.findall(r'#[\w\d_]+', str(parsed))
+        if not tags:
+            tags = ["#shorts", "#viral", "#cortes", "#reels"]
+        return {"hashtags": tags, "error": None}
+    except Exception as exc:
+        return {"hashtags": ["#shorts", "#viral", "#cortes", "#reels"], "error": str(exc)}
+
+
+def generate_tags_seo_individual(transcript_snippet: str, model: str = "llama3") -> dict:
+    """Gera apenas as Tags SEO (palavras-chave separadas por vírgula)."""
+    snippet_prompt = transcript_snippet.strip()[:3500]
+    prompt = f"""Você é especialista em SEO para YouTube e plataformas de vídeo.
+Analise a transcrição abaixo e crie tags de SEO relevantes em Português.
+
+Transcrição:
+\"\"\"{snippet_prompt}\"\"\"
+
+REGRAS:
+- Entre 8 e 15 palavras-chave
+- Separadas por vírgula
+- Inclua variações do tema (singular/plural, termos relacionados)
+- Inclua nomes próprios e assuntos relevantes citados
+- Sem hashtags (#)
+
+Responda APENAS em JSON:
+{{"tags_seo": "palavra1, palavra2, palavra3, palavra4, palavra5"}}"""
+    try:
+        parsed = _call_ollama_json(prompt, model)
+        tags = parsed.get("tags_seo", "").strip()
+        if not tags or len(tags) < 5:
+            tags = "cortes, viral, shorts, podcast, debate"
+        return {"tags_seo": tags, "error": None}
+    except Exception as exc:
+        return {"tags_seo": "cortes, viral, shorts, podcast, debate", "error": str(exc)}

@@ -955,6 +955,55 @@ def detect_split_screen_params(
         return {"top_pan": -0.65, "bottom_pan": 0.65, "zoom": 1.15}
 
 
+def fit_frame_to_slot(img: np.ndarray, target_w: int = 1080, target_h: int = 960) -> np.ndarray:
+    """
+    Redimensiona e recorta centralizadamente a imagem/frame para preencher
+    exatamente o slot (target_w x target_h) sem distorção (Aspect Fill / Center Crop).
+    """
+    if img is None:
+        return np.zeros((target_h, target_w, 3), dtype=np.uint8)
+    ih, iw = img.shape[:2]
+    if ih == 0 or iw == 0:
+        return np.zeros((target_h, target_w, 3), dtype=np.uint8)
+    
+    scale = max(float(target_w) / float(iw), float(target_h) / float(ih))
+    new_w = int(round(iw * scale))
+    new_h = int(round(ih * scale))
+    
+    interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+    resized = cv2.resize(img, (new_w, new_h), interpolation=interp)
+    
+    x1 = max(0, (new_w - target_w) // 2)
+    y1 = max(0, (new_h - target_h) // 2)
+    cropped = resized[y1 : y1 + target_h, x1 : x1 + target_w]
+    
+    if cropped.shape[0] != target_h or cropped.shape[1] != target_w:
+        cropped = cv2.resize(cropped, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+    return cropped
+
+
+def load_images_for_slideshow(image_paths: list, target_w: int = 1080, target_h: int = 960) -> list:
+    """
+    Carrega e formata uma lista de imagens para exibição em slideshow 1080x960.
+    Suporta caminhos do Windows e caracteres especiais (cv2.imdecode).
+    """
+    loaded = []
+    if not image_paths:
+        return loaded
+    for img_p in image_paths:
+        if not img_p or not os.path.exists(img_p):
+            continue
+        try:
+            with open(img_p, "rb") as f_in:
+                bytes_data = np.frombuffer(f_in.read(), dtype=np.uint8)
+                img = cv2.imdecode(bytes_data, cv2.IMREAD_COLOR)
+                if img is not None:
+                    loaded.append(fit_frame_to_slot(img, target_w, target_h))
+        except Exception:
+            continue
+    return loaded
+
+
 def generate_split_preview_image(
     input_video_path: str,
     timestamp_str: str,
@@ -963,10 +1012,17 @@ def generate_split_preview_image(
     bottom_pan: float = 0.65,
     zoom: float = 1.15,
     divider_color: str = "black",
-    divider_width: int = 4
+    divider_width: int = 4,
+    split_source_type: str = "main_video",
+    split_video_path: str = None,
+    split_image_paths: list = None,
+    split_media_position: str = "bottom",
+    split_blur_margin_pct: float = 5.0
 ) -> dict:
     """
-    Gera uma imagem de prévia instantânea do Layout Dividido (Split Screen 9:16).
+    Gera uma imagem de prévia instantânea do Layout Dividido (Split Screen 9:16),
+    com suporte a vídeo principal duplo, vídeo secundário em looping, slideshow de imagens
+    e margens com fundo desfocado no topo e na base.
     """
     try:
         t_sec = parse_time_to_seconds(timestamp_str)
@@ -979,6 +1035,18 @@ def generate_split_preview_image(
             return {"path": None, "error": "Não foi possível extrair o frame do vídeo para a prévia."}
 
         h, w = frame.shape[:2]
+
+        # Cálculo das margens com blur (topo & base)
+        margin_pct = max(0.0, min(25.0, float(split_blur_margin_pct)))
+        if margin_pct > 0.0:
+            margin_px = int(round(1920.0 * (margin_pct / 100.0)))
+            slot_h = max(200, (1920 - 2 * margin_px) // 2)
+            content_h = 2 * slot_h
+            actual_top_margin = (1920 - content_h) // 2
+        else:
+            slot_h = 960
+            content_h = 1920
+            actual_top_margin = 0
 
         base_w = int(h * 1.125 / zoom)
         base_h = int(h / zoom)
@@ -994,20 +1062,68 @@ def generate_split_preview_image(
         bot_x = int(max(0, min(max_x, (max_x / 2.0) + (bottom_pan * (max_x / 2.0)))))
         bot_y = top_y
 
-        # Recorta
+        # Recorta frames do vídeo principal
         top_crop = frame[top_y : top_y + base_h, top_x : top_x + base_w]
         bot_crop = frame[bot_y : bot_y + base_h, bot_x : bot_x + base_w]
 
-        top_resized = cv2.resize(top_crop, (1080, 960), interpolation=cv2.INTER_LINEAR)
-        bot_resized = cv2.resize(bot_crop, (1080, 960), interpolation=cv2.INTER_LINEAR)
+        top_resized = cv2.resize(top_crop, (1080, slot_h), interpolation=cv2.INTER_LINEAR)
+        bot_resized = cv2.resize(bot_crop, (1080, slot_h), interpolation=cv2.INTER_LINEAR)
 
-        # Monta canvas vertical 1080x1920
-        canvas = cv2.vconcat([top_resized, bot_resized])
+        # Processa Mídia Secundária caso selecionada
+        sec_res = None
+        if split_source_type == "video" and split_video_path and os.path.exists(split_video_path):
+            try:
+                sec_cap = cv2.VideoCapture(split_video_path)
+                sec_fps = sec_cap.get(cv2.CAP_PROP_FPS) or 30.0
+                sec_frames = int(sec_cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+                sec_dur = max(0.1, sec_frames / float(sec_fps))
+                sec_t = (t_sec % sec_dur)
+                sec_cap.set(cv2.CAP_PROP_POS_MSEC, sec_t * 1000.0)
+                ret_s, f_s = sec_cap.read()
+                sec_cap.release()
+                if ret_s and f_s is not None:
+                    sec_res = fit_frame_to_slot(f_s, 1080, slot_h)
+            except Exception:
+                sec_res = None
+
+        elif split_source_type == "images" and split_image_paths:
+            imgs = load_images_for_slideshow(split_image_paths, 1080, slot_h)
+            if imgs:
+                sec_res = imgs[0]
+
+        # Monta conteúdo ativo
+        if sec_res is not None:
+            if split_media_position == "top":
+                active_content = cv2.vconcat([sec_res, top_resized])
+            else:
+                active_content = cv2.vconcat([top_resized, sec_res])
+        else:
+            active_content = cv2.vconcat([top_resized, bot_resized])
+
+        # Aplica margens com fundo desfocado se margin_pct > 0
+        if actual_top_margin > 0:
+            bg_scale = max(1080.0 / float(w), 1920.0 / float(h))
+            bg_w = int(round(w * bg_scale))
+            bg_h = int(round(h * bg_scale))
+            bg_resized = cv2.resize(frame, (bg_w, bg_h), interpolation=cv2.INTER_LINEAR)
+            bg_x = max(0, (bg_w - 1080) // 2)
+            bg_y = max(0, (bg_h - 1920) // 2)
+            bg_cropped = bg_resized[bg_y : bg_y + 1920, bg_x : bg_x + 1080]
+
+            bg_small = cv2.resize(bg_cropped, (108, 192), interpolation=cv2.INTER_LINEAR)
+            bg_blur_small = cv2.GaussianBlur(bg_small, (21, 21), 0)
+            bg_blur = cv2.resize(bg_blur_small, (1080, 1920), interpolation=cv2.INTER_LINEAR)
+            bg_blur = cv2.convertScaleAbs(bg_blur, alpha=0.85, beta=0)
+
+            canvas = bg_blur
+            canvas[actual_top_margin : actual_top_margin + content_h, 0:1080] = active_content
+        else:
+            canvas = active_content
 
         # Desenha linha divisória elegante
         if divider_width > 0:
             div_c = (0, 0, 0) if divider_color == "black" else ((255, 255, 255) if divider_color == "white" else (180, 180, 180))
-            y_mid = 960
+            y_mid = actual_top_margin + slot_h
             y1 = max(0, y_mid - divider_width // 2)
             y2 = min(1920, y_mid + divider_width // 2)
             canvas[y1:y2, :] = div_c
@@ -1029,13 +1145,22 @@ def crop_video_with_dynamic_auto_switch(
     bottom_pan: float = 0.65,
     divider_color: str = "black",
     divider_width: int = 4,
-    auto_switch_enabled: bool = True
+    auto_switch_enabled: bool = True,
+    split_source_type: str = "main_video",
+    split_video_path: str = None,
+    split_image_paths: list = None,
+    split_media_position: str = "bottom",
+    split_blur_margin_pct: float = 5.0
 ) -> dict:
     """
-    Renderiza vídeo 9:16 com Transição Dinâmica Inteligente:
-    - Quando houver >= 2 pessoas visíveis na cena: renderiza em Split Screen 9:16 (Topo e Base).
-    - Quando a câmera fechar em Close-up de 1 pessoa: faz a transição suave para 9:16 Full Screen.
+    Renderiza vídeo 9:16 em Layout Dividido (Split Screen):
+    - Modo Padrão: Quando houver >= 2 pessoas, aplica Split Screen (Topo e Base).
+    - Modo Vídeo Secundário: Insere vídeo local em looping contínuo na base (ou topo).
+    - Modo Slideshow de Imagens: Apresenta imagens proporcionalmente ao tempo do vídeo.
+    - Margens com Fundo Desfocado: Adiciona margens com blur cinematográfico no topo e na base.
+    - Se auto_switch_enabled e sem mídia secundária: transiciona suavemente para 9:16 Full Screen em close-ups.
     """
+    sec_cap = None
     try:
         ensure_face_model()
         start_s = parse_time_to_seconds(start_time_str)
@@ -1056,7 +1181,7 @@ def crop_video_with_dynamic_auto_switch(
         temp_audio_cut = os.path.join(out_dir, "temp_dyn_audio.m4a") if out_dir else "temp_dyn_audio.m4a"
         temp_video_raw = os.path.join(out_dir, "temp_dyn_raw.mp4") if out_dir else "temp_dyn_raw.mp4"
 
-        # Extrai áudio sincronizado
+        # Extrai áudio sincronizado do vídeo principal
         cmd_audio = [
             FFMPEG_EXE, "-y",
             "-ss", start_time_str,
@@ -1065,7 +1190,28 @@ def crop_video_with_dynamic_auto_switch(
             "-vn", "-c:a", "aac", "-b:a", "192k",
             temp_audio_cut
         ]
-        subprocess.run(cmd_audio, capture_output=True)
+        subprocess.run(cmd_audio, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+        # Cálculo das margens com blur (topo & base)
+        margin_pct = max(0.0, min(25.0, float(split_blur_margin_pct)))
+        if margin_pct > 0.0:
+            margin_px = int(round(1920.0 * (margin_pct / 100.0)))
+            slot_h = max(200, (1920 - 2 * margin_px) // 2)
+            content_h = 2 * slot_h
+            actual_top_margin = (1920 - content_h) // 2
+        else:
+            slot_h = 960
+            content_h = 1920
+            actual_top_margin = 0
+
+        # Prepara Mídia Secundária (Vídeo em Looping ou Slideshow de Imagens)
+        use_custom_secondary = split_source_type in ["video", "images"]
+        slideshow_frames = []
+
+        if split_source_type == "video" and split_video_path and os.path.exists(split_video_path):
+            sec_cap = cv2.VideoCapture(split_video_path)
+        elif split_source_type == "images" and split_image_paths:
+            slideshow_frames = load_images_for_slideshow(split_image_paths, 1080, slot_h)
 
         # Inicia processo FFmpeg para receber os frames 1080x1920 via stdin
         cmd_ffmpeg = [
@@ -1100,8 +1246,8 @@ def crop_video_with_dynamic_auto_switch(
 
             h, w = frame.shape[:2]
 
-            if auto_switch_enabled:
-                # Detecção a cada 2 frames com histerese
+            # Auto-switch só se aplica quando NÃO estiver usando mídia secundária personalizada
+            if auto_switch_enabled and not use_custom_secondary:
                 if frame_idx % 2 == 0 or frame_idx == 0:
                     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
@@ -1136,15 +1282,59 @@ def crop_video_with_dynamic_auto_switch(
                 bot_y = top_y
 
                 top_crop = frame[top_y : top_y + base_h, top_x : top_x + base_w]
-                bot_crop = frame[bot_y : bot_y + base_h, bot_x : bot_x + base_w]
+                top_res = cv2.resize(top_crop, (1080, slot_h), interpolation=cv2.INTER_LINEAR)
 
-                top_res = cv2.resize(top_crop, (1080, 960), interpolation=cv2.INTER_LINEAR)
-                bot_res = cv2.resize(bot_crop, (1080, 960), interpolation=cv2.INTER_LINEAR)
+                # Processa slot secundário
+                sec_slot_res = None
+                if split_source_type == "video" and sec_cap is not None and sec_cap.isOpened():
+                    ret_s, f_s = sec_cap.read()
+                    if not ret_s or f_s is None:
+                        # Looping contínuo caso o vídeo secundário seja menor que o principal
+                        sec_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        ret_s, f_s = sec_cap.read()
+                    if ret_s and f_s is not None:
+                        sec_slot_res = fit_frame_to_slot(f_s, 1080, slot_h)
+                    else:
+                        sec_slot_res = np.zeros((slot_h, 1080, 3), dtype=np.uint8)
 
-                out_frame = cv2.vconcat([top_res, bot_res])
+                elif split_source_type == "images" and slideshow_frames:
+                    n_imgs = len(slideshow_frames)
+                    idx_img = min(int((float(frame_idx) / max(1.0, float(total_cut_frames))) * n_imgs), n_imgs - 1)
+                    sec_slot_res = slideshow_frames[idx_img]
+
+                if sec_slot_res is not None:
+                    if split_media_position == "top":
+                        active_content = cv2.vconcat([sec_slot_res, top_res])
+                    else:
+                        active_content = cv2.vconcat([top_res, sec_slot_res])
+                else:
+                    bot_crop = frame[bot_y : bot_y + base_h, bot_x : bot_x + base_w]
+                    bot_res = cv2.resize(bot_crop, (1080, slot_h), interpolation=cv2.INTER_LINEAR)
+                    active_content = cv2.vconcat([top_res, bot_res])
+
+                # Aplica margens com fundo desfocado se margin_pct > 0
+                if actual_top_margin > 0:
+                    bg_scale = max(1080.0 / float(w), 1920.0 / float(h))
+                    bg_w = int(round(w * bg_scale))
+                    bg_h = int(round(h * bg_scale))
+                    bg_resized = cv2.resize(frame, (bg_w, bg_h), interpolation=cv2.INTER_LINEAR)
+                    bg_x = max(0, (bg_w - 1080) // 2)
+                    bg_y = max(0, (bg_h - 1920) // 2)
+                    bg_cropped = bg_resized[bg_y : bg_y + 1920, bg_x : bg_x + 1080]
+
+                    bg_small = cv2.resize(bg_cropped, (108, 192), interpolation=cv2.INTER_LINEAR)
+                    bg_blur_small = cv2.GaussianBlur(bg_small, (21, 21), 0)
+                    bg_blur = cv2.resize(bg_blur_small, (1080, 1920), interpolation=cv2.INTER_LINEAR)
+                    bg_blur = cv2.convertScaleAbs(bg_blur, alpha=0.85, beta=0)
+
+                    out_frame = bg_blur
+                    out_frame[actual_top_margin : actual_top_margin + content_h, 0:1080] = active_content
+                else:
+                    out_frame = active_content
+
                 if divider_width > 0:
                     div_c = (0, 0, 0) if divider_color == "black" else ((255, 255, 255) if divider_color == "white" else (180, 180, 180))
-                    y_mid = 960
+                    y_mid = actual_top_margin + slot_h
                     y1 = max(0, y_mid - divider_width // 2)
                     y2 = min(1920, y_mid + divider_width // 2)
                     out_frame[y1:y2, :] = div_c
@@ -1164,6 +1354,8 @@ def crop_video_with_dynamic_auto_switch(
             frame_idx += 1
 
         cap.release()
+        if sec_cap is not None and sec_cap.isOpened():
+            sec_cap.release()
         detector.close()
         ffmpeg_proc.stdin.close()
         ffmpeg_proc.wait()

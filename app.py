@@ -45,7 +45,7 @@ importlib.reload(core.overlay_manager)
 
 from core.extractor import download_audio, get_video_metadata
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
-from core.analyzer import analyze_transcript
+from core.analyzer import analyze_transcript, build_suggested_bundles
 from core.video_processor import (
     download_full_video, cut_video, get_video_resolution,
     extract_audio_from_local_video, extract_thumbnail_from_video, generate_local_video_id
@@ -55,13 +55,19 @@ from core.config_manager import load_settings, save_all_settings, save_setting
 from core.export_kit import build_cut_folder_name, create_viral_package
 from core.cuts_catalog import get_cut_entry, get_format_instance, register_cut_instance, update_cut_texts_only, delete_entire_cut, delete_format_instance, load_cuts_catalog, set_active_thumbnail_variation, update_cut_thumbnail_in_catalog
 from core.batch_processor import process_batch_cuts
-from core.headline_drawer import HEADLINE_PRESETS
+from core.headline_drawer import (
+    HEADLINE_PRESETS, generate_headline_preview, apply_headline_to_video,
+    clean_and_condense_headline, format_headline_text
+)
 from core.audio_mixer import list_available_tracks, DUCKING_PRESETS
 from core.retention_effects import PROGRESS_BAR_COLORS, ENGAGEMENT_CALLOUT_PRESETS
 from core.thumbnail_generator import create_cut_thumbnail
 from core.integrations import get_youtube_auth_status, authenticate_youtube_oauth, upload_to_youtube_shorts, send_to_webhook
 from core.quick_editor import get_video_duration, extract_frame_at_timestamp, trim_video, remove_snippet_and_merge
 from core.overlay_manager import apply_overlay_to_video, generate_overlay_preview, OVERLAY_PRESETS
+from core.audio_processor import (
+    AUDIO_EQUALIZER_PRESETS, equalize_video_audio, generate_audio_preview_sample
+)
 
 # Carrega todas as configurações persistentes salvas
 _cfg = load_settings()
@@ -119,11 +125,22 @@ def safe_display_image(img_source, caption=None, use_container_width=True):
     return False
 
 def safe_display_video(video_path: str):
-    """Garante reprodução e streaming instantâneo de vídeo MP4."""
-    if not video_path or not os.path.exists(video_path):
+    """Garante reprodução e streaming instantâneo de vídeo MP4 sem erros de storage."""
+    if not video_path:
         st.warning("Arquivo de vídeo não encontrado.")
         return
-    st.video(video_path)
+    abs_p = os.path.abspath(video_path)
+    if not os.path.exists(abs_p) or os.path.getsize(abs_p) == 0:
+        st.warning(f"Arquivo de vídeo não encontrado ou vazio: {video_path}")
+        return
+    try:
+        with open(abs_p, "rb") as f_v:
+            st.video(f_v.read())
+    except Exception:
+        try:
+            st.video(abs_p)
+        except Exception as e_vid:
+            st.error(f"Erro ao reproduzir vídeo: {e_vid}")
 
 def open_in_file_explorer(target_path: str) -> bool:
     """
@@ -175,10 +192,12 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 if not custom_suffix.startswith("_"):
                     custom_suffix = f"_{custom_suffix}"
 
-        tab_trim, tab_snip, tab_overlay = st.tabs([
+        tab_trim, tab_snip, tab_overlay, tab_headline, tab_audio = st.tabs([
             "✂️ Aparar (Trim)", 
             "🗑️ Remover Trecho",
-            "🎨 Banner (Overlay)"
+            "🎨 Banner (Overlay)",
+            "🏷️ Headline de Topo",
+            "🎙️ Equalizador & Áudio"
         ])
 
         with tab_trim:
@@ -553,6 +572,327 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                                 st.success("🎉 Banner aplicado e vídeo atualizado com sucesso!")
                                 st.rerun()
 
+        # ── TAB 4: HEADLINE / TÍTULO DE TOPO (PÓS-CORTE) ──────────────────────
+        with tab_headline:
+            st.markdown("##### 🏷️ Headline / Título de Topo Magnético (Pós-Corte)")
+            st.caption("Adicione, ajuste ou troque o título fixo no topo do corte com visualização instantânea em tempo real e renderização ultra-rápida por GPU!")
+
+            # 1. Texto da Headline
+            col_htxt, col_hbtn = st.columns([4, 1.2])
+            with col_htxt:
+                def_hl_text = st.session_state.get("input_cut_headline") or st.session_state.get("input_cut_title") or "PREPARO DE RENAN SANTOS\nESTÁ MUITO ACIMA DO NORMAL"
+                hl_text_input = st.text_area(
+                    "Texto da Headline (use Enter para quebrar linhas manualmente):",
+                    value=def_hl_text,
+                    height=80,
+                    key=f"hl_post_text_{unique_key}",
+                    help="Digite ou edite o texto. Linhas separadas por Enter serão formatadas em caixas independentes estilo TikTok/Reels!"
+                )
+            with col_hbtn:
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                if st.button("✨ Condensar", key=f"hl_post_condense_{unique_key}", use_container_width=True, help="Ajusta o texto para caixa alta e quebra inteligente de 2 a 3 linhas"):
+                    cleaned_hl = clean_and_condense_headline(hl_text_input)
+                    if cleaned_hl:
+                        st.session_state[f"hl_post_text_{unique_key}"] = format_headline_text(cleaned_hl).replace(r"\N", "\n")
+                        st.rerun()
+
+            # 2. Estilos e Cores
+            col_hp1, col_hp2, col_hp3 = st.columns([1.6, 1.2, 1.2])
+            with col_hp1:
+                hl_preset_keys = list(HEADLINE_PRESETS.keys())
+                hl_preset_labels = [HEADLINE_PRESETS[k]["name"] for k in hl_preset_keys]
+                saved_hl_preset = _cfg.get("headline_preset", "yellow_black")
+                def_hl_idx = hl_preset_keys.index(saved_hl_preset) if saved_hl_preset in hl_preset_keys else 0
+                sel_hl_preset_lbl = st.selectbox(
+                    "Estilo Visual:",
+                    hl_preset_labels,
+                    index=def_hl_idx,
+                    key=f"hl_post_preset_sel_{unique_key}"
+                )
+                sel_hl_preset_key = hl_preset_keys[hl_preset_labels.index(sel_hl_preset_lbl)]
+                p_hl_data = HEADLINE_PRESETS[sel_hl_preset_key]
+
+            with col_hp2:
+                def_txt_col = _cfg.get("headline_text_color") or p_hl_data["text_color"]
+                sel_txt_col = st.color_picker("Cor do Texto:", def_txt_col, key=f"hl_post_txt_col_{unique_key}")
+
+            with col_hp3:
+                def_bg_col = _cfg.get("headline_bg_color") or p_hl_data["bg_color"]
+                sel_bg_col = st.color_picker("Cor da Caixa (Fundo):", def_bg_col, key=f"hl_post_bg_col_{unique_key}")
+
+            # 3. Layout e Dimensões
+            col_hl_m1, col_hl_m2, col_hl_m3, col_hl_m4 = st.columns(4)
+            with col_hl_m1:
+                sel_hl_mode = st.selectbox(
+                    "Modo do Container:",
+                    ["line_boxes", "single_card", "outline_only"],
+                    index=0 if sel_hl_preset_key != "floating_bold" else 2,
+                    format_func=lambda x: {
+                        "line_boxes": "📦 Caixa por Linha (TikTok/Reels)",
+                        "single_card": "🃏 Card Único (Bloco)",
+                        "outline_only": "✨ Sem Caixa (Contorno)"
+                    }[x],
+                    key=f"hl_post_mode_{unique_key}"
+                )
+            with col_hl_m2:
+                saved_margin_top = int(_cfg.get("headline_margin_top", 240))
+                sel_hl_margin_top = st.number_input(
+                    "Margem do Topo Y (px):",
+                    min_value=0,
+                    max_value=1200,
+                    value=saved_margin_top,
+                    step=10,
+                    key=f"hl_post_mtop_{unique_key}",
+                    help="Distância em pixels a partir da borda superior."
+                )
+            with col_hl_m3:
+                saved_font_size = int(_cfg.get("headline_font_size", 70))
+                sel_hl_font_size = st.number_input(
+                    "Tamanho da Fonte:",
+                    min_value=20,
+                    max_value=200,
+                    value=saved_font_size,
+                    step=2,
+                    key=f"hl_post_fsz_{unique_key}"
+                )
+            with col_hl_m4:
+                sel_hl_width_pct = st.slider(
+                    "Largura Máxima (% da tela):",
+                    min_value=50,
+                    max_value=100,
+                    value=92,
+                    step=1,
+                    key=f"hl_post_wpct_{unique_key}"
+                )
+
+            # 4. Ajustes Finos (Expander)
+            with st.expander("⚙️ Ajustes Finos de Espaçamento, Cantos Arredondados e Alinhamento", expanded=False):
+                col_fin1, col_fin2, col_fin3, col_fin4 = st.columns(4)
+                with col_fin1:
+                    sel_hl_pad_x = st.slider("Padding Horizontal (px):", 4, 80, 28, 2, key=f"hl_post_padx_{unique_key}")
+                with col_fin2:
+                    sel_hl_pad_y = st.slider("Padding Vertical (px):", 2, 60, 16, 2, key=f"hl_post_pady_{unique_key}")
+                with col_fin3:
+                    sel_hl_linesp = st.slider("Espaçamento de Linhas (px):", 0, 50, 14, 2, key=f"hl_post_linesp_{unique_key}")
+                with col_fin4:
+                    sel_hl_radius = st.slider("Cantos Arredondados (px):", 0, 50, 14, 2, key=f"hl_post_radius_{unique_key}")
+
+                col_fin5, col_fin6, col_fin7 = st.columns(3)
+                with col_fin5:
+                    sel_hl_align = st.selectbox(
+                        "Alinhamento:",
+                        ["center", "left", "right"],
+                        format_func=lambda x: {"center": "↔️ Centralizado", "left": "⬅️ Esquerda", "right": "➡️ Direita"}[x],
+                        key=f"hl_post_align_{unique_key}"
+                    )
+                with col_fin6:
+                    sel_hl_bg_op = st.slider("Opacidade da Caixa:", 0.0, 1.0, 1.0, 0.05, key=f"hl_post_bgop_{unique_key}")
+                with col_fin7:
+                    sel_hl_shadow = st.toggle("Sombra Projetada", value=True, key=f"hl_post_shadow_{unique_key}")
+
+            # Dicionário de Configuração
+            current_hl_cfg = {
+                "preset_key": sel_hl_preset_key,
+                "text_color": sel_txt_col,
+                "bg_color": sel_bg_col,
+                "bg_opacity": sel_hl_bg_op if 'sel_hl_bg_op' in locals() else 1.0,
+                "font_size": sel_hl_font_size,
+                "margin_top": sel_hl_margin_top,
+                "container_mode": sel_hl_mode,
+                "container_width_pct": sel_hl_width_pct,
+                "box_padding_x": sel_hl_pad_x if 'sel_hl_pad_x' in locals() else 28,
+                "box_padding_y": sel_hl_pad_y if 'sel_hl_pad_y' in locals() else 16,
+                "line_spacing": sel_hl_linesp if 'sel_hl_linesp' in locals() else 14,
+                "corner_radius": sel_hl_radius if 'sel_hl_radius' in locals() else 14,
+                "alignment": sel_hl_align if 'sel_hl_align' in locals() else "center",
+                "shadow_enabled": sel_hl_shadow if 'sel_hl_shadow' in locals() else True,
+                "shadow_offset_y": 6
+            }
+
+            # 5. Prévia Instantânea do Frame
+            st.markdown("---")
+            st.markdown("##### 👁️ Prévia da Headline em Tempo Real:")
+            col_hl_prev_t, _ = st.columns([2, 2])
+            with col_hl_prev_t:
+                hl_preview_sec = st.slider(
+                    "Segundo do vídeo para prévia:",
+                    min_value=0.0,
+                    max_value=float(dur),
+                    value=min(1.0, float(dur * 0.1)),
+                    step=0.5,
+                    key=f"hl_post_prev_sec_{unique_key}"
+                )
+
+            prev_hl_frame = generate_headline_preview(
+                video_path=video_path,
+                text=hl_text_input,
+                config=current_hl_cfg,
+                timestamp_s=hl_preview_sec
+            )
+
+            if prev_hl_frame is not None:
+                safe_display_image(prev_hl_frame, caption=f"Prévia da Headline em {hl_preview_sec:.1f}s", use_container_width=True)
+
+            # 6. Botão de Aplicação / Renderização Ultra-Rápida
+            st.markdown("")
+            btn_label_hl = "🚀 Salvar como Novo Vídeo com Headline" if "Salvar como um novo vídeo" in save_mode else "🚀 Aplicar Headline no Vídeo Atual"
+            if st.button(btn_label_hl, key=f"btn_apply_headline_post_{unique_key}", type="primary", use_container_width=True):
+                with st.spinner("Queimando Headline no vídeo com aceleração GPU (NVENC)..."):
+                    out_target_hl = None
+                    if "Salvar como um novo vídeo" in save_mode:
+                        v_dir_edit = os.path.dirname(video_path)
+                        b_name, ext = os.path.splitext(os.path.basename(video_path))
+                        suf = custom_suffix if custom_suffix else "_com_headline"
+                        out_target_hl = os.path.join(v_dir_edit, f"{b_name}{suf}{ext}")
+
+                    hl_res = apply_headline_to_video(
+                        video_path=video_path,
+                        text=hl_text_input,
+                        config=current_hl_cfg,
+                        output_path=out_target_hl
+                    )
+
+                    if hl_res.get("error"):
+                        st.error(f"Erro ao aplicar headline: {hl_res['error']}")
+                    else:
+                        if out_target_hl:
+                            st.session_state[f"last_edited_video_{unique_key}"] = out_target_hl
+                            st.success(f"🎉 Novo vídeo criado com sucesso! Arquivo: `{os.path.basename(out_target_hl)}`")
+                            st.rerun()
+                        else:
+                            st.success("🎉 Headline aplicada e vídeo atualizado com sucesso!")
+                            st.rerun()
+
+        # ── TAB 5: EQUALIZADOR & TRATAMENTO DE ÁUDIO (PÓS-CORTE) ──────────────
+        with tab_audio:
+            st.markdown("##### 🎙️ Equalizador, Anti-Estouro & Nivelador de Áudio")
+            st.caption("Recupere microfones estourados/saturados, nivele a voz com a torcida/som ambiente e aplique limiter profissional sem perda de qualidade de vídeo!")
+
+            # 1. Seletor de Preset
+            eq_preset_keys = list(AUDIO_EQUALIZER_PRESETS.keys())
+            eq_preset_labels = [AUDIO_EQUALIZER_PRESETS[k]["name"] for k in eq_preset_keys]
+            sel_eq_lbl = st.selectbox(
+                "Perfil de Equalização & Tratamento:",
+                eq_preset_labels,
+                index=0,
+                key=f"eq_preset_sel_{unique_key}"
+            )
+            sel_eq_key = eq_preset_keys[eq_preset_labels.index(sel_eq_lbl)]
+            eq_preset_data = AUDIO_EQUALIZER_PRESETS[sel_eq_key]
+            st.info(f"💡 **Como atua este perfil**: {eq_preset_data['description']}")
+
+            # 2. Ajustes Finos (Expander)
+            with st.expander("⚙️ Ajustes Finos de Equalização, Torcida/Ambiente e Limiter", expanded=(sel_eq_key == "custom")):
+                col_eq1, col_eq2, col_eq3 = st.columns(3)
+                with col_eq1:
+                    sel_highpass = st.slider(
+                        "Corte de Graves / Vento (Hz):",
+                        min_value=20, max_value=160,
+                        value=int(eq_preset_data.get("highpass_hz", 75)),
+                        step=5,
+                        key=f"eq_highpass_{unique_key}",
+                        help="Remove rumbles e barulhos de vento/microfone abaixo desta frequência."
+                    )
+                with col_eq2:
+                    sel_deharsh = st.slider(
+                        "Atenuação de Agudos Estridentes (dB):",
+                        min_value=-8.0, max_value=2.0,
+                        value=float(eq_preset_data.get("deharsh_eq_db", -3.5)),
+                        step=0.5,
+                        key=f"eq_deharsh_{unique_key}",
+                        help="Suaviza frequências agudas metálicas e estouradas do microfone em 3.2 kHz."
+                    )
+                with col_eq3:
+                    sel_limiter_db = st.slider(
+                        "Teto Anti-Estouro / Limiter (dB):",
+                        min_value=-6.0, max_value=-0.2,
+                        value=float(eq_preset_data.get("limiter_limit_db", -1.2)),
+                        step=0.1,
+                        key=f"eq_limiter_{unique_key}",
+                        help="Impede qualquer distorção ou estouro no alto-falante estabelecendo um teto seguro."
+                    )
+
+                col_eq4, col_eq5, col_eq6 = st.columns(3)
+                with col_eq4:
+                    sel_dynaudnorm = st.toggle(
+                        "Nivelador Dinâmico (Realçar Torcida/Fundo)",
+                        value=bool(eq_preset_data.get("dynaudnorm_enabled", True)),
+                        key=f"eq_dynaud_{unique_key}",
+                        help="Eleva suavemente o som da torcida/ambiente nas pausas de fala e controla gritos próximos ao microfone."
+                    )
+                with col_eq5:
+                    sel_vol_gain = st.slider(
+                        "Ganho Geral de Volume (dB):",
+                        min_value=-12.0, max_value=12.0,
+                        value=float(eq_preset_data.get("volume_gain_db", 0.0)),
+                        step=0.5,
+                        key=f"eq_vol_gain_{unique_key}"
+                    )
+                with col_eq6:
+                    sel_denoise = st.toggle(
+                        "Redução de Chiado de Fundo (Denoise)",
+                        value=bool(eq_preset_data.get("denoise_enabled", False)),
+                        key=f"eq_denoise_{unique_key}"
+                    )
+
+            current_eq_cfg = {
+                "preset_key": sel_eq_key,
+                "highpass_hz": sel_highpass,
+                "deharsh_eq_db": sel_deharsh,
+                "limiter_limit_db": sel_limiter_db,
+                "dynaudnorm_enabled": sel_dynaudnorm,
+                "dynaudnorm_framelen": int(eq_preset_data.get("dynaudnorm_framelen", 150)),
+                "dynaudnorm_maxgain": int(eq_preset_data.get("dynaudnorm_maxgain", 15)),
+                "volume_gain_db": sel_vol_gain,
+                "denoise_enabled": sel_denoise
+            }
+
+            # 3. Prévia de Áudio em Tempo Real
+            st.markdown("---")
+            st.markdown("##### 🎧 Ouvir Prévia do Áudio Equalizado:")
+            col_prev_a1, col_prev_a2 = st.columns([1.5, 2.5])
+            with col_prev_a1:
+                if st.button("▶️ Gerar / Atualizar Prévia de Áudio", key=f"btn_gen_eq_prev_{unique_key}", use_container_width=True):
+                    with st.spinner("Gerando prévia sonora em alta fidelidade..."):
+                        prev_a_path = generate_audio_preview_sample(video_path, current_eq_cfg, max_duration_s=min(45.0, float(dur)))
+                        if prev_a_path and os.path.exists(prev_a_path):
+                            st.session_state[f"last_eq_audio_prev_{unique_key}"] = prev_a_path
+                            st.rerun()
+
+            with col_prev_a2:
+                last_a_prev = st.session_state.get(f"last_eq_audio_prev_{unique_key}")
+                if last_a_prev and os.path.exists(last_a_prev):
+                    st.audio(last_a_prev, format="audio/mp4")
+
+            # 4. Botão de Aplicação no Vídeo
+            st.markdown("")
+            btn_label_eq = "🚀 Salvar como Novo Vídeo Equalizado" if "Salvar como um novo vídeo" in save_mode else "🚀 Aplicar Equalização no Vídeo Atual"
+            if st.button(btn_label_eq, key=f"btn_apply_eq_{unique_key}", type="primary", use_container_width=True):
+                with st.spinner("Equalizando áudio e gerando vídeo final (Stream Copy em ~1s)..."):
+                    out_target_eq = None
+                    if "Salvar como um novo vídeo" in save_mode:
+                        v_dir_edit = os.path.dirname(video_path)
+                        b_name, ext = os.path.splitext(os.path.basename(video_path))
+                        suf = custom_suffix if custom_suffix else "_audio_equalizado"
+                        out_target_eq = os.path.join(v_dir_edit, f"{b_name}{suf}{ext}")
+
+                    eq_res = equalize_video_audio(
+                        video_path=video_path,
+                        config=current_eq_cfg,
+                        output_path=out_target_eq
+                    )
+
+                    if eq_res.get("error"):
+                        st.error(f"Erro ao equalizar áudio: {eq_res['error']}")
+                    else:
+                        if out_target_eq:
+                            st.session_state[f"last_edited_video_{unique_key}"] = out_target_eq
+                            st.success(f"🎉 Novo vídeo criado com sucesso! Arquivo: `{os.path.basename(out_target_eq)}`")
+                            st.rerun()
+                        else:
+                            st.success("🎉 Áudio equalizado e vídeo atualizado com sucesso!")
+                            st.rerun()
+
         # Se uma nova versão foi gerada recentemente para este componente, exibe player e download
         last_new_v = st.session_state.get(f"last_edited_video_{unique_key}")
         if last_new_v and os.path.exists(last_new_v):
@@ -844,6 +1184,16 @@ if input_mode == "🌐 Link do YouTube":
                             if os.path.exists(v_full_cache):
                                 os.remove(v_full_cache)
                             st.rerun()
+                    
+                    # Download automático do vídeo completo (se ainda não baixado)
+                    _vfull_cache_path = os.path.join(data_dir, "video_full.mp4")
+                    if not is_live_flag and not os.path.exists(_vfull_cache_path):
+                        with st.spinner("⏳ Baixando vídeo completo em 1080p para habilitar o Recorte Final..."):
+                            download_full_video(video_url, _vfull_cache_path, is_live=False)
+                        if os.path.exists(_vfull_cache_path):
+                            st.success("🎥 Vídeo completo baixado e pronto para recorte!")
+                    elif os.path.exists(_vfull_cache_path):
+                        st.info(f"🎥 Vídeo completo já no cache — pronto para recorte.")
                 else:
                     st.info("Iniciando extração do YouTube...")
                     if meta.get("title"):
@@ -904,6 +1254,16 @@ if input_mode == "🌐 Link do YouTube":
                                 "segments": st.session_state.segments,
                                 "source": st.session_state.transcript_source
                             }, f, ensure_ascii=False, indent=4)
+
+                        # Download automático do vídeo completo logo após a transcrição
+                        _vfull_path = os.path.join(data_dir, "video_full.mp4")
+                        if not is_live_flag and not os.path.exists(_vfull_path):
+                            with st.spinner("⏬ Baixando vídeo completo em 1080p Full HD (necessário para o Recorte Final)..."):
+                                _vres = download_full_video(video_url, _vfull_path, is_live=False)
+                            if _vres.get("error"):
+                                st.warning(f"⚠️ Vídeo baixado parcialmente ou com aviso: {_vres['error']}")
+                            elif os.path.exists(_vfull_path):
+                                st.success("🎥 Vídeo completo baixado e pronto para recorte na Seção 3!")
 
 else:
     # 💻 Modo Arquivo de Vídeo Local do Computador
@@ -1090,7 +1450,7 @@ if st.session_state.transcription_done:
     
     tab_composer, tab_series, tab_shorts, tab_manual = st.tabs([
         "🧩 Compositor de Pautas (Micro-Assuntos)",
-        "💡 Séries Sugeridas (10+ min)",
+        "💡 Séries Sugeridas",
         "🔥 Ganchos Virais (Shorts)",
         "🖱️ Seleção Manual (Chunks)"
     ])
@@ -1290,10 +1650,10 @@ if st.session_state.transcription_done:
                 st.info("Nenhum passo guardado ainda. Selecione pautas acima e clique em **'💾 Guardar como Passo'** para montar sua fila de cortes!")
 
 
-    # ── TAB 2: SÉRIES AUTOMÁTICAS ─────────────────────────────────────────────
+    # ── TAB 2: SÉRIES SUGERIDAS ───────────────────────────────────────────────
     with tab_series:
-        st.markdown("Cortes de **10+ minutos** sugeridos agrupando sequências de pautas para publicação como **Vídeos Normais no YouTube** (Horizontal 16:9 Full HD).")
-        st.info("ℹ️ **Modo Vídeo Normal (YouTube 16:9)**: Séries e vídeos longos de 10+ minutos são renderizados no formato original widescreen limpo (sem tarjas de topo, zoom punches periódicos ou barras de progresso de Shorts), preservando a experiência de vídeo tradicional do YouTube.")
+        st.markdown("Séries sugeridas agrupando sequências de pautas para publicação como **Vídeos Normais no YouTube** (Horizontal 16:9 Full HD) ou outros formatos.")
+        st.info("ℹ️ **Modo Vídeo Normal (YouTube 16:9)**: Séries e vídeos longos são renderizados no formato original widescreen limpo (sem tarjas de topo, zoom punches periódicos ou barras de progresso de Shorts), preservando a experiência de vídeo tradicional do YouTube.")
 
         if "batch_feedback" in st.session_state:
             fb = st.session_state.pop("batch_feedback")
@@ -1304,25 +1664,46 @@ if st.session_state.transcription_done:
             else:
                 st.error(fb.get("msg", ""))
         
-        if st.button("🧠 Gerar Séries Automáticas (10 min)", key="btn_series"):
-            with st.spinner("Agrupando pautas em séries de 10+ min..."):
-                res = analyze_transcript(
-                    chunked_transcript, "blocos",
-                    model=ollama_model,
-                    chunks_list=chunks_list,
-                    segments=st.session_state.segments,
-                    strategy="qa_interview" if "Entrevistas" in strategy_choice else "semantic_topics"
-                )
-                if res.get("error"):
-                    st.error(f"Erro no Ollama: {res['error']}")
-                else:
-                    st.session_state.bundles = res.get("bundles", [])
-                    st.session_state.pautas = res.get("pautas", [])
-                    st.session_state.ai_raw = res.get("raw", "")
+        col_s_min, col_s_btn = st.columns([1.5, 2.5])
+        with col_s_min:
+            saved_min_mins = float(_cfg.get("series_min_minutes", 10.0))
+            series_min_mins = st.number_input(
+                "⏱️ Tempo Mínimo por Corte (minutos):",
+                min_value=1.0,
+                max_value=120.0,
+                value=saved_min_mins,
+                step=1.0,
+                key="series_min_minutes_input",
+                on_change=lambda: save_setting("series_min_minutes", st.session_state.series_min_minutes_input),
+                help="Define a duração mínima de agrupamento para cada série/episódio gerado."
+            )
+
+        with col_s_btn:
+            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            _btn_label = f"🧠 Gerar / Reagrupar Séries Sugeridas ({series_min_mins:.0f}+ min)" if series_min_mins == int(series_min_mins) else f"🧠 Gerar / Reagrupar Séries Sugeridas ({series_min_mins:.1f}+ min)"
+            if st.button(_btn_label, key="btn_series", type="primary", use_container_width=True):
+                with st.spinner(f"Agrupando pautas em séries de {series_min_mins:.0f}+ min..."):
+                    if 'pautas' in st.session_state and st.session_state.pautas:
+                        st.session_state.bundles = build_suggested_bundles(st.session_state.pautas, min_minutes=series_min_mins)
+                    else:
+                        res = analyze_transcript(
+                            chunked_transcript, "blocos",
+                            model=ollama_model,
+                            chunks_list=chunks_list,
+                            segments=st.session_state.segments,
+                            strategy="qa_interview" if "Entrevistas" in strategy_choice else "semantic_topics",
+                            min_series_minutes=series_min_mins
+                        )
+                        if res.get("error"):
+                            st.error(f"Erro no Ollama: {res['error']}")
+                        else:
+                            st.session_state.bundles = res.get("bundles", [])
+                            st.session_state.pautas = res.get("pautas", [])
+                            st.session_state.ai_raw = res.get("raw", "")
                     
                     active_u = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
                     v_id = get_video_id(active_u)
-                    if v_id:
+                    if v_id and 'bundles' in st.session_state:
                         s_file = os.path.join("data", v_id, "series.json")
                         with open(s_file, "w", encoding="utf-8") as f:
                             json.dump(st.session_state.bundles, f, ensure_ascii=False, indent=4)
@@ -1766,6 +2147,33 @@ if st.session_state.transcription_done:
     if 'final_end_time' not in st.session_state:
         st.session_state.final_end_time = ""
 
+    # ── Botões de atalho de tempo ──────────────────────────────────────
+    _btn_col_full, _btn_col_clear, _btn_col_spacer = st.columns([1.4, 1, 3])
+    with _btn_col_full:
+        if st.button("📺 Vídeo Inteiro", key="btn_use_full_video", use_container_width=True,
+                     help="Preenche automaticamente o tempo inicial (00:00:00) e o tempo final com a duração total do vídeo"):
+            _active_url_full = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+            _vid_id_full = get_video_id(_active_url_full)
+            _vid_path_full = os.path.join("data", _vid_id_full, "video_full.mp4") if _vid_id_full else None
+            if _vid_path_full and os.path.exists(_vid_path_full):
+                _total_dur = get_video_duration(_vid_path_full)
+                def _fmt(s):
+                    h, m, sec = int(s // 3600), int((s % 3600) // 60), int(s % 60)
+                    return f"{h:02d}:{m:02d}:{sec:02d}"
+                st.session_state.final_start_time = "00:00:00"
+                st.session_state.final_end_time = _fmt(_total_dur)
+                st.session_state.cut_ready_banner = f"✅ Vídeo inteiro selecionado: [00:00:00 → {_fmt(_total_dur)}]"
+                st.rerun()
+            else:
+                st.warning("⚠️ Vídeo ainda não baixado. Gere o corte uma vez para baixar o vídeo completo.")
+    with _btn_col_clear:
+        if st.button("🗑️ Limpar", key="btn_clear_times", use_container_width=True,
+                     help="Limpa os campos de tempo inicial e final"):
+            st.session_state.final_start_time = ""
+            st.session_state.final_end_time = ""
+            st.session_state.cut_ready_banner = ""
+            st.rerun()
+
     col_start, col_end = st.columns(2)
     start_time = col_start.text_input("Tempo Inicial (HH:MM:SS)", key="final_start_time", placeholder="00:00:00")
     end_time = col_end.text_input("Tempo Final (HH:MM:SS)", key="final_end_time", placeholder="00:10:00")
@@ -1817,55 +2225,206 @@ if st.session_state.transcription_done:
     split_div_color = "black"
     split_div_w = 4
     split_auto_switch = True
+    split_source_type = "main_video"
+    split_video_path = None
+    split_image_paths = []
+    split_media_position = "bottom"
+    split_blur_margin_pct = 5.0
 
     if selected_aspect == "9:16_split":
         with st.expander("👥 Ajustes do Layout Dividido (Split Screen 9:16)", expanded=True):
-            saved_split_auto = _cfg.get("split_auto_switch", True)
-            split_auto_switch = st.toggle(
-                "🤖 Transição Dinâmica Inteligente (Auto-Switch)",
-                value=saved_split_auto,
-                key="split_auto_switch_tgl",
-                on_change=lambda: save_setting("split_auto_switch", st.session_state.split_auto_switch_tgl),
-                help="Recomendado: Quando houver 2+ pessoas no enquadramento, aplica o Split Screen. Se a câmera fechar em Close-up de apenas 1 pessoa, expande suavemente para 9:16 Full Screen sem cortar ninguém!"
-            )
-            col_sp1, col_sp2 = st.columns(2)
-            with col_sp1:
-                saved_split_preset = _cfg.get("split_preset", "👈 Entrevistador(es) no Topo | 👉 Entrevistado na Base (Padrão Podpah/Flow)")
-                split_presets_list = [
-                    "👈 Entrevistador(es) no Topo | 👉 Entrevistado na Base (Padrão Podpah/Flow)",
-                    "👉 Entrevistado no Topo | 👈 Entrevistador(es) na Base",
-                    "🎛️ Personalizado (Sliders Manuais)"
-                ]
-                split_p_idx = split_presets_list.index(saved_split_preset) if saved_split_preset in split_presets_list else 0
-                split_preset = st.selectbox(
-                    "🎬 Distribuição dos Personagens:",
-                    split_presets_list,
-                    index=split_p_idx,
-                    key="split_preset_choice",
-                    on_change=lambda: save_setting("split_preset", st.session_state.split_preset_choice)
-                )
-                
-                if split_preset == "👈 Entrevistador(es) no Topo | 👉 Entrevistado na Base (Padrão Podpah/Flow)":
-                    split_top_pan = -0.65
-                    split_bottom_pan = 0.65
-                elif split_preset == "👉 Entrevistado no Topo | 👈 Entrevistador(es) na Base":
-                    split_top_pan = 0.65
-                    split_bottom_pan = -0.65
-                else:
-                    saved_top_pan = float(_cfg.get("split_top_pan", -0.65))
-                    saved_bottom_pan = float(_cfg.get("split_bottom_pan", 0.65))
-                    split_top_pan = st.slider(
-                        "↔️ Foco Horizontal do Topo:", -1.0, 1.0, saved_top_pan, 0.05,
-                        key="split_top_pan_slider",
-                        on_change=lambda: save_setting("split_top_pan", st.session_state.split_top_pan_slider)
-                    )
-                    split_bottom_pan = st.slider(
-                        "↔️ Foco Horizontal da Base:", -1.0, 1.0, saved_bottom_pan, 0.05,
-                        key="split_bottom_pan_slider",
-                        on_change=lambda: save_setting("split_bottom_pan", st.session_state.split_bottom_pan_slider)
-                    )
+            saved_split_src = _cfg.get("split_source_type", "main_video")
+            _src_map = {
+                "👥 Câmera Dupla (Vídeo Principal no Topo & Base)": "main_video",
+                "🎬 Vídeo Secundário Local / B-Roll / Gameplay (Looping)": "video",
+                "🖼️ Slideshow de Imagens (Apresentação Proporcional)": "images"
+            }
+            _src_inv_map = {v: k for k, v in _src_map.items()}
+            _saved_src_label = _src_inv_map.get(saved_split_src, list(_src_map.keys())[0])
+            _src_idx = list(_src_map.keys()).index(_saved_src_label) if _saved_src_label in _src_map else 0
 
-            with col_sp2:
+            split_source_type_label = st.radio(
+                "🧩 Composição das Metades da Tela:",
+                list(_src_map.keys()),
+                index=_src_idx,
+                key="split_src_type_radio",
+                on_change=lambda: save_setting("split_source_type", _src_map.get(st.session_state.split_src_type_radio, "main_video"))
+            )
+            split_source_type = _src_map[split_source_type_label]
+
+            if split_source_type in ["video", "images"]:
+                col_pos, col_auto = st.columns(2)
+                with col_pos:
+                    saved_pos = _cfg.get("split_media_position", "bottom")
+                    _pos_map = {
+                        "⬇️ Parte Inferior / Base (Recomendado)": "bottom",
+                        "⬆️ Parte Superior / Topo": "top"
+                    }
+                    _pos_inv_map = {v: k for k, v in _pos_map.items()}
+                    _pos_idx = 0 if saved_pos == "bottom" else 1
+                    pos_label = st.radio(
+                        "📍 Posição do Conteúdo Secundário:",
+                        list(_pos_map.keys()),
+                        index=_pos_idx,
+                        key="split_pos_radio",
+                        on_change=lambda: save_setting("split_media_position", _pos_map.get(st.session_state.split_pos_radio, "bottom"))
+                    )
+                    split_media_position = _pos_map[pos_label]
+                with col_auto:
+                    st.info("💡 O vídeo principal ocupará a outra metade da tela com foco ajustável pelo zoom e posição horizontal.")
+
+                if split_source_type == "video":
+                    st.markdown("##### 🎬 Seleção do Vídeo Secundário (B-Roll / Gameplay / Satisfatório)")
+                    col_vup, col_vpath = st.columns([1.5, 1])
+                    with col_vup:
+                        sec_vid_file = st.file_uploader(
+                            "Faça upload do arquivo de vídeo secundário:",
+                            type=["mp4", "mov", "mkv", "webm", "avi"],
+                            key="split_sec_video_uploader",
+                            help="Se o vídeo for menor que a duração do corte, ele rodará em looping contínuo automaticamente."
+                        )
+                    with col_vpath:
+                        saved_vpath = _cfg.get("split_video_path", "")
+                        sec_vid_path_input = st.text_input(
+                            "Ou digite o caminho local:",
+                            value=saved_vpath,
+                            placeholder="C:\\Videos\\gameplay.mp4",
+                            key="split_vpath_input",
+                            on_change=lambda: save_setting("split_video_path", st.session_state.split_vpath_input)
+                        )
+
+                    if sec_vid_file is not None:
+                        broll_dir = os.path.join("data", "custom_broll")
+                        os.makedirs(broll_dir, exist_ok=True)
+                        save_dest = os.path.join(broll_dir, sec_vid_file.name)
+                        with open(save_dest, "wb") as f_broll:
+                            f_broll.write(sec_vid_file.getbuffer())
+                        split_video_path = save_dest
+                        st.success(f"✅ Vídeo secundário carregado: `{sec_vid_file.name}` (Looping automático ativado)")
+                    elif sec_vid_path_input.strip() and os.path.exists(sec_vid_path_input.strip()):
+                        split_video_path = sec_vid_path_input.strip()
+                        st.success(f"✅ Vídeo secundário localizado: `{os.path.basename(split_video_path)}`")
+                    else:
+                        st.warning("⚠️ Nenhum vídeo secundário selecionado. Selecione um arquivo ou envie pelo botão acima.")
+
+                elif split_source_type == "images":
+                    st.markdown("##### 🖼️ Slideshow de Imagens Proporcionais")
+                    col_iup, col_ifolder = st.columns([1.5, 1])
+                    with col_iup:
+                        uploaded_imgs = st.file_uploader(
+                            "Selecione uma ou mais imagens (PNG, JPG, WEBP):",
+                            type=["png", "jpg", "jpeg", "webp"],
+                            accept_multiple_files=True,
+                            key="split_img_uploader"
+                        )
+                    with col_ifolder:
+                        saved_ifolder = _cfg.get("split_image_folder", "")
+                        img_folder_input = st.text_input(
+                            "Ou informe uma pasta local com imagens:",
+                            value=saved_ifolder,
+                            placeholder="C:\\Imagens\\Slides",
+                            key="split_ifolder_input",
+                            on_change=lambda: save_setting("split_image_folder", st.session_state.split_ifolder_input)
+                        )
+
+                    split_image_paths = []
+                    if uploaded_imgs:
+                        slides_dir = os.path.join("data", "custom_slides")
+                        os.makedirs(slides_dir, exist_ok=True)
+                        for u_img in uploaded_imgs:
+                            s_path = os.path.join(slides_dir, u_img.name)
+                            with open(s_path, "wb") as f_s:
+                                f_s.write(u_img.getbuffer())
+                            split_image_paths.append(s_path)
+                    elif img_folder_input.strip() and os.path.isdir(img_folder_input.strip()):
+                        valid_exts = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
+                        for fname in sorted(os.listdir(img_folder_input.strip())):
+                            if fname.lower().endswith(valid_exts):
+                                split_image_paths.append(os.path.join(img_folder_input.strip(), fname))
+
+                    if split_image_paths:
+                        num_s = len(split_image_paths)
+                        calc_dur = 60.0
+                        if start_time and end_time:
+                            try:
+                                from core.analyzer import parse_time_str_to_seconds
+                                s_sec = parse_time_str_to_seconds(start_time)
+                                e_sec = parse_time_str_to_seconds(end_time)
+                                if e_sec > s_sec:
+                                    calc_dur = e_sec - s_sec
+                            except Exception:
+                                pass
+                        time_per_slide = calc_dur / float(num_s)
+                        st.success(f"✨ **{num_s} imagem(ns) pronta(s)** • Cada slide ficará visível por **{time_per_slide:.1f} segundos** (tempo proporcional ao corte de {calc_dur:.0f}s).")
+                        
+                        with st.expander("👁️ Ver sequência dos slides carregados", expanded=False):
+                            cols_thumbs = st.columns(min(6, num_s))
+                            for idx_th, th_p in enumerate(split_image_paths[:12]):
+                                with cols_thumbs[idx_th % len(cols_thumbs)]:
+                                    st.image(th_p, caption=f"Slide #{idx_th+1}", use_container_width=True)
+                    else:
+                        st.warning("⚠️ Nenhuma imagem carregada. Envie arquivos ou informe a pasta de imagens.")
+
+                # Pan / Enquadramento do Vídeo Principal
+                saved_top_pan = float(_cfg.get("split_top_pan", 0.0))
+                split_top_pan = st.slider(
+                    "↔️ Enquadramento Horizontal do Vídeo Principal:", -1.0, 1.0, saved_top_pan, 0.05,
+                    key="split_top_pan_slider",
+                    on_change=lambda: save_setting("split_top_pan", st.session_state.split_top_pan_slider),
+                    help="Ajuste para centralizar o personagem do vídeo principal no seu respectivo quadro."
+                )
+                split_bottom_pan = split_top_pan
+
+            else:
+                # Modo Câmera Dupla Padrão
+                saved_split_auto = _cfg.get("split_auto_switch", True)
+                split_auto_switch = st.toggle(
+                    "🤖 Transição Dinâmica Inteligente (Auto-Switch)",
+                    value=saved_split_auto,
+                    key="split_auto_switch_tgl",
+                    on_change=lambda: save_setting("split_auto_switch", st.session_state.split_auto_switch_tgl),
+                    help="Recomendado: Quando houver 2+ pessoas no enquadramento, aplica o Split Screen. Se a câmera fechar em Close-up de apenas 1 pessoa, expande suavemente para 9:16 Full Screen sem cortar ninguém!"
+                )
+                col_sp1, col_sp2 = st.columns(2)
+                with col_sp1:
+                    saved_split_preset = _cfg.get("split_preset", "👈 Entrevistador(es) no Topo | 👉 Entrevistado na Base (Padrão Podpah/Flow)")
+                    split_presets_list = [
+                        "👈 Entrevistador(es) no Topo | 👉 Entrevistado na Base (Padrão Podpah/Flow)",
+                        "👉 Entrevistado no Topo | 👈 Entrevistador(es) na Base",
+                        "🎛️ Personalizado (Sliders Manuais)"
+                    ]
+                    split_p_idx = split_presets_list.index(saved_split_preset) if saved_split_preset in split_presets_list else 0
+                    split_preset = st.selectbox(
+                        "🎬 Distribuição dos Personagens:",
+                        split_presets_list,
+                        index=split_p_idx,
+                        key="split_preset_choice",
+                        on_change=lambda: save_setting("split_preset", st.session_state.split_preset_choice)
+                    )
+                    
+                    if split_preset == "👈 Entrevistador(es) no Topo | 👉 Entrevistado na Base (Padrão Podpah/Flow)":
+                        split_top_pan = -0.65
+                        split_bottom_pan = 0.65
+                    elif split_preset == "👉 Entrevistado no Topo | 👈 Entrevistador(es) na Base":
+                        split_top_pan = 0.65
+                        split_bottom_pan = -0.65
+                    else:
+                        saved_top_pan = float(_cfg.get("split_top_pan", -0.65))
+                        saved_bottom_pan = float(_cfg.get("split_bottom_pan", 0.65))
+                        split_top_pan = st.slider(
+                            "↔️ Foco Horizontal do Topo:", -1.0, 1.0, saved_top_pan, 0.05,
+                            key="split_top_pan_slider",
+                            on_change=lambda: save_setting("split_top_pan", st.session_state.split_top_pan_slider)
+                        )
+                        split_bottom_pan = st.slider(
+                            "↔️ Foco Horizontal da Base:", -1.0, 1.0, saved_bottom_pan, 0.05,
+                            key="split_bottom_pan_slider",
+                            on_change=lambda: save_setting("split_bottom_pan", st.session_state.split_bottom_pan_slider)
+                        )
+
+            # Controles comuns de Zoom, Margem com Blur e Linha Divisória
+            col_z, col_m = st.columns(2)
+            with col_z:
                 saved_split_zoom = float(_cfg.get("split_zoom", 1.15))
                 split_zoom_val = st.slider(
                     "🔍 Zoom / Aproximação dos Quadros:",
@@ -1876,28 +2435,42 @@ if st.session_state.transcription_done:
                     format="%.2fx",
                     key="split_zoom_slider",
                     on_change=lambda: save_setting("split_zoom", st.session_state.split_zoom_slider),
-                    help="Aumente para aproximar o enquadramento de rosto e busto nos dois quadros."
+                    help="Aumente para aproximar o enquadramento do vídeo principal."
                 )
-                col_div1, col_div2 = st.columns(2)
-                with col_div1:
-                    saved_div_col = _cfg.get("split_divider_color", "black")
-                    div_cols_list = ["black", "white", "gray", "none"]
-                    div_c_idx = div_cols_list.index(saved_div_col) if saved_div_col in div_cols_list else 0
-                    split_div_color = st.selectbox(
-                        "Linha Divisória:",
-                        div_cols_list,
-                        index=div_c_idx,
-                        key="split_div_color_sel",
-                        on_change=lambda: save_setting("split_divider_color", st.session_state.split_div_color_sel),
-                        format_func=lambda x: {"black": "⬛ Preta", "white": "⬜ Branca", "gray": "🔘 Cinza", "none": "🚫 Sem Linha"}[x]
-                    )
-                with col_div2:
-                    saved_div_w = int(_cfg.get("split_divider_width", 4))
-                    split_div_w = st.slider(
-                        "Espessura:", 0, 8, saved_div_w,
-                        key="split_div_w_slider",
-                        on_change=lambda: save_setting("split_divider_width", st.session_state.split_div_w_slider)
-                    )
+            with col_m:
+                saved_blur_margin = float(_cfg.get("split_blur_margin_pct", 5.0))
+                split_blur_margin_pct = st.slider(
+                    "🌫️ Margem com Fundo Desfocado (Topo & Base):",
+                    min_value=0.0,
+                    max_value=20.0,
+                    value=saved_blur_margin,
+                    step=0.5,
+                    format="%.1f%%",
+                    key="split_blur_margin_slider",
+                    on_change=lambda: save_setting("split_blur_margin_pct", st.session_state.split_blur_margin_slider),
+                    help="Adiciona uma faixa com fundo desfocado no topo e na base (ex: 5% = 96px em cada borda), evitando que os botões do Shorts/Reels e títulos cubram os oradores."
+                )
+
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
+                saved_div_col = _cfg.get("split_divider_color", "black")
+                div_cols_list = ["black", "white", "gray", "none"]
+                div_c_idx = div_cols_list.index(saved_div_col) if saved_div_col in div_cols_list else 0
+                split_div_color = st.selectbox(
+                    "Linha Divisória:",
+                    div_cols_list,
+                    index=div_c_idx,
+                    key="split_div_color_sel",
+                    on_change=lambda: save_setting("split_divider_color", st.session_state.split_div_color_sel),
+                    format_func=lambda x: {"black": "⬛ Preta", "white": "⬜ Branca", "gray": "🔘 Cinza", "none": "🚫 Sem Linha"}[x]
+                )
+            with col_d2:
+                saved_div_w = int(_cfg.get("split_divider_width", 4))
+                split_div_w = st.slider(
+                    "Espessura da Linha:", 0, 8, saved_div_w,
+                    key="split_div_w_slider",
+                    on_change=lambda: save_setting("split_divider_width", st.session_state.split_div_w_slider)
+                )
 
             if start_time:
                 if st.button("👁️ Visualizar Prévia do Split Screen", key="btn_prev_split"):
@@ -1915,7 +2488,12 @@ if st.session_state.transcription_done:
                             bottom_pan=split_bottom_pan,
                             zoom=split_zoom_val,
                             divider_color=split_div_color,
-                            divider_width=split_div_w
+                            divider_width=split_div_w,
+                            split_source_type=split_source_type,
+                            split_video_path=split_video_path,
+                            split_image_paths=split_image_paths,
+                            split_media_position=split_media_position,
+                            split_blur_margin_pct=split_blur_margin_pct
                         )
                         if p_res.get("path") and os.path.exists(p_res["path"]):
                             st.image(p_res["path"], caption=f"Prévia 9:16 Split Screen em {start_time}", use_container_width=True)
@@ -2159,15 +2737,14 @@ if st.session_state.transcription_done:
             col_hz1, col_hz2 = st.columns([2, 1])
             with col_hz1:
                 saved_hz_zoom = float(_cfg.get("horizontal_zoom", 1.0))
-                horizontal_zoom_val = st.slider(
+                horizontal_zoom_val = st.number_input(
                     "🔎 Nível de Aproximação (Zoom):",
                     min_value=1.00,
-                    max_value=1.50,
+                    max_value=3.00,
                     value=saved_hz_zoom,
                     step=0.02,
-                    format="%.2fx",
+                    format="%.2f",
                     key="hz_zoom_slider",
-                    on_change=lambda: save_setting("horizontal_zoom", st.session_state.hz_zoom_slider),
                     help="Aproxima o enquadramento horizontal centralizado (ideal para focar nos oradores ou remover marcas d'água e barras pretas das bordas)."
                 )
             with col_hz2:
@@ -2244,10 +2821,10 @@ if st.session_state.transcription_done:
                         help="Cor das palavras da linha atual que ainda não foram ditas."
                     )
                 with col_sub3:
-                    subtitle_font_size = st.slider(
+                    subtitle_font_size = st.number_input(
                         "🔤 Fonte",
-                        min_value=40,
-                        max_value=160,
+                        min_value=10,
+                        max_value=300,
                         value=subtitle_font_size,
                         step=5,
                         key="sub_font_size",
@@ -2269,6 +2846,8 @@ if st.session_state.transcription_done:
         headline_enabled = st.toggle(
             "📌 Fixar Título Chamativo no Topo do Vídeo",
             value=headline_enabled,
+            key="headline_enabled_tgl",
+            on_change=lambda: save_setting("headline_enabled", st.session_state.headline_enabled_tgl),
             help="Adiciona uma caixa de headline magnética na parte superior do corte 9:16 (estilo vídeos virais de TikTok/Reels) que segura a atenção nos primeiros segundos."
         )
         if headline_enabled:
@@ -2277,21 +2856,44 @@ if st.session_state.transcription_done:
                 preset_keys = list(HEADLINE_PRESETS.keys()) + ["custom"]
                 preset_labels = [HEADLINE_PRESETS[k]["name"] for k in HEADLINE_PRESETS] + ["🎨 Cores Personalizadas"]
                 cur_preset_idx = preset_keys.index(headline_preset) if headline_preset in preset_keys else 0
-                sel_preset_label = st.selectbox("Estilo Visual da Headline:", preset_labels, index=cur_preset_idx)
+                sel_preset_label = st.selectbox(
+                    "Estilo Visual da Headline:",
+                    preset_labels,
+                    index=cur_preset_idx,
+                    key="headline_preset_sel",
+                    on_change=lambda: save_setting("headline_preset", preset_keys[preset_labels.index(st.session_state.headline_preset_sel)])
+                )
                 headline_preset = preset_keys[preset_labels.index(sel_preset_label)]
 
             with col_hp2:
-                headline_font_size = st.slider("Tamanho da Fonte:", 28, 70, headline_font_size, 2, key="hl_font_sz")
+                headline_font_size = st.number_input(
+                    "Tamanho da Fonte:", min_value=10, max_value=200, value=headline_font_size, step=2,
+                    key="hl_font_sz",
+                    on_change=lambda: save_setting("headline_font_size", st.session_state.hl_font_sz)
+                )
 
             with col_hp3:
-                headline_margin_top = st.slider("Margem do Topo:", 60, 240, headline_margin_top, 10, key="hl_margin_tp", help="Distância da borda superior para não cobrir elementos da interface do TikTok/Shorts.")
+                headline_margin_top = st.number_input(
+                    "Margem do Topo:", min_value=0, max_value=1000, value=headline_margin_top, step=10,
+                    key="hl_margin_tp",
+                    on_change=lambda: save_setting("headline_margin_top", st.session_state.hl_margin_tp),
+                    help="Distância da borda superior para não cobrir elementos da interface do TikTok/Shorts."
+                )
 
             if headline_preset == "custom":
                 col_c1, col_c2 = st.columns(2)
                 with col_c1:
-                    headline_text_color = st.color_picker("Cor do Texto:", headline_text_color, key="hl_txt_col")
+                    headline_text_color = st.color_picker(
+                        "Cor do Texto:", headline_text_color,
+                        key="hl_txt_col",
+                        on_change=lambda: save_setting("headline_text_color", st.session_state.hl_txt_col)
+                    )
                 with col_c2:
-                    headline_bg_color = st.color_picker("Cor da Caixa de Fundo:", headline_bg_color, key="hl_bg_col")
+                    headline_bg_color = st.color_picker(
+                        "Cor da Caixa de Fundo:", headline_bg_color,
+                        key="hl_bg_col",
+                        on_change=lambda: save_setting("headline_bg_color", st.session_state.hl_bg_col)
+                    )
 
             st.caption("💡 O texto da Headline puxará automaticamente o Título Viral gerado pela IA ou digitado no Kit de Publicação abaixo.")
 
@@ -2351,7 +2953,7 @@ if st.session_state.transcription_done:
                     sel_pb_label = st.selectbox("Cor da Barra:", pb_color_labels, index=cur_pb_col_idx, key="sel_pb_color")
                     progress_bar_color = PROGRESS_BAR_COLORS[pb_color_keys[pb_color_labels.index(sel_pb_label)]]["color"]
                 with col_pb2:
-                    progress_bar_height = st.slider("Espessura (px):", 4, 18, progress_bar_height, 2, key="sl_pb_height")
+                    progress_bar_height = st.number_input("Espessura (px):", min_value=1, max_value=60, value=progress_bar_height, step=1, key="sl_pb_height")
 
             st.divider()
 
@@ -2361,10 +2963,10 @@ if st.session_state.transcription_done:
                 help="Aproxima dramaticamente no rosto do orador nos últimos segundos da conclusão para reforçar a frase de impacto."
             )
             if climax_zoom_enabled:
-                climax_zoom_factor = st.slider(
+                climax_zoom_factor = st.number_input(
                     "Intensidade do Zoom de Clímax:",
-                    1.06, 1.25, climax_zoom_factor, 0.02,
-                    format="%.2fx",
+                    min_value=1.00, max_value=3.00, value=climax_zoom_factor, step=0.02,
+                    format="%.2f",
                     help="1.08x = Suave | 1.14x = Médio/Dramático | 1.20x = Impacto Forte"
                 )
 
@@ -2397,7 +2999,7 @@ if st.session_state.transcription_done:
                     value=callout_text,
                     key="txt_callout_val"
                 )
-                callout_duration = st.slider("Duração do Banner (segundos no final):", 3.0, 7.0, callout_duration, 0.5, key="sl_co_dur")
+                callout_duration = st.number_input("Duração do Banner (segundos no final):", min_value=0.5, max_value=30.0, value=callout_duration, step=0.5, key="sl_co_dur")
 
     # ─────────────────────────────────────────────────────────────────
     # 🎵 Trilha Sonora de Fundo & Audio Ducking Inteligente (Fase 3)
@@ -2433,7 +3035,7 @@ if st.session_state.transcription_done:
                         st.audio(af_prev.read(), format="audio/wav")
 
             with col_m2:
-                bg_music_volume = st.slider("Volume da Música:", 0.05, 0.40, bg_music_volume, 0.02, format="%.2f", help="Volume base da música quando não houver fala.")
+                bg_music_volume = st.number_input("Volume da Música:", min_value=0.01, max_value=1.00, value=bg_music_volume, step=0.02, format="%.2f", help="Volume base da música quando não houver fala.")
                 duck_keys = list(DUCKING_PRESETS.keys())
                 duck_labels = [DUCKING_PRESETS[k]["name"] for k in duck_keys]
                 cur_duck_idx = duck_keys.index(ducking_preset) if ducking_preset in duck_keys else 1
@@ -2513,6 +3115,22 @@ if st.session_state.transcription_done:
             st.session_state["input_cut_title"] = st.session_state["final_corte_title"]
             st.session_state["meta_generated"] = True
 
+    # ── Flush de atualizações pendentes dos botões individuais ──────────
+    # (Deve ser aplicado ANTES dos widgets serem criados para evitar
+    #  StreamlitAPIException ao modificar chave de widget já renderizado)
+    _pending_map = {
+        "_pending_cut_title":    "input_cut_title",
+        "_pending_cut_headline": "input_cut_headline",
+        "_pending_cut_desc":     "input_cut_desc",
+        "_pending_cut_hashtags": "input_cut_hashtags",
+        "_pending_cut_tags_seo": "input_cut_tags_seo",
+    }
+    for _pkey, _wkey in _pending_map.items():
+        if _pkey in st.session_state:
+            st.session_state[_wkey] = st.session_state.pop(_pkey)
+    if "_pending_alt_titles" in st.session_state:
+        st.session_state["meta_alt_titles"] = st.session_state.pop("_pending_alt_titles")
+
     with st.expander("🚀 Kit de Publicação Viral (Título, Descrição & Tags para Redes)", expanded=True):
         col_meta_btn, col_meta_status = st.columns([1.8, 2.2])
         with col_meta_btn:
@@ -2560,21 +3178,67 @@ if st.session_state.transcription_done:
         badge_desc = "🟢 [GERADA POR IA COM CTA]" if is_gen else "⚪ [PADRÃO]"
         badge_tags = "🟢 [TAGS CONTEXTUAIS]" if is_gen else "⚪ [PADRÃO]"
 
+        # Utilitário interno: extrai snippet do transcript do trecho selecionado
+        def _get_snippet_for_regen():
+            import core.analyzer
+            from core.subtitle_burner import extract_words_in_range
+            _tp = os.path.join("data", _vid_id_cat, "transcript.json") if _vid_id_cat else ""
+            if not os.path.exists(_tp):
+                st.warning("⚠️ Transcrição não encontrada. Transcreva o vídeo na Seção 1 primeiro.")
+                return None
+            if not start_time or not end_time:
+                st.warning("⚠️ Defina o tempo inicial e final do corte primeiro.")
+                return None
+            _words = extract_words_in_range(_tp, start_time, end_time)
+            _snip = " ".join(w["word"] for w in _words)
+            if not _snip:
+                st.warning("Nenhuma fala encontrada no intervalo selecionado.")
+                return None
+            return _snip
+
+        _model_ind = ollama_model if 'ollama_model' in locals() and ollama_model else "llama3"
+
+        # ── Linha 1: Título + Headline ─────────────────────────────────────────
         col_t1, col_t2 = st.columns([1.4, 1.0])
         with col_t1:
-            cut_title_val = st.text_input(
-                f"🏷️ Título do Corte (YouTube/Redes) {badge_title}:",
-                value=st.session_state.get("input_cut_title", "Corte Selecionado"),
-                key="input_cut_title"
-            )
+            col_t1_field, col_t1_btn = st.columns([5, 1])
+            with col_t1_field:
+                cut_title_val = st.text_input(
+                    f"🏷️ Título do Corte (YouTube/Redes) {badge_title}:",
+                    value=st.session_state.get("input_cut_title", "Corte Selecionado"),
+                    key="input_cut_title"
+                )
+            with col_t1_btn:
+                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                if st.button("✨", key="btn_regen_title", use_container_width=True, help="Regerar Título com IA"):
+                    _snip = _get_snippet_for_regen()
+                    if _snip:
+                        with st.spinner("Gerando título..."):
+                            import core.analyzer
+                            _r = core.analyzer.generate_title_individual(_snip, model=_model_ind)
+                        st.session_state["_pending_cut_title"] = _r.get("titulo_principal", st.session_state.get("input_cut_title", ""))
+                        st.session_state["_pending_alt_titles"] = _r.get("titulos_alternativos", [])
+                        st.rerun()
         with col_t2:
-            cut_headline_val = st.text_input(
-                f"📌 Headline de Topo 9:16 (Curta) {badge_title}:",
-                value=st.session_state.get("input_cut_headline", st.session_state.get("input_cut_title", "Corte Selecionado")),
-                key="input_cut_headline",
-                help="Frase de gancho curta e completa (máx 35-40 caracteres) fixada na caixa magnética no topo do vídeo."
-            )
-        
+            col_t2_field, col_t2_btn = st.columns([5, 1])
+            with col_t2_field:
+                cut_headline_val = st.text_input(
+                    f"📌 Headline de Topo 9:16 (Curta) {badge_title}:",
+                    value=st.session_state.get("input_cut_headline", st.session_state.get("input_cut_title", "Corte Selecionado")),
+                    key="input_cut_headline",
+                    help="Frase de gancho curta e completa (máx 35-40 caracteres) fixada na caixa magnética no topo do vídeo."
+                )
+            with col_t2_btn:
+                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                if st.button("✨", key="btn_regen_headline", use_container_width=True, help="Regerar Headline com IA"):
+                    _snip = _get_snippet_for_regen()
+                    if _snip:
+                        with st.spinner("Gerando headline..."):
+                            import core.analyzer
+                            _r = core.analyzer.generate_headline_individual(_snip, model=_model_ind)
+                        st.session_state["_pending_cut_headline"] = _r.get("headline_topo", st.session_state.get("input_cut_headline", ""))
+                        st.rerun()
+
         # Prévia do nome da pasta e do arquivo de vídeo gerados
         _preview_folder = build_cut_folder_name(selected_aspect, cut_title_val)
         st.caption(f"📁 **Pasta da Instância ({selected_aspect}):** `data/{_vid_id_cat}/{_preview_folder}/`  |  🎬 **Vídeo:** `{_preview_folder}.mp4`")
@@ -2590,25 +3254,62 @@ if st.session_state.transcription_done:
                         st.session_state["input_cut_title"] = alt_t
                         st.rerun()
 
+        # ── Linha 2: Descrição + (Hashtags + Tags SEO) ────────────────────────
         col_desc, col_tags = st.columns([1.5, 1])
         with col_desc:
-            cut_desc_val = st.text_area(
-                f"📝 Descrição / Legenda {badge_desc}:",
-                value=st.session_state.get("input_cut_desc", "Confira a declaração e participe do debate nos comentários!"),
-                height=110,
-                key="input_cut_desc"
-            )
+            col_d_field, col_d_btn = st.columns([8, 1])
+            with col_d_field:
+                cut_desc_val = st.text_area(
+                    f"📝 Descrição / Legenda {badge_desc}:",
+                    value=st.session_state.get("input_cut_desc", "Confira a declaração e participe do debate nos comentários!"),
+                    height=110,
+                    key="input_cut_desc"
+                )
+            with col_d_btn:
+                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                if st.button("✨", key="btn_regen_desc", use_container_width=True, help="Regerar Descrição com IA"):
+                    _snip = _get_snippet_for_regen()
+                    if _snip:
+                        with st.spinner("Gerando descrição..."):
+                            import core.analyzer
+                            _r = core.analyzer.generate_description_individual(_snip, model=_model_ind)
+                        st.session_state["_pending_cut_desc"] = _r.get("descricao", st.session_state.get("input_cut_desc", ""))
+                        st.rerun()
         with col_tags:
-            cut_hashtags_val = st.text_input(
-                f"🏷️ Hashtags {badge_tags}:",
-                value=st.session_state.get("input_cut_hashtags", "#shorts #viral #cortes #reels"),
-                key="input_cut_hashtags"
-            )
-            cut_tags_seo_val = st.text_input(
-                f"🔍 Tags SEO {badge_tags}:",
-                value=st.session_state.get("input_cut_tags_seo", "cortes, viral, shorts, podcast, debate"),
-                key="input_cut_tags_seo"
-            )
+            col_h_field, col_h_btn = st.columns([5, 1])
+            with col_h_field:
+                cut_hashtags_val = st.text_input(
+                    f"🏷️ Hashtags {badge_tags}:",
+                    value=st.session_state.get("input_cut_hashtags", "#shorts #viral #cortes #reels"),
+                    key="input_cut_hashtags"
+                )
+            with col_h_btn:
+                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                if st.button("✨", key="btn_regen_hashtags", use_container_width=True, help="Regerar Hashtags com IA"):
+                    _snip = _get_snippet_for_regen()
+                    if _snip:
+                        with st.spinner("Gerando hashtags..."):
+                            import core.analyzer
+                            _r = core.analyzer.generate_hashtags_individual(_snip, model=_model_ind)
+                        st.session_state["_pending_cut_hashtags"] = " ".join(_r.get("hashtags", []))
+                        st.rerun()
+            col_s_field, col_s_btn = st.columns([5, 1])
+            with col_s_field:
+                cut_tags_seo_val = st.text_input(
+                    f"🔍 Tags SEO {badge_tags}:",
+                    value=st.session_state.get("input_cut_tags_seo", "cortes, viral, shorts, podcast, debate"),
+                    key="input_cut_tags_seo"
+                )
+            with col_s_btn:
+                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                if st.button("✨", key="btn_regen_tags_seo", use_container_width=True, help="Regerar Tags SEO com IA"):
+                    _snip = _get_snippet_for_regen()
+                    if _snip:
+                        with st.spinner("Gerando tags SEO..."):
+                            import core.analyzer
+                            _r = core.analyzer.generate_tags_seo_individual(_snip, model=_model_ind)
+                        st.session_state["_pending_cut_tags_seo"] = _r.get("tags_seo", st.session_state.get("input_cut_tags_seo", ""))
+                        st.rerun()
 
         # Ações Rápidas Independentes (Não exigem re-renderização de vídeo)
         col_act_txt, col_act_th = st.columns(2)
@@ -2876,6 +3577,11 @@ if st.session_state.transcription_done:
                             split_divider_color=split_div_color,
                             split_divider_width=split_div_w,
                             split_auto_switch=split_auto_switch,
+                            split_source_type=split_source_type,
+                            split_video_path=split_video_path,
+                            split_image_paths=split_image_paths,
+                            split_media_position=split_media_position,
+                            split_blur_margin_pct=split_blur_margin_pct,
                             # Legendas Dinâmicas (Fase 2)
                             subtitle_enabled=subtitle_enabled,
                             subtitle_transcript_path=_transcript_path_cut,
@@ -2884,7 +3590,7 @@ if st.session_state.transcription_done:
                             subtitle_font_size=subtitle_font_size,
                             # Fase 3: Retenção & Áudio
                             headline_enabled=headline_enabled,
-                            headline_text=cut_headline_val,
+                            headline_text=cut_headline_val or cut_title_val or st.session_state.get("input_cut_headline") or st.session_state.get("input_cut_title", "Corte Selecionado"),
                             headline_preset=headline_preset,
                             headline_text_color=headline_text_color,
                             headline_bg_color=headline_bg_color,

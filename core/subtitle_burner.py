@@ -567,7 +567,7 @@ def burn_subtitles(
                 tmp_output
             ]
 
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
             if result.returncode == 0 and os.path.exists(tmp_output) and os.path.getsize(tmp_output) > 0:
                 if os.path.exists(output_video_path):
@@ -577,7 +577,8 @@ def burn_subtitles(
             else:
                 if os.path.exists(tmp_output):
                     os.remove(tmp_output)
-                err_detail = result.stderr[-2000:] if result.stderr else "Erro desconhecido"
+                err_text = result.stderr.decode("utf-8", errors="replace") if result.stderr else "Erro desconhecido"
+                err_detail = err_text[-2000:]
                 return {"path": None, "error": f"FFmpeg libass subtitle pass-2 falhou:\n{err_detail}"}
 
         finally:

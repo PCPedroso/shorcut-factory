@@ -245,6 +245,11 @@ def process_batch_cuts(
             split_divider_color=params.get("split_divider_color", "black"),
             split_divider_width=params.get("split_divider_width", 4),
             split_auto_switch=params.get("split_auto_switch", True),
+            split_source_type=params.get("split_source_type", "main_video"),
+            split_video_path=params.get("split_video_path", None),
+            split_image_paths=params.get("split_image_paths", None),
+            split_media_position=params.get("split_media_position", "bottom"),
+            split_blur_margin_pct=params.get("split_blur_margin_pct", 5.0),
             # Legendas Dinâmicas
             subtitle_enabled=subtitle_enabled,
             subtitle_transcript_path=transcript_path,

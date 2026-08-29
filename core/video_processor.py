@@ -66,11 +66,12 @@ def extract_audio_from_local_video(video_path: str, output_path: str = "temp_aud
             "-b:a", "192k",
             output_path
         ]
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         if res.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             return {"path": output_path, "error": None}
         else:
-            return {"path": None, "error": f"Falha ao extrair áudio: {res.stderr[-200:] if res.stderr else 'Erro desconhecido'}"}
+            err_txt = res.stderr.decode('utf-8', errors='replace')[-200:] if res.stderr else 'Erro desconhecido'
+            return {"path": None, "error": f"Falha ao extrair áudio: {err_txt}"}
     except Exception as exc:
         return {"path": None, "error": str(exc)}
 
@@ -92,7 +93,7 @@ def extract_thumbnail_from_video(video_path: str, output_path: str = "temp_thumb
             "-q:v", "2",
             output_path
         ]
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         if res.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             return {"path": output_path, "error": None}
         else:
@@ -123,27 +124,44 @@ def download_full_video(url: str, output_path: str = "temp_video.mp4", is_live: 
         elif os.path.exists(r"C:\Program Files\nodejs\node.exe"):
             js_runtimes_cfg['node'] = {'path': r"C:\Program Files\nodejs\node.exe"}
 
-        ydl_opts = {
-            'format': 'bestvideo[height<=1080]+bestaudio/best',
+        base_opts = {
+            'format': 'bestvideo[height<=1080][protocol=https]+bestaudio[protocol=https]/bestvideo[height<=1080]+bestaudio/best',
             'outtmpl': output_path,
             'merge_output_format': 'mp4',
             'ffmpeg_location': FFMPEG_EXE,
+            'concurrent_fragment_downloads': 16,
+            'http_chunk_size': 10485760,  # 10MB chunk size to avoid YouTube throttling
+            'buffersize': 1048576,        # 1MB RAM buffer
+            'retries': 10,
+            'fragment_retries': 10,
             'quiet': False,
             'no_warnings': True,
             'js_runtimes': js_runtimes_cfg
         }
 
+        attempts = [
+            dict(base_opts),
+            dict(base_opts, live_from_start=True, hls_use_mpegts=True),
+            dict(base_opts, format='bestvideo+bestaudio/best', live_from_start=True, hls_use_mpegts=True)
+        ]
         if is_live:
-            ydl_opts['live_from_start'] = True
-            ydl_opts['hls_use_mpegts'] = True
+            attempts = [attempts[1], attempts[2], attempts[0]]
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+        last_err = None
+        for ydl_opts in attempts:
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
+                if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                    return {"path": output_path, "error": None}
+            except Exception as exc_attempt:
+                last_err = str(exc_attempt)
+                continue
 
         if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             return {"path": output_path, "error": None}
         else:
-            return {"path": None, "error": "Falha ao gerar o arquivo de vídeo final."}
+            return {"path": None, "error": last_err or "Falha ao gerar o arquivo de vídeo final."}
 
     except Exception as exc:
         return {"path": None, "error": str(exc)}
@@ -202,6 +220,11 @@ def cut_video(
     split_divider_color: str = "black",
     split_divider_width: int = 4,
     split_auto_switch: bool = True,
+    split_source_type: str = "main_video",
+    split_video_path: str = None,
+    split_image_paths: list = None,
+    split_media_position: str = "bottom",
+    split_blur_margin_pct: float = 5.0,
     # --- Parâmetros de Legendas Dinâmicas (Fase 2) ---
     subtitle_enabled: bool = False,
     subtitle_transcript_path: str = None,
@@ -243,7 +266,7 @@ def cut_video(
         - '9:16_blur': Vertical 1080x1920 com fundo ampliado e desfocado (Auto-Reframing dinâmico ou manual)
         - '9:16_crop': Vertical 1080x1920 com corte central preenchendo 100% da tela
         - '9:16_smart_face': Vertical 1080x1920 com rastreamento inteligente de rosto
-        - '9:16_split': Vertical 1080x1920 Dividido (Topo: Entrevistador / Base: Entrevistado - Estilo Podcasts/Flow)
+        - '9:16_split': Vertical 1080x1920 Dividido (Topo e Base: Oradores, Vídeo Secundário em Looping ou Slideshow de Imagens)
     """
     try:
         if os.path.exists(output_path):
@@ -277,7 +300,7 @@ def cut_video(
             )
 
         elif aspect_ratio_mode == "9:16_split":
-            # Pipeline 9:16 Split Screen com Transição Dinâmica Inteligente
+            # Pipeline 9:16 Split Screen com Transição Dinâmica e Mídia Secundária
             from core.face_tracker import crop_video_with_dynamic_auto_switch
             result = crop_video_with_dynamic_auto_switch(
                 input_video_path=input_path,
@@ -289,7 +312,12 @@ def cut_video(
                 bottom_pan=split_bottom_pan,
                 divider_color=split_divider_color,
                 divider_width=split_divider_width,
-                auto_switch_enabled=split_auto_switch
+                auto_switch_enabled=split_auto_switch,
+                split_source_type=split_source_type,
+                split_video_path=split_video_path,
+                split_image_paths=split_image_paths,
+                split_media_position=split_media_position,
+                split_blur_margin_pct=split_blur_margin_pct
             )
             return _apply_all_post_processing(
                 result, output_path, start_time_str, end_time_str,
@@ -423,7 +451,8 @@ def cut_video(
                 ]
 
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        _stderr_txt = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
 
         if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             return _apply_all_post_processing(
@@ -521,14 +550,13 @@ def _apply_all_post_processing(
     end_s = parse_time_to_seconds(end_time_str)
     duration_s = max(1.0, float(end_s - start_s))
 
-    # ── RESTRIÇÕES PARA VÍDEOS LONGOS (SÉRIES 10+ MIN) E HORIZONTAIS (16:9) ──
-    # Vídeos normais de YouTube não devem ter tarjas de topo, barras de progresso, zoom punches ou callouts verticais de Shorts
-    is_long_or_169 = (aspect_mode == "16:9") or (duration_s > 180.0)
-    if is_long_or_169:
+    # ── RESTRIÇÕES PARA FORMATO HORIZONTAL (16:9) ──
+    # Em vídeos horizontais widescreen normais, efeitos automáticos de Shorts (como zoom punch e barras verticais)
+    # são desativados para preservar a experiência tradicional de YouTube, a menos que o usuário tenha solicitado.
+    if aspect_mode == "16:9":
         zoom_punch_enabled = False
         climax_zoom_enabled = False
         progress_bar_enabled = False
-        headline_enabled = False
         callout_enabled = False
 
     # --- 1. Zoom Punch de Retenção & Climax Punchline Zoom ---
@@ -590,7 +618,7 @@ def _apply_all_post_processing(
                 "-movflags", "+faststart",
                 tmp_z
             ]
-            z_res = subprocess.run(cmd, capture_output=True, text=True)
+            z_res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             if z_res.returncode == 0 and os.path.exists(tmp_z) and os.path.getsize(tmp_z) > 0:
                 if os.path.exists(output_path):
                     os.remove(output_path)
@@ -636,7 +664,7 @@ def _apply_all_post_processing(
                     "-movflags", "+faststart",
                     tmp_pb
                 ]
-                pb_res = subprocess.run(cmd, capture_output=True, text=True)
+                pb_res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
                 if pb_res.returncode == 0 and os.path.exists(tmp_pb) and os.path.getsize(tmp_pb) > 0:
                     if os.path.exists(output_path):
                         os.remove(output_path)
@@ -654,7 +682,7 @@ def _apply_all_post_processing(
         sub_result = burn_subtitles(
             input_video_path=curr_path,
             output_video_path=output_path,
-            transcript_path=subtitle_transcript_path,
+            transcript_path=subtitle_transcript_path if subtitle_enabled else None,
             start_time_str=start_time_str,
             end_time_str=end_time_str,
             highlight_color=subtitle_highlight_color,
@@ -736,7 +764,7 @@ def ensure_faststart(video_path: str) -> str:
     try:
         tmp_fast = video_path + ".fast.mp4"
         cmd = [FFMPEG_EXE, "-y", "-i", video_path, "-c", "copy", "-movflags", "+faststart", tmp_fast]
-        res = subprocess.run(cmd, capture_output=True, text=True)
+        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         if res.returncode == 0 and os.path.exists(tmp_fast) and os.path.getsize(tmp_fast) > 0:
             os.replace(tmp_fast, video_path)
     except Exception:

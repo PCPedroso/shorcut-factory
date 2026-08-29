@@ -60,6 +60,43 @@ class TestHeadlineDrawer(unittest.TestCase):
         self.assertIn("46", style)
         self.assertIn("120", style)
 
+    def test_render_headline_overlay(self):
+        from core.headline_drawer import render_headline_overlay
+        overlay = render_headline_overlay(
+            video_width=1080,
+            video_height=1920,
+            text="PREPARO DE RENAN SANTOS\nESTA MUITO ACIMA DO NORMAL",
+            config={"preset_key": "yellow_black", "margin_top": 240, "font_size": 70}
+        )
+        self.assertEqual(overlay.shape, (1920, 1080, 4))
+        # Ensure some non-transparent pixels exist
+        self.assertTrue(overlay[:, :, 3].max() > 0)
+
+    def test_generate_headline_preview(self):
+        import cv2
+        import numpy as np
+        import tempfile
+        import os
+        from core.headline_drawer import generate_headline_preview
+
+        # Create dummy 1-second video
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dummy_video = os.path.join(tmp_dir, "dummy_prev.mp4")
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            out = cv2.VideoWriter(dummy_video, fourcc, 10.0, (1080, 1920))
+            for _ in range(10):
+                out.write(np.zeros((1920, 1080, 3), dtype=np.uint8))
+            out.release()
+
+            prev = generate_headline_preview(
+                video_path=dummy_video,
+                text="TESTE DE HEADLINE",
+                config={"preset_key": "red_white", "margin_top": 200},
+                timestamp_s=0.5
+            )
+            self.assertIsNotNone(prev)
+            self.assertEqual(prev.shape, (1920, 1080, 3))
+
     def test_custom_headline_style(self):
         style = build_ass_headline_style(
             preset_key="custom",

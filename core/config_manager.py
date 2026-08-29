@@ -15,6 +15,7 @@ DEFAULT_SETTINGS = {
     "model_size": "small",
     "ollama_model": "llama3",
     "analysis_strategy": "🎙️ Entrevistas & Sabatinas (Detecção Q&A [INÍCIO -> FIM])",
+    "series_min_minutes": 10.0,
 
     # Enquadramento selecionado (índice da lista)
     "aspect_option": "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)",
@@ -34,6 +35,11 @@ DEFAULT_SETTINGS = {
     "split_divider_color": "black",
     "split_divider_width": 4,
     "split_auto_switch": True,
+    "split_source_type": "main_video",
+    "split_media_position": "bottom",
+    "split_video_path": "",
+    "split_image_folder": "",
+    "split_blur_margin_pct": 5.0,
 
     # Fundo Desfocado (Blur 9:16)
     "blur_mode_ctrl": "🤖 Auto-Zoom Inteligente no Personagem (Recomendado)",

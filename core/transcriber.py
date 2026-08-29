@@ -12,6 +12,20 @@ try:
 except:
     pass
 
+def extract_youtube_video_id(url_or_id: str) -> str:
+    """Extrai o ID de 11 caracteres do YouTube a partir de ID puro ou URL completa."""
+    if not url_or_id:
+        return ""
+    clean = str(url_or_id).strip()
+    if len(clean) == 11 and "/" not in clean and "?" not in clean and "&" not in clean:
+        return clean
+    import re
+    m = re.search(r"(?:v=|\/|youtu\.be\/|embed\/|live\/)([0-9A-Za-z_-]{11})", clean)
+    if m:
+        return m.group(1)
+    return clean
+
+
 def fetch_youtube_transcript(video_id: str) -> dict:
     """
     Obtém a transcrição oficial do YouTube (legendas automáticas ou manuais em PT-BR/PT).
@@ -19,8 +33,9 @@ def fetch_youtube_transcript(video_id: str) -> dict:
     """
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
+        clean_id = extract_youtube_video_id(video_id)
         ytt = YouTubeTranscriptApi()
-        fetched = ytt.fetch(video_id, languages=['pt', 'pt-BR', 'en'])
+        fetched = ytt.fetch(clean_id, languages=['pt', 'pt-BR', 'en'])
         
         transcript_data = []
         full_text_list = []
