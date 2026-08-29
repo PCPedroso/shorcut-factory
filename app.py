@@ -62,6 +62,9 @@ from core.headline_drawer import (
 from core.audio_mixer import list_available_tracks, DUCKING_PRESETS
 from core.retention_effects import PROGRESS_BAR_COLORS, ENGAGEMENT_CALLOUT_PRESETS
 from core.thumbnail_generator import create_cut_thumbnail
+from core.integrations import (
+    get_youtube_auth_status, authenticate_youtube_oauth, upload_to_youtube_shorts, send_to_webhook
+)
 from core.quick_editor import (
     get_video_duration, extract_frame_at_timestamp, trim_video, remove_snippet_and_merge,
     load_edit_history, record_quick_edit
