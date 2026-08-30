@@ -25,7 +25,7 @@ HEADLINE_PRESETS = {
     "yellow_black": {
         "name": "🟡 Amarelo Vibrante (Texto Preto)",
         "text_color": "#000000",
-        "bg_color": "#FFE600",
+        "bg_color": "#FFDA29",
         "outline_color": "#000000",
         "border_style": 3,  # Opaque box no ASS
         "box_padding": 8,
@@ -65,7 +65,7 @@ HEADLINE_PRESETS = {
     "custom": {
         "name": "🎨 Personalizado (Cores e Margens Livres)",
         "text_color": "#000000",
-        "bg_color": "#FFE600",
+        "bg_color": "#FFDA29",
         "outline_color": "#000000",
         "border_style": 3,
         "box_padding": 8,
@@ -286,7 +286,7 @@ def render_headline_overlay(
     # Cores
     if preset_key == "custom":
         text_color_hex = config.get("text_color", "#000000")
-        bg_color_hex = config.get("bg_color", "#FFE600")
+        bg_color_hex = config.get("bg_color", "#FFDA29")
     else:
         text_color_hex = config.get("text_color") or preset["text_color"]
         bg_color_hex = config.get("bg_color") or preset["bg_color"]

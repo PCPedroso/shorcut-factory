@@ -633,13 +633,13 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 with col_hl_c1:
                     sel_hl_text_color = st.color_picker(
                         "Cor do Texto:",
-                        value=sel_hl_preset_data.get("primary_color", "#FFFFFF"),
+                        value=sel_hl_preset_data.get("text_color") or sel_hl_preset_data.get("primary_color", "#000000"),
                         key=f"hl_post_tcolor_{unique_key}"
                     )
                 with col_hl_c2:
                     sel_hl_bg_color = st.color_picker(
                         "Cor do Fundo / Caixa:",
-                        value=sel_hl_preset_data.get("box_color", "#E62117"),
+                        value=sel_hl_preset_data.get("bg_color") or sel_hl_preset_data.get("box_color", "#FFDA29"),
                         key=f"hl_post_bgcolor_{unique_key}"
                     )
                 with col_hl_c3:
@@ -2823,7 +2823,7 @@ if st.session_state.transcription_done:
     headline_enabled = _cfg.get("headline_enabled", False)
     headline_preset = _cfg.get("headline_preset", "yellow_black")
     headline_text_color = _cfg.get("headline_text_color", "#000000")
-    headline_bg_color = _cfg.get("headline_bg_color", "#FFE600")
+    headline_bg_color = _cfg.get("headline_bg_color", "#FFDA29")
     headline_font_size = _cfg.get("headline_font_size", 46)
     headline_margin_top = _cfg.get("headline_margin_top", 120)
 

@@ -236,7 +236,7 @@ def cut_video(
     headline_text: str = "",
     headline_preset: str = "yellow_black",
     headline_text_color: str = "#000000",
-    headline_bg_color: str = "#FFE600",
+    headline_bg_color: str = "#FFDA29",
     headline_font_size: int = 46,
     headline_margin_top: int = 120,
     emojis_enabled: bool = False,

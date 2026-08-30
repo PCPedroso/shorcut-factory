@@ -61,7 +61,7 @@ DEFAULT_SETTINGS = {
     "headline_enabled": False,
     "headline_preset": "yellow_black",
     "headline_text_color": "#000000",
-    "headline_bg_color": "#FFE600",
+    "headline_bg_color": "#FFDA29",
     "headline_font_size": 46,
     "headline_margin_top": 120,
 

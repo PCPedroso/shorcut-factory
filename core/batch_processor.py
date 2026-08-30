@@ -262,7 +262,7 @@ def process_batch_cuts(
             headline_text=cut_headline,
             headline_preset=params.get("headline_preset", "yellow_black"),
             headline_text_color=params.get("headline_text_color", "#000000"),
-            headline_bg_color=params.get("headline_bg_color", "#FFE600"),
+            headline_bg_color=params.get("headline_bg_color", "#FFDA29"),
             headline_font_size=params.get("headline_font_size", 46),
             headline_margin_top=params.get("headline_margin_top", 120),
             emojis_enabled=params.get("emojis_enabled", False) if not is_series_or_169 else False,
