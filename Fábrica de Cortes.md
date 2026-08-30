@@ -146,6 +146,7 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **5 Abas de Pós-Corte**: *Trim*, *Snip & Merge*, *Banner*, *Headline de Topo* e *Equalizador & Áudio*.
 - **🏷️ Headline / Título de Topo Magnético Pós-Corte (`core/headline_drawer.py`, `app.py`)**:
   - Modos: *Caixa por Linha (TikTok/Reels)*, *Card Único* e *Sem Caixa (Contorno)* com live preview e aceleração GPU (NVENC).
+  - **Paleta Padrão Viral**: Texto em Preto Absoluto (`#000000`) sobre Fundo Amarelo Ouro Viral (`#FFDA29`) com sincronização automática entre Edição Rápida e pipeline principal.
 - **🎙️ Equalizador, Anti-Estouro & Nivelador Dinâmico de Áudio no Pós-Corte (`core/audio_processor.py`, `app.py`)**:
   - *Perfil Anti-Estouro & Voz + Torcida*: De-Clipper + Brickwall Limiter + Nivelador Dinâmico (`dynaudnorm`).
   - Prévia sonora e Stream Copy (~1s sem re-renderizar vídeo).
@@ -164,7 +165,7 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Modos `fill`, `fit`, `cover`, logo embutido secundário e prévia instantânea de frame.
 - **🔍 Aproximação / Zoom no Modo Horizontal 16:9 (1.0x a 1.5x)** (`core/video_processor.py`).
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
-- **🧪 Suíte de 69 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 70 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest`.
 
 ---
