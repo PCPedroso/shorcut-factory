@@ -125,7 +125,7 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Cores configuráveis (Destaque e Base), sliders de fonte e contorno nítido.
 - **Kit de Publicação Viral com IA com Guia Editorial (`core/analyzer.py`, `app.py`)**:
   - Título Magnético, Variações Alternativas, Legenda com CTA e Hashtags/SEO contextuais. Geração individualizada de cada texto sob demanda.
-  - **Direção Editorial Personalizada (`user_guidance`)**: Campo dedicado para instruir a IA sobre tom (ex: polêmico, indignado, bem-humorado, sério, urgente) e assunto ou gancho central a priorizar na geração dos textos.
+  - **Direção Editorial Personalizada (`user_guidance`)**: Campo dedicado para instruir a IA sobre tom e assunto prioritário.
 - **Exportação Padronizada com Nomenclatura Estrita** (`core/export_kit.py`):
   - Prefixos de 5 letras (`VLDSS`, `VRIRA`, `VFDBS`, `VCCFT`, `HOFHD`) + limite de 25 caracteres em palavras completas do título.
 - **Catálogo & Cache Inteligente por Minutagem e Formato** (`core/cuts_catalog.py`):
@@ -135,38 +135,28 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 
 ## ⚡ Recursos Implementados & Em Produção
 
+- **📝 Extração Automática de Legendas & Transcrição do Corte (`core/subtitle_burner.py`, `core/export_kit.py`)**:
+  - Ao renderizar qualquer corte (individual ou em lote), o sistema gera automaticamente na mesma pasta do vídeo:
+    1. `<PREFIXO_Titulo>.srt` e `legendas.srt`: Formato SubRip universal com timestamps relativos ao corte (`00:00:00,000`).
+    2. `<PREFIXO_Titulo>.vtt`: Formato WebVTT para web players.
+    3. `transcricao_corte.txt`: Transcrição contínua limpa em texto corrido exclusivamente da fala do corte.
 - **✂️ Ferramenta Integrada de Edição Rápida, Ajuste Fino & Histórico Persistente (`core/quick_editor.py`, `app.py`)**:
-  - **Sinalização Persistente de Conclusão**: Após qualquer ajuste pós-corte (*Trim*, *Remover Trecho*, *Banner*, *Headline*, *Equalização de Áudio*), um card verde de confirmação permanece no topo do componente com carimbo de data/hora, ação realizada, detalhes dos parâmetros e arquivo gerado.
-  - **Histórico Completo de Edições (`historico_edicoes.json`)**: Cada pasta de corte armazena o histórico em JSON de todos os ajustes aplicados cronologicamente, com visualizador em expander exibindo a linha do tempo de alterações.
-  - **5 Abas de Pós-Corte**:
-    1. *✂️ Aparar (Trim)* com prévia de frames de início e fim.
-    2. *🗑️ Remover Trecho (Snip & Merge)* para corte de gafes e silêncios.
-    3. *🎨 Banner / Tarja (Overlay)* com suporte a logo embutido.
-    4. *🏷️ Headline de Topo* com renderização acelerada por GPU.
-    5. *🎙️ Equalizador & Áudio* com preset para lives/estouro e torcida/ambiente.
+  - **Sinalização Persistente de Conclusão**: Card verde com carimbo de data/hora, ação realizada, detalhes dos parâmetros e arquivo gerado.
+  - **Histórico Completo de Edições (`historico_edicoes.json`)**: Histórico JSON de todos os ajustes aplicados cronologicamente.
+  - **5 Abas de Pós-Corte**: *Trim*, *Snip & Merge*, *Banner*, *Headline de Topo* e *Equalizador & Áudio*.
 - **🏷️ Headline / Título de Topo Magnético Pós-Corte (`core/headline_drawer.py`, `app.py`)**:
-  - Adição ou troca do título fixo do corte sem necessidade de reprocessar o vídeo do zero.
-  - Modos de container: *Caixa por Linha (TikTok/Reels)*, *Card Único (Bloco)* e *Sem Caixa (Contorno/Outline)*.
-  - Controle completo de margem do topo (Offset Y), tamanho de fonte, largura do container, padding horizontal/vertical, espaçamento entre linhas, cantos arredondados, alinhamento, opacidade e sombra projetada.
-  - **Prévia visual instantânea no frame em tempo real** e queima no vídeo acelerada por GPU (NVENC).
+  - Modos: *Caixa por Linha (TikTok/Reels)*, *Card Único* e *Sem Caixa (Contorno)* com live preview e aceleração GPU (NVENC).
 - **🎙️ Equalizador, Anti-Estouro & Nivelador Dinâmico de Áudio no Pós-Corte (`core/audio_processor.py`, `app.py`)**:
-  - Nova aba no pós-corte para tratamento cirúrgico de microfones sobrecarregados em lives e eventos.
-  - **Perfil Anti-Estouro & Voz + Torcida (Recomendado)**: Aplica De-Clipper + Brickwall Limiter + Nivelador Dinâmico (`dynaudnorm`), suavizando a voz saturada do microfone enquanto eleva de forma harmônica a vibração da torcida e som ambiente nos momentos certos.
-  - Presets especializados: *Clareza de Voz (Podcast)*, *De-Clipper Suave*, *Nivelador Agressivo (Rua/IRL)* e *Normalização Social (-14 LUFS)*.
-  - **Prévia sonora imediata via player** e aplicação instantânea no vídeo via *Stream Copy* (~1s sem re-renderizar vídeo).
+  - *Perfil Anti-Estouro & Voz + Torcida*: De-Clipper + Brickwall Limiter + Nivelador Dinâmico (`dynaudnorm`).
+  - Prévia sonora e Stream Copy (~1s sem re-renderizar vídeo).
 - **⚡ Download Ultra-Acelerado Multi-Thread do YouTube (`core/extractor.py`, `core/video_processor.py`)**:
-  - Download paralelo em **16 conexões simultâneas** com chunks HTTP de 10 MB e buffers de 1 MB, eliminando throttling do YouTube.
-  - Áudio de transmissões de mais de 2 horas baixando em **~8 segundos** (35 MB/s).
-  - Suporte completo a lives ativas e transmissões recém-encerradas (`post_live` / `was_live`) com fallback multi-estratégia.
+  - 16 conexões simultâneas, buffers de 10 MB, suporte a lives e `post_live`.
 - **🎬 Split Screen com Mídia Secundária & Margens Desfocadas (Blur Margins) (`core/face_tracker.py`, `core/video_processor.py`)**:
-  - Suporte para preencher a metade inferior (ou superior) do Split Screen com **Vídeo em Looping Contínuo** ou **Conjunto de Imagens (Slideshow Dinâmico)** com tempo de exibição proporcional à duração do corte.
-  - **Margens Desfocadas no Topo e Rodapé (`split_blur_margin_pct`)**: Margens de 0% a 20% com blur para afastar os participantes das bordas e evitar que a interface do TikTok/Reels cubra os rostos.
+  - Suporte a vídeo em loop, slideshow dinâmico e margens de blur no topo/rodapé de 0% a 20%.
 - **💡 Séries Sugeridas com Duração Mínima Configurável (`core/analyzer.py`, `app.py`)**:
-  - Campo numérico para definir o tempo mínimo por corte de série (ex: 5, 10, 15 min) com agrupamento instantâneo sem re-executar IA.
+  - Tempo mínimo por corte de série (ex: 5, 10, 15 min) com agrupamento instantâneo.
 - **🖼️ Gerador Avançado de Capas / Thumbnails Multicamadas com 3 Variações (`core/thumbnail_generator.py`)**:
-  - Extração do frame mais expressivo via nitidez Laplaciana + MediaPipe BlazeFace.
-  - Isolamento de sujeito por IA via `Rembg` (U2-Net) + micro-contraste adaptativo `OpenCV CLAHE` + Unsharp Mask.
-  - Geração automática das 3 variações: `⚡ Impacto Neon (Glow)`, `✨ Clean Focus (Sombra 3D)` e `🎬 Moldura Dinâmica (HDR)`.
+  - Variações: `⚡ Impacto Neon (Glow)`, `✨ Clean Focus (Sombra 3D)` e `🎬 Moldura Dinâmica (HDR)`.
 - **⏳ Barra de Progresso Animada & Banner de Chamada (Lower Third)** (`core/retention_effects.py`).
 - **👥 Enquadramento Plano Conjunto & Dual Shot (`core/face_tracker.py`)**:
   - Auto-detecção espacial de debate/sabatina com Bounding Box composta.

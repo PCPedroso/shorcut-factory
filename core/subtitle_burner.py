@@ -588,3 +588,159 @@ def burn_subtitles(
 
     except Exception as e:
         return {"path": None, "error": str(e)}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Exportação de Legendas do Corte (.SRT, .VTT, .TXT)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _format_srt_time(seconds: float) -> str:
+    """Converte segundos em float para o formato de tempo SRT: HH:MM:SS,mmm"""
+    if seconds < 0:
+        seconds = 0.0
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    ms = int(round((seconds - int(seconds)) * 1000))
+    if ms >= 1000:
+        ms = 999
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def _format_vtt_time(seconds: float) -> str:
+    """Converte segundos em float para o formato de tempo WebVTT: HH:MM:SS.mmm"""
+    if seconds < 0:
+        seconds = 0.0
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    ms = int(round((seconds - int(seconds)) * 1000))
+    if ms >= 1000:
+        ms = 999
+    return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
+
+
+def export_subtitles_to_srt(lines: list, output_srt_path: str) -> bool:
+    """
+    Exporta a lista de linhas de legenda para arquivo .srt padrão SubRip.
+    Timestamps são relativos ao corte (iniciando em 00:00:00,000).
+    """
+    if not lines:
+        return False
+    try:
+        srt_blocks = []
+        for idx, line in enumerate(lines, 1):
+            s_start = _format_srt_time(line.get("line_start", 0.0))
+            s_end = _format_srt_time(line.get("line_end", 0.0))
+            text = line.get("text", "").strip()
+            srt_blocks.append(f"{idx}\n{s_start} --> {s_end}\n{text}\n")
+
+        os.makedirs(os.path.dirname(os.path.abspath(output_srt_path)), exist_ok=True)
+        with open(output_srt_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(srt_blocks))
+        return True
+    except Exception:
+        return False
+
+
+def export_subtitles_to_vtt(lines: list, output_vtt_path: str) -> bool:
+    """
+    Exporta a lista de linhas de legenda para arquivo .vtt padrão WebVTT.
+    """
+    if not lines:
+        return False
+    try:
+        vtt_blocks = ["WEBVTT\n"]
+        for idx, line in enumerate(lines, 1):
+            s_start = _format_vtt_time(line.get("line_start", 0.0))
+            s_end = _format_vtt_time(line.get("line_end", 0.0))
+            text = line.get("text", "").strip()
+            vtt_blocks.append(f"{idx}\n{s_start} --> {s_end}\n{text}\n")
+
+        os.makedirs(os.path.dirname(os.path.abspath(output_vtt_path)), exist_ok=True)
+        with open(output_vtt_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(vtt_blocks))
+        return True
+    except Exception:
+        return False
+
+
+def export_subtitles_to_txt(lines: list, output_txt_path: str) -> bool:
+    """
+    Exporta a transcrição contínua do corte em texto corrido limpo.
+    """
+    if not lines:
+        return False
+    try:
+        full_text = " ".join(line.get("text", "").strip() for line in lines if line.get("text"))
+        os.makedirs(os.path.dirname(os.path.abspath(output_txt_path)), exist_ok=True)
+        with open(output_txt_path, "w", encoding="utf-8") as f:
+            f.write(full_text.strip() + "\n")
+        return True
+    except Exception:
+        return False
+
+
+def generate_cut_subtitle_files(
+    transcript_path: str,
+    start_time_str: str,
+    end_time_str: str,
+    output_dir: str,
+    base_filename: str = "legendas",
+    max_words_per_line: int = 6
+) -> dict:
+    """
+    Extrai o trecho do transcript correspondente ao corte e gera:
+    1. `<base_filename>.srt` (e cópia `legendas.srt`)
+    2. `<base_filename>.vtt`
+    3. `transcricao_corte.txt` (texto corrido da fala)
+    Retorna dicionário com os caminhos dos arquivos gerados.
+    """
+    result = {
+        "srt_path": None,
+        "vtt_path": None,
+        "txt_path": None,
+        "line_count": 0,
+        "word_count": 0
+    }
+    if not transcript_path or not os.path.exists(transcript_path):
+        return result
+
+    try:
+        words = extract_words_in_range(transcript_path, start_time_str, end_time_str)
+        if not words:
+            return result
+
+        lines = group_words_into_lines(words, max_words_per_line=max_words_per_line)
+        if not lines:
+            return result
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        # 1. Arquivo .SRT principal com o nome do corte
+        srt_file = os.path.join(output_dir, f"{base_filename}.srt")
+        if export_subtitles_to_srt(lines, srt_file):
+            result["srt_path"] = srt_file
+
+        # Se o base_filename não for "legendas", gera também uma cópia amigável "legendas.srt"
+        if base_filename != "legendas":
+            alt_srt = os.path.join(output_dir, "legendas.srt")
+            export_subtitles_to_srt(lines, alt_srt)
+
+        # 2. Arquivo .VTT (WebVTT)
+        vtt_file = os.path.join(output_dir, f"{base_filename}.vtt")
+        if export_subtitles_to_vtt(lines, vtt_file):
+            result["vtt_path"] = vtt_file
+
+        # 3. Arquivo .TXT com texto corrido falado no corte
+        txt_file = os.path.join(output_dir, "transcricao_corte.txt")
+        if export_subtitles_to_txt(lines, txt_file):
+            result["txt_path"] = txt_file
+
+        result["line_count"] = len(lines)
+        result["word_count"] = len(words)
+    except Exception:
+        pass
+
+    return result
+

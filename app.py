@@ -3678,7 +3678,7 @@ if st.session_state.transcription_done:
                                     "url": active_url
                                 }
 
-                            # Criação da Pasta Estruturada do Corte (sem arquivo ZIP)
+                            # Criação da Pasta Estruturada do Corte (incluindo legendas .SRT e thumbnails)
                             import core.export_kit
                             package_res = core.export_kit.create_viral_package(
                                 video_path=corte_output_path,
@@ -3689,7 +3689,10 @@ if st.session_state.transcription_done:
                                 aspect_mode=selected_aspect,
                                 output_base_dir=data_dir,
                                 orig_video_info=orig_info,
-                                thumbnail_path=gen_thumb_path
+                                thumbnail_path=gen_thumb_path,
+                                transcript_path=_transcript_path_cut,
+                                start_time_str=start_time,
+                                end_time_str=end_time
                             )
 
                             # Registra no Catálogo de Cortes
@@ -3803,6 +3806,8 @@ if st.session_state.transcription_done:
                             with st.expander(f"📁 Pasta de Publicação Criada em: {package_res['folder_name']}", expanded=True):
                                 st.markdown(f"📂 **Caminho da Pasta:** [{package_res['folder_name']}](file:///{link_pkg_p}) &nbsp; `📁 {abs_pkg_p}`", unsafe_allow_html=True)
                                 st.markdown(f"**🎬 Arquivo de Vídeo:** `{package_res['video_filename']}`")
+                                if package_res.get("subtitle_srt_path"):
+                                    st.markdown(f"**📝 Legenda (.SRT):** `{os.path.basename(package_res['subtitle_srt_path'])}` &nbsp; | &nbsp; **📄 Transcrição de Fala (.TXT):** `transcricao_corte.txt`")
                                 st.markdown(f"**📌 Título:** `{cut_title_val}`")
                                 st.markdown(f"**📝 Legenda para Redes:**\n```\n{cut_desc_val}\n```")
                                 st.markdown(f"**🏷️ Hashtags:** `{cut_hashtags_val}`")

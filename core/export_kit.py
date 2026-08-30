@@ -1,8 +1,8 @@
 """
 export_kit.py — Criação do Pacote de Publicação Viral Estruturado
 Salva a pasta do corte em data/<video_id>/<PREFIXO>_<Palavras_Do_Titulo>/
-com vídeo renderizado, info_publicacao.txt (incluindo dados do vídeo original),
-descricao.txt e tags.txt.
+com vídeo renderizado, capa/thumbnails, legenda (.srt, .vtt, .txt),
+info_publicacao.txt, descricao.txt e tags.txt.
 """
 
 import os
@@ -63,15 +63,19 @@ def create_viral_package(
     output_base_dir: str,
     orig_video_info: dict = None,
     thumbnail_path: str = None,
+    transcript_path: str = None,
+    start_time_str: str = None,
+    end_time_str: str = None,
 ) -> dict:
     """
     Cria a pasta estruturada do corte dentro de data/<video_id>/<PREFIXO>_<Palavras>/
     e gera:
     1. Vídeo renderizado (.mp4) nomeado com o código do corte
-    2. Capa / Thumbnail 9:16 (thumbnail.jpg) em alta resolução
-    3. info_publicacao.txt (guia completo de postagem + dados do vídeo original)
-    4. descricao.txt (apenas a legenda pronta para colar)
-    5. tags.txt (hashtags e tags SEO)
+    2. Capa / Thumbnail 9:16 (thumbnail.jpg) em alta resolução e variações
+    3. Arquivo de Legenda (.srt, .vtt) e transcrição em texto puro (.txt)
+    4. info_publicacao.txt (guia completo de postagem + dados do vídeo original)
+    5. descricao.txt (apenas a legenda pronta para colar)
+    6. tags.txt (hashtags e tags SEO)
     """
     try:
         folder_name = build_cut_folder_name(aspect_mode, title)
@@ -105,6 +109,27 @@ def create_viral_package(
                         "path": v_dst
                     })
 
+        # 3. Extração e Criação de Legendas do Corte (.SRT, .VTT, .TXT)
+        eff_transcript = transcript_path
+        if not eff_transcript and output_base_dir:
+            cand_t = os.path.join(output_base_dir, "transcript.json")
+            if os.path.exists(cand_t):
+                eff_transcript = cand_t
+
+        sub_res = {}
+        if eff_transcript and os.path.exists(eff_transcript) and start_time_str and end_time_str:
+            try:
+                from core.subtitle_burner import generate_cut_subtitle_files
+                sub_res = generate_cut_subtitle_files(
+                    transcript_path=eff_transcript,
+                    start_time_str=start_time_str,
+                    end_time_str=end_time_str,
+                    output_dir=package_dir,
+                    base_filename=folder_name
+                )
+            except Exception:
+                pass
+
         # Formata hashtags
         hashtags_str = " ".join(h if h.startswith("#") else f"#{h}" for h in hashtags) if hashtags else "#shorts #viral #cortes"
 
@@ -119,7 +144,13 @@ def create_viral_package(
         if variations_copied:
             thumb_info_str += "• Variações de Capa Disponíveis:\n" + "".join(f"  - {v['filename']} ({v['name']})\n" for v in variations_copied)
 
-        # 3. info_publicacao.txt
+        sub_info_str = ""
+        if sub_res.get("srt_path"):
+            sub_info_str += f"• Arquivo de Legenda (.SRT): {os.path.basename(sub_res['srt_path'])}\n"
+        if sub_res.get("txt_path"):
+            sub_info_str += f"• Transcrição de Fala (.TXT): {os.path.basename(sub_res['txt_path'])}\n"
+
+        # 4. info_publicacao.txt
         info_content = f"""════════════════════════════════════════════════════════════════
 🚀 PACOTE DE PUBLICAÇÃO VIRAL
 📁 CÓDIGO DO CORTE: {folder_name}
@@ -136,10 +167,9 @@ def create_viral_package(
 🏷️ TAGS SEO (separadas por vírgula):
 {tags_seo}
 
-🎬 ARQUIVO DE VÍDEO GERADO:
-{video_filename}
-{thumb_info_str}
-════════════════════════════════════════════════════════════════
+🎬 ARQUIVOS GERADOS DO CORTE:
+• Vídeo (.MP4): {video_filename}
+{thumb_info_str}{sub_info_str}════════════════════════════════════════════════════════════════
 📺 INFORMAÇÕES DO VÍDEO ORIGINAL
 ════════════════════════════════════════════════════════════════
 • Título Original: {orig_title}
@@ -151,12 +181,12 @@ def create_viral_package(
         with open(os.path.join(package_dir, "info_publicacao.txt"), "w", encoding="utf-8") as f:
             f.write(info_content)
 
-        # 4. descricao.txt
+        # 5. descricao.txt
         desc_content = f"{description}\n\n{hashtags_str}\n"
         with open(os.path.join(package_dir, "descricao.txt"), "w", encoding="utf-8") as f:
             f.write(desc_content)
 
-        # 5. tags.txt
+        # 6. tags.txt
         tags_content = f"HASHTAGS:\n{hashtags_str}\n\nTAGS SEO:\n{tags_seo}\n"
         with open(os.path.join(package_dir, "tags.txt"), "w", encoding="utf-8") as f:
             f.write(tags_content)
@@ -169,6 +199,9 @@ def create_viral_package(
             "thumbnail_filename": thumb_filename if thumb_dest_path else None,
             "thumbnail_dest_path": thumb_dest_path,
             "thumbnail_variations": variations_copied,
+            "subtitle_srt_path": sub_res.get("srt_path"),
+            "subtitle_vtt_path": sub_res.get("vtt_path"),
+            "subtitle_txt_path": sub_res.get("txt_path"),
             "error": None
         }
 

@@ -307,7 +307,7 @@ def process_batch_cuts(
 
         _log(f"Vídeo renderizado com sucesso ({os.path.getsize(temp_corte_path)} bytes). Criando pacote de publicação...")
 
-        # 5. Criação do Pacote Estruturado (incluindo thumbnail)
+        # 5. Criação do Pacote Estruturado (incluindo thumbnail e legendas)
         pkg_res = core.export_kit.create_viral_package(
             video_path=temp_corte_path,
             title=cut_title,
@@ -317,7 +317,10 @@ def process_batch_cuts(
             aspect_mode=aspect_ratio_mode,
             output_base_dir=data_dir,
             orig_video_info=orig_info,
-            thumbnail_path=cut_res.get("thumbnail_path")
+            thumbnail_path=cut_res.get("thumbnail_path"),
+            transcript_path=transcript_path,
+            start_time_str=start_t,
+            end_time_str=end_t
         )
         _log(f"Pacote criado em: {pkg_res.get('package_dir')}")
         _log(f"Arquivo final: {pkg_res.get('video_filename')}")

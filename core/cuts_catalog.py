@@ -136,6 +136,16 @@ def register_cut_instance(
                     "path": v_cand
                 })
 
+    # Verifica se arquivos de legenda (.srt) existem na pasta
+    resolved_sub_path = None
+    if folder_path:
+        cand_sub1 = os.path.join(folder_path, f"{folder_name}.srt")
+        cand_sub2 = os.path.join(folder_path, "legendas.srt")
+        if os.path.exists(cand_sub1):
+            resolved_sub_path = cand_sub1
+        elif os.path.exists(cand_sub2):
+            resolved_sub_path = cand_sub2
+
     # Registra a instância específica deste formato
     catalog[key]["formats"][aspect_mode] = {
         "aspect_mode": aspect_mode,
@@ -147,6 +157,8 @@ def register_cut_instance(
         "thumbnail_filename": "thumbnail.jpg" if resolved_thumb_path else None,
         "thumbnail_variations": thumb_variations,
         "active_variation": 1,
+        "subtitle_path": resolved_sub_path,
+        "subtitle_filename": os.path.basename(resolved_sub_path) if resolved_sub_path else None,
         "resolution": resolution,
         "rendered_at": datetime.now().strftime("%d/%m/%Y %H:%M")
     }
