@@ -18,7 +18,7 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
 | **Processamento de Vídeo** | `FFmpeg` (com `libass` e NVENC) | Recorte, filtros complexos, sidechain compress, equalização e queima de legendas/overlays |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
-| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (72 testes) |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (73 testes) |
 
 ---
 
@@ -171,7 +171,7 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Injeção de máscara interativa JavaScript nos campos de tempo (`Tempo Inicial` e `Tempo Final`) formatando dígitos automaticamente no padrão `HH:MM:SS.ms` (com 2 dígitos de milissegundos) durante a digitação.
   - Normalizador Python de alta precisão (`normalize_time_mask`) e parser float (`parse_time_str_to_seconds`) com suporte integral a cortes no milissegundo exato (ex: `00:01:30.50`, `00:00:45.00`, `1000` -> `00:10:00.00`).
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
-- **🧪 Suíte de 72 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 73 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest`.
 
 ---

@@ -14,8 +14,16 @@ class TestAnalyzerUtils(unittest.TestCase):
         self.assertEqual(parse_time_str_to_seconds("00:01:30.50"), 90.5)
         self.assertEqual(parse_time_str_to_seconds("00:01:30,25"), 90.25)
         self.assertEqual(parse_time_str_to_seconds("01:00:00.00"), 3600.0)
+        self.assertEqual(parse_time_str_to_seconds("00:06:11.50"), 371.50)
+        self.assertEqual(parse_time_str_to_seconds("00:07:40.00"), 460.0)
         self.assertEqual(parse_time_str_to_seconds("02:15"), 135.0)
         self.assertEqual(parse_time_str_to_seconds("45"), 45.0)
+
+    def test_video_processor_parse_time_to_seconds(self):
+        from core.video_processor import parse_time_to_seconds
+        self.assertEqual(parse_time_to_seconds("00:06:11.50"), 371.50)
+        self.assertEqual(parse_time_to_seconds("00:07:40.00"), 460.0)
+        self.assertEqual(parse_time_to_seconds("00:01:30"), 90.0)
 
     def test_format_seconds_to_time(self):
         self.assertEqual(format_seconds_to_time(90), "00:01:30")

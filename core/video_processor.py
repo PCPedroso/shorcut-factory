@@ -190,14 +190,20 @@ def get_video_resolution(video_path: str) -> str:
         return "1080x1920"
 
 
-def parse_time_to_seconds(time_str: str) -> int:
-    """Converte formato HH:MM:SS ou MM:SS para segundos inteiros."""
-    parts = time_str.strip().split(':')
+def parse_time_to_seconds(time_str: str) -> float:
+    """Converte formato HH:MM:SS, HH:MM:SS.ms ou MM:SS para segundos (float)."""
+    if not time_str:
+        return 0.0
+    clean = str(time_str).strip().replace(',', '.')
+    parts = clean.split(':')
     if len(parts) == 3:
-        return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
     elif len(parts) == 2:
-        return int(parts[0]) * 60 + int(parts[1])
-    return int(time_str)
+        return int(parts[0]) * 60 + float(parts[1])
+    try:
+        return float(clean)
+    except Exception:
+        return 0.0
 
 
 def cut_video(

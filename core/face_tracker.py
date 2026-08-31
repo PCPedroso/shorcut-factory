@@ -27,13 +27,19 @@ def ensure_face_model():
 
 
 def parse_time_to_seconds(time_str: str) -> float:
-    """Converte HH:MM:SS ou MM:SS para segundos."""
-    parts = time_str.strip().split(':')
+    """Converte HH:MM:SS, HH:MM:SS.ms ou MM:SS para segundos."""
+    if not time_str:
+        return 0.0
+    clean = str(time_str).strip().replace(',', '.')
+    parts = clean.split(':')
     if len(parts) == 3:
         return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
     elif len(parts) == 2:
         return float(parts[0]) * 60 + float(parts[1])
-    return float(time_str)
+    try:
+        return float(clean)
+    except Exception:
+        return 0.0
 
 
 def filter_prominent_faces(detections, frame_width: int, frame_height: int, min_relative_area: float = 0.28) -> list:
