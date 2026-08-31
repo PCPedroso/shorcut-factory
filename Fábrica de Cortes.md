@@ -18,7 +18,7 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
 | **Processamento de Vídeo** | `FFmpeg` (com `libass` e NVENC) | Recorte, filtros complexos, sidechain compress, equalização e queima de legendas/overlays |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
-| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (71 testes) |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (72 testes) |
 
 ---
 
@@ -163,11 +163,15 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Auto-detecção espacial de debate/sabatina com Bounding Box composta.
 - **🎨 Motor de Sobreposição de Banners, Tarjas (GC) e Logos (`core/overlay_manager.py`)**:
   - Modos `fill`, `fit`, `cover`, logo embutido secundário e prévia instantânea de frame.
+- **🌐 Priorização Estrita de Português (PT-BR) & Detecção Multilinguagem (`core/transcriber.py`, `app.py`)**:
+  - Prioridade máxima e estrita para transcrições oficiais do YouTube em Português (`pt-BR`, `pt`, `pt-PT`), evitando o download de legendas em inglês por engano.
+  - Mapeamento dinâmico de todas as faixas de legenda disponíveis no YouTube com badge/sinalização de múltiplos idiomas detectados.
+  - Fixação mandatória de `language="pt"` no fallback do Faster-Whisper, garantindo transcrição em português mesmo em vídeos com vinhetas musicais ou ruídos no início.
 - **⏱️ Máscara Interativa & Normalização de Tempo (`HH:MM:SS`) (`core/analyzer.py`, `app.py`)**:
   - Injeção de máscara interativa JavaScript nos campos de tempo (`Tempo Inicial` e `Tempo Final`) formatando dígitos automaticamente no padrão `HH:MM:SS` durante a digitação.
   - Normalizador Python robusto (`normalize_time_mask`) com callbacks imediatos `on_change` que convertem qualquer formato digitado (ex: `1000` -> `00:10:00`, `1:30` -> `00:01:30`, `45` -> `00:00:45`, `001000` -> `00:10:00`) com segurança e precisão.
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
-- **🧪 Suíte de 71 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 72 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest`.
 
 ---
@@ -183,6 +187,8 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 2. **🎬 B-Roll Inteligente & Split Screen Híbrido** (`core/broll_engine.py`):
    - Detecção de entidades e tópicos visuais na fala (nomes de pessoas, notícias, dados, gráficos).
    - Inserção de imagens/vídeos de apoio na metade secundária do Split Screen ou em overlays curtos de 2 a 3 segundos (cutaways).
+3. **🌐 Seletor Interativo e Tradução de Transcrições Multilinguagem**:
+   - Menu dropdown para alternar e baixar transcrições em diferentes idiomas disponíveis no YouTube quando detectadas faixas multilíngues, ou gerar versões legendadas traduzidas automaticamente (PT/EN/ES).
 
 ---
 

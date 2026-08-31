@@ -109,6 +109,32 @@ class TestAnalyzerUtils(unittest.TestCase):
         s = generate_tags_seo_individual("", user_guidance="Palavras chave")
         self.assertIn("tags_seo", s)
 
+    def test_fetch_youtube_transcript_structure_and_priority(self):
+        from unittest.mock import patch, MagicMock
+        from core.transcriber import fetch_youtube_transcript
+
+        mock_seg = MagicMock()
+        mock_seg.start = 0.0
+        mock_seg.duration = 5.0
+        mock_seg.text = "Texto de teste em português"
+
+        mock_ytt_instance = MagicMock()
+        mock_ytt_instance.fetch.return_value = [mock_seg]
+        
+        mock_track = MagicMock()
+        mock_track.language_code = "pt-BR"
+        mock_track.language = "Portuguese (Brazil)"
+        mock_track.is_generated = True
+        mock_track.is_translatable = True
+        mock_ytt_instance.list.return_value = [mock_track]
+
+        with patch("youtube_transcript_api.YouTubeTranscriptApi", return_value=mock_ytt_instance):
+            res = fetch_youtube_transcript("sample12345")
+            self.assertIsNotNone(res["transcript_segments"])
+            self.assertIn("YouTube Oficial", res["source"])
+            self.assertEqual(len(res["available_languages"]), 1)
+            self.assertEqual(res["available_languages"][0]["code"], "pt-BR")
+
 
 if __name__ == '__main__':
     unittest.main()

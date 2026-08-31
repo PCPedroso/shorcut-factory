@@ -1260,9 +1260,12 @@ if input_mode == "🌐 Link do YouTube":
                         transcribe_res = fetch_youtube_transcript(video_id)
                         
                         if transcribe_res.get("transcript_segments"):
-                            st.success(f"⚡ Transcrição oficial do YouTube carregada ({len(transcribe_res['transcript_segments'])} segmentos)! Máxima precisão.")
+                            st.success(f"⚡ Transcrição oficial do YouTube carregada ({len(transcribe_res['transcript_segments'])} segmentos - {transcribe_res.get('selected_language', 'Português')})! Máxima precisão.")
+                            langs = transcribe_res.get("available_languages", [])
+                            if len(langs) > 1:
+                                st.caption(f"🌐 **Idiomas detectados no YouTube ({len(langs)} faixas):** {', '.join([l['name'] for l in langs])}")
                         else:
-                            st.info("Legendas oficiais não encontradas no YouTube. Processando áudio via Whisper local...")
+                            st.info("Legendas oficiais em português não encontradas no YouTube. Processando áudio via Whisper local (PT-BR)...")
                             if os.path.exists(audio_path):
                                 audio_res = {"path": audio_path, "error": None}
                             else:
@@ -1287,11 +1290,12 @@ if input_mode == "🌐 Link do YouTube":
                                         is_live=is_live_flag
                                     )
 
-                                with st.spinner(f"Transcrevendo áudio com Whisper ({model_size}) na {device_option.upper()}..."):
+                                with st.spinner(f"Transcrevendo áudio com Whisper ({model_size}) em Português na {device_option.upper()}..."):
                                     transcribe_res = transcribe_audio(
                                         audio_res["path"], 
                                         model_size=model_size, 
-                                        device=device_option
+                                        device=device_option,
+                                        language="pt"
                                     )
                                 
                     if transcribe_res.get("error"):

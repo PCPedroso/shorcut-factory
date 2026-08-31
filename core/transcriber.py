@@ -26,17 +26,45 @@ def extract_youtube_video_id(url_or_id: str) -> str:
     return clean
 
 
-def fetch_youtube_transcript(video_id: str) -> dict:
+def fetch_youtube_transcript(video_id: str, preferred_languages: list = None) -> dict:
     """
-    Obtém a transcrição oficial do YouTube (legendas automáticas ou manuais em PT-BR/PT).
-    É instantâneo (< 1s) e muito mais preciso que modelos pequenos de Whisper.
+    Obtém a transcrição oficial do YouTube com prioridade absoluta para Português (pt-BR, pt, pt-PT).
+    Detecta todas as linguagens disponíveis no vídeo e sinaliza suporte a multilinguagem.
     """
+    if preferred_languages is None:
+        preferred_languages = ['pt-BR', 'pt', 'pt-PT', 'pt-br', 'pt-pt', 'en', 'es']
+
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
         clean_id = extract_youtube_video_id(video_id)
         ytt = YouTubeTranscriptApi()
-        fetched = ytt.fetch(clean_id, languages=['pt', 'pt-BR', 'en'])
-        
+
+        # 1. Mapeia todas as faixas de legenda disponíveis no vídeo
+        available_languages = []
+        selected_lang_name = "Português"
+        try:
+            t_list = ytt.list(clean_id)
+            for t in t_list:
+                available_languages.append({
+                    "code": t.language_code,
+                    "name": t.language,
+                    "is_generated": getattr(t, "is_generated", False),
+                    "is_translatable": getattr(t, "is_translatable", False)
+                })
+        except Exception:
+            pass
+
+        # 2. Busca estritamente com a ordem de preferência (Português prioritário)
+        fetched = ytt.fetch(clean_id, languages=preferred_languages)
+
+        # Identifica a linguagem selecionada
+        if available_languages:
+            for pref in preferred_languages:
+                matching = [l for l in available_languages if l["code"].lower() == pref.lower()]
+                if matching:
+                    selected_lang_name = matching[0]["name"]
+                    break
+
         transcript_data = []
         full_text_list = []
         for seg in fetched:
@@ -49,11 +77,13 @@ def fetch_youtube_transcript(video_id: str) -> dict:
                 "text": t
             })
             full_text_list.append(t)
-            
+
         return {
             "transcript_segments": transcript_data,
             "full_text": " ".join(full_text_list),
-            "source": "YouTube Oficial (ASR)",
+            "source": f"YouTube Oficial ({selected_lang_name})",
+            "available_languages": available_languages,
+            "selected_language": selected_lang_name,
             "error": None
         }
     except Exception as e:
@@ -61,23 +91,32 @@ def fetch_youtube_transcript(video_id: str) -> dict:
             "transcript_segments": None,
             "full_text": None,
             "source": None,
+            "available_languages": [],
+            "selected_language": None,
             "error": str(e)
         }
 
 
-def transcribe_audio(audio_path: str, model_size: str = "small", device: str = "cuda"):
+def transcribe_audio(audio_path: str, model_size: str = "small", device: str = "cuda", language: str = "pt"):
     """
     Transcreve o áudio usando Faster-Whisper (usado como fallback se não houver legendas no YouTube).
+    Por padrão força language="pt" para garantir transcrição em português-BR mesmo com vinhetas ou ruídos iniciais.
     """
     if not os.path.exists(audio_path):
         return {"transcript_segments": None, "full_text": None, "source": None, "error": "Arquivo de áudio não encontrado."}
-        
+
     try:
         compute_type = "float32" if device == "cuda" else "int8"
         model = WhisperModel(model_size, device=device, compute_type=compute_type)
-        # word_timestamps=True: salva timestamps por palavra para legendas dinâmicas (Fase 2)
-        segments, info = model.transcribe(audio_path, beam_size=5, word_timestamps=True)
-        
+        # Força language='pt' (ou linguagem informada) para evitar falsos positivos de detecção de inglês
+        segments, info = model.transcribe(
+            audio_path,
+            language=language,
+            beam_size=5,
+            word_timestamps=True
+        )
+
+        detected_lang = getattr(info, 'language', language) or language
         transcript_data = []
         full_text = ""
         for segment in segments:
@@ -97,11 +136,13 @@ def transcribe_audio(audio_path: str, model_size: str = "small", device: str = "
                 "words": words_data,
             })
             full_text += segment.text + " "
-            
+
         return {
             "transcript_segments": transcript_data,
             "full_text": full_text.strip(),
-            "source": f"Whisper ({model_size})",
+            "source": f"Whisper ({model_size} - {detected_lang.upper()})",
+            "available_languages": [{"code": detected_lang, "name": "Português (Whisper AI)"}],
+            "selected_language": detected_lang,
             "error": None
         }
     except Exception as e:
