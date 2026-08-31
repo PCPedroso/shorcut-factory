@@ -12,13 +12,13 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 |---|---|---|
 | **Linguagem** | Python 3.10+ | Núcleo de processamento e automação |
 | **Interface** | Streamlit | Web UI interativa local, modular e minimalista |
-| **Extração & Download** | `yt-dlp` (Multi-thread 16x) | Download ultra-rápido de áudio, metadados oficiais e vídeo em até 1080p Full HD (com suporte a lives e `post_live`) |
+| **Extração & Download** | `yt-dlp` (Multi-thread 16x) | Download ultra-rápido de YouTube, Instagram Reels, TikTok, Twitter/X e Web com metadados e cookies |
 | **Transcrição** | `faster-whisper` + ASR YouTube | Transcrição com timestamps por palavra acelerada por GPU CUDA |
 | **Visão Computacional** | `MediaPipe` + `OpenCV` | Face tracking, Target Lock e transição dinâmica Split/Full Screen |
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
 | **Processamento de Vídeo** | `FFmpeg` (com `libass` e NVENC) | Recorte, filtros complexos, sidechain compress, equalização e queima de legendas/overlays |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
-| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (73 testes) |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (74 testes) |
 
 ---
 
@@ -170,8 +170,12 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 - **⏱️ Máscara Interativa & Normalização de Tempo com Milissegundos (`HH:MM:SS.ms`) (`core/analyzer.py`, `app.py`)**:
   - Injeção de máscara interativa JavaScript nos campos de tempo (`Tempo Inicial` e `Tempo Final`) formatando dígitos automaticamente no padrão `HH:MM:SS.ms` (com 2 dígitos de milissegundos) durante a digitação.
   - Normalizador Python de alta precisão (`normalize_time_mask`) e parser float (`parse_time_str_to_seconds`) com suporte integral a cortes no milissegundo exato (ex: `00:01:30.50`, `00:00:45.00`, `1000` -> `00:10:00.00`).
+- **📱 Ingestão Multi-Plataforma & Download Automático (Instagram, TikTok, YouTube & Web) (`core/extractor.py`, `core/video_processor.py`, `app.py`)**:
+  - Reconhecimento automático de links de múltiplas redes sociais: **Instagram Reels / Posts / TV** (`ig_...`), **TikTok** (`tt_...`), **Twitter/X** (`tw_...`), **YouTube** e links web genéricos.
+  - Suporte automático a arquivos de autenticação/cookies (`data/cookies.txt` ou `data/instagram_cookies.txt`) para extração sem restrições de bloqueio de bots.
+  - Transcrição automática instantânea com Faster-Whisper em Português-BR para qualquer vídeo baixado das redes.
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
-- **🧪 Suíte de 73 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 74 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest`.
 
 ---

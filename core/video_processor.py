@@ -124,8 +124,11 @@ def download_full_video(url: str, output_path: str = "temp_video.mp4", is_live: 
         elif os.path.exists(r"C:\Program Files\nodejs\node.exe"):
             js_runtimes_cfg['node'] = {'path': r"C:\Program Files\nodejs\node.exe"}
 
+        from core.extractor import get_cookie_file
+        cookie_file = get_cookie_file()
+
         base_opts = {
-            'format': 'bestvideo[height<=1080][protocol=https]+bestaudio[protocol=https]/bestvideo[height<=1080]+bestaudio/best',
+            'format': 'bestvideo[height<=1080][protocol=https]+bestaudio[protocol=https]/bestvideo[height<=1080]+bestaudio/bestvideo+bestaudio/best',
             'outtmpl': output_path,
             'merge_output_format': 'mp4',
             'ffmpeg_location': FFMPEG_EXE,
@@ -139,10 +142,13 @@ def download_full_video(url: str, output_path: str = "temp_video.mp4", is_live: 
             'js_runtimes': js_runtimes_cfg
         }
 
+        if cookie_file:
+            base_opts['cookiefile'] = cookie_file
+
         attempts = [
             dict(base_opts),
-            dict(base_opts, live_from_start=True, hls_use_mpegts=True),
-            dict(base_opts, format='bestvideo+bestaudio/best', live_from_start=True, hls_use_mpegts=True)
+            dict(base_opts, format='bestvideo+bestaudio/best', live_from_start=True, hls_use_mpegts=True),
+            dict(base_opts, live_from_start=True, hls_use_mpegts=True)
         ]
         if is_live:
             attempts = [attempts[1], attempts[2], attempts[0]]

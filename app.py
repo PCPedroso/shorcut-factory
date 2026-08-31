@@ -43,7 +43,7 @@ importlib.reload(core.thumbnail_generator)
 importlib.reload(core.quick_editor)
 importlib.reload(core.overlay_manager)
 
-from core.extractor import download_audio, get_video_metadata
+from core.extractor import download_audio, get_video_metadata, get_video_id
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
 from core.analyzer import analyze_transcript, build_suggested_bundles, normalize_time_mask
 from core.video_processor import (
@@ -77,26 +77,7 @@ from core.audio_processor import (
 # Carrega todas as configurações persistentes salvas
 _cfg = load_settings()
 
-
 st.set_page_config(page_title="Fábrica de Cortes", layout="wide")
-
-def get_video_id(url):
-    if not url:
-        return None
-    url_str = str(url).strip()
-    if url_str.startswith('local://'):
-        return url_str.replace('local://', '')
-    if url_str.startswith('local_'):
-        return url_str
-    query = urlparse(url_str)
-    if query.hostname == 'youtu.be': return query.path[1:]
-    if query.hostname in ('www.youtube.com', 'youtube.com'):
-        if query.path == '/watch': return parse_qs(query.query).get('v', [None])[0]
-        if query.path[:7] == '/embed/': return query.path.split('/')[2]
-        if query.path[:3] == '/v/': return query.path.split('/')[2]
-    if os.path.exists(os.path.join("data", url_str)):
-        return url_str
-    return None
 
 st.title("✂️ ViralCut - Fábrica de Cortes")
 
@@ -1205,23 +1186,27 @@ st.header("1. Ingestão e Transcrição do Vídeo")
 
 input_mode = st.radio(
     "Escolha a Origem do Vídeo:",
-    ["🌐 Link do YouTube", "💻 Carregar Arquivo de Vídeo Local (MP4, MOV, MKV...)"],
+    ["🌐 Link da Web (YouTube, Instagram, TikTok...)", "💻 Carregar Arquivo de Vídeo Local (MP4, MOV, MKV...)"],
     index=0 if not str(st.session_state.get("video_url", "")).startswith("local://") and not str(st.session_state.get("video_url", "")).startswith("local_") else 1,
     horizontal=True,
     key="video_source_mode"
 )
 
-if input_mode == "🌐 Link do YouTube":
-    video_url = st.text_input("Cole a URL do vídeo do YouTube:", key="input_yt_url")
+if input_mode.startswith("🌐 Link"):
+    video_url = st.text_input(
+        "Cole a URL do vídeo (YouTube, Instagram Reel/Post, TikTok, etc.):",
+        key="input_yt_url",
+        placeholder="https://www.youtube.com/watch?v=... ou https://www.instagram.com/reel/..."
+    )
 
-    if st.button("🚀 Processar Vídeo do YouTube", type="primary", key="btn_process_yt"):
+    if st.button("🚀 Processar Vídeo Online", type="primary", key="btn_process_yt"):
         if not video_url:
             st.warning("Por favor, insira uma URL válida.")
         else:
             st.session_state.video_url = video_url
             video_id = get_video_id(video_url)
             if not video_id:
-                st.error("URL do YouTube inválida.")
+                st.error("URL inválida ou formato de link não reconhecido.")
             else:
                 data_dir = os.path.join("data", video_id)
                 os.makedirs(data_dir, exist_ok=True)
@@ -1249,7 +1234,7 @@ if input_mode == "🌐 Link do YouTube":
                     )
 
                 if is_live_flag:
-                    st.warning("🔴 **Transmissão Ao Vivo (LIVE) Detectada!** O vídeo ainda está em andamento no YouTube. O sistema capturará todo o conteúdo transmitido desde o início até o momento atual.")
+                    st.warning("🔴 **Transmissão Ao Vivo (LIVE) Detectada!** O vídeo ainda está em andamento. O sistema capturará todo o conteúdo transmitido desde o início até o momento atual.")
 
                 # CACHE: Verifica se já temos a transcrição pronta
                 if os.path.exists(transcript_file):
@@ -1277,13 +1262,16 @@ if input_mode == "🌐 Link do YouTube":
                     elif os.path.exists(_vfull_cache_path):
                         st.info(f"🎥 Vídeo completo já no cache — pronto para recorte.")
                 else:
-                    st.info("Iniciando extração do YouTube...")
+                    platform_label = "Instagram" if video_id.startswith("ig_") else ("TikTok" if video_id.startswith("tt_") else "YouTube/Web")
+                    st.info(f"Iniciando extração do vídeo ({platform_label})...")
                     if meta.get("title"):
                         st.success(f"🎬 Vídeo: **{meta['title']}** (Publicado em: `{meta.get('upload_date')}`) ")
 
-                    # Passo 2: Transcrição (Tenta legendas oficiais do YouTube primeiro, fallback para Whisper)
-                    with st.spinner("Buscando transcrição oficial do YouTube (alta precisão e fidelidade)..."):
-                        transcribe_res = fetch_youtube_transcript(video_id)
+                    # Passo 2: Transcrição (Tenta legendas oficiais primeiro se for YouTube, fallback Whisper PT-BR)
+                    transcribe_res = {}
+                    if not video_id.startswith(("ig_", "tt_", "tw_", "local_")):
+                        with st.spinner("Buscando transcrição oficial do YouTube (alta precisão e fidelidade)..."):
+                            transcribe_res = fetch_youtube_transcript(video_id)
                         
                         if transcribe_res.get("transcript_segments"):
                             st.success(f"⚡ Transcrição oficial do YouTube carregada ({len(transcribe_res['transcript_segments'])} segmentos - {transcribe_res.get('selected_language', 'Português')})! Máxima precisão.")
