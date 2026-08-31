@@ -43,6 +43,64 @@ def format_duration_human(secs: float) -> str:
     return f"{s}s"
 
 
+def normalize_time_mask(t_str: str) -> str:
+    """
+    Aplica máscara e normaliza qualquer string de tempo para o formato estrito 'HH:MM:SS'.
+    Exemplos:
+      - '0' / '00:00' -> '00:00:00'
+      - '10:00' -> '00:10:00'
+      - '1:30' -> '00:01:30'
+      - '1:15:30' -> '01:15:30'
+      - '001000' -> '00:10:00'
+      - '45' -> '00:00:45'
+    """
+    if not t_str:
+        return ""
+    val = str(t_str).strip()
+    if not val:
+        return ""
+
+    # Se contém ':'
+    if ":" in val:
+        parts = [p.strip() for p in val.split(":") if p.strip() != ""]
+        try:
+            if len(parts) == 1:
+                n = int(parts[0])
+                return f"00:{n:02d}:00"
+            elif len(parts) == 2:
+                m = int(parts[0])
+                s = int(parts[1])
+                h = m // 60
+                m = m % 60
+                return f"{h:02d}:{m:02d}:{s:02d}"
+            elif len(parts) >= 3:
+                h = int(parts[0])
+                m = int(parts[1])
+                s = int(parts[2])
+                return f"{h:02d}:{m:02d}:{s:02d}"
+        except Exception:
+            pass
+
+    # Apenas dígitos
+    digits = re.sub(r"\D", "", val)
+    if not digits:
+        return val
+
+    digits = digits[-6:]
+    if len(digits) == 1:
+        return f"00:00:0{digits}"
+    elif len(digits) == 2:
+        return f"00:00:{digits}"
+    elif len(digits) == 3:
+        return f"00:0{digits[0]}:{digits[1:]}"
+    elif len(digits) == 4:
+        return f"00:{digits[:2]}:{digits[2:]}"
+    elif len(digits) == 5:
+        return f"0{digits[0]}:{digits[1:3]}:{digits[3:]}"
+    else:  # 6 dígitos
+        return f"{digits[:2]}:{digits[2:4]}:{digits[4:]}"
+
+
 def _clean_ai_title(title: str) -> str:
     """Remove ruídos, formatação markdown e introduções do título gerado pela IA."""
     title = title.strip()

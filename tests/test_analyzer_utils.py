@@ -25,6 +25,19 @@ class TestAnalyzerUtils(unittest.TestCase):
         self.assertEqual(format_duration_human(45), "45s")
         self.assertEqual(format_duration_human(3600), "60m 00s")
 
+    def test_normalize_time_mask(self):
+        from core.analyzer import normalize_time_mask
+        self.assertEqual(normalize_time_mask("00:00"), "00:00:00")
+        self.assertEqual(normalize_time_mask("10:00"), "00:10:00")
+        self.assertEqual(normalize_time_mask("00:10:00"), "00:10:00")
+        self.assertEqual(normalize_time_mask("1:30"), "00:01:30")
+        self.assertEqual(normalize_time_mask("1:15:30"), "01:15:30")
+        self.assertEqual(normalize_time_mask("001000"), "00:10:00")
+        self.assertEqual(normalize_time_mask("1000"), "00:10:00")
+        self.assertEqual(normalize_time_mask("45"), "00:00:45")
+        self.assertEqual(normalize_time_mask("5"), "00:00:05")
+        self.assertEqual(normalize_time_mask(""), "")
+
     def test_clean_ai_title(self):
         raw1 = '1. "Título: O Brasil vai entrar em recessão?"'
         clean1 = _clean_ai_title(raw1)

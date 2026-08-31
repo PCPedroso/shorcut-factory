@@ -45,7 +45,7 @@ importlib.reload(core.overlay_manager)
 
 from core.extractor import download_audio, get_video_metadata
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
-from core.analyzer import analyze_transcript, build_suggested_bundles
+from core.analyzer import analyze_transcript, build_suggested_bundles, normalize_time_mask
 from core.video_processor import (
     download_full_video, cut_video, get_video_resolution,
     extract_audio_from_local_video, extract_thumbnail_from_video, generate_local_video_id
@@ -99,6 +99,77 @@ def get_video_id(url):
     return None
 
 st.title("✂️ ViralCut - Fábrica de Cortes")
+
+def inject_time_mask_js():
+    """Injeta JavaScript no navegador para aplicar máscara interativa HH:MM:SS aos inputs de tempo."""
+    import streamlit.components.v1 as components
+    mask_script = """
+    <script>
+    (function() {
+        function formatDigits(val) {
+            let digits = val.replace(/\\D/g, '').slice(0, 6);
+            if (!digits) return '';
+            if (digits.length <= 2) {
+                return digits;
+            } else if (digits.length <= 4) {
+                return digits.slice(0, 2) + ':' + digits.slice(2);
+            } else {
+                return digits.slice(0, 2) + ':' + digits.slice(2, 4) + ':' + digits.slice(4);
+            }
+        }
+
+        function attachMask(input) {
+            if (input.dataset.timeMaskAttached) return;
+            input.dataset.timeMaskAttached = "true";
+
+            input.addEventListener('input', function(e) {
+                const oldVal = input.value;
+                const masked = formatDigits(oldVal);
+                if (oldVal !== masked) {
+                    input.value = masked;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            });
+
+            input.addEventListener('blur', function() {
+                let digits = input.value.replace(/\\D/g, '');
+                if (!digits) return;
+                while (digits.length < 6) {
+                    if (digits.length <= 2) digits = digits.padStart(6, '0');
+                    else if (digits.length === 3 || digits.length === 4) digits = '00' + digits;
+                    else if (digits.length === 5) digits = '0' + digits;
+                }
+                const finalVal = digits.slice(0, 2) + ':' + digits.slice(2, 4) + ':' + digits.slice(4, 6);
+                if (input.value !== finalVal) {
+                    input.value = finalVal;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            });
+        }
+
+        function scanTimeInputs() {
+            try {
+                const parentDoc = window.parent.document;
+                const inputs = parentDoc.querySelectorAll('input[type="text"]');
+                inputs.forEach(inp => {
+                    const label = (inp.getAttribute('aria-label') || '').toLowerCase();
+                    const ph = (inp.getAttribute('placeholder') || '').toLowerCase();
+                    if (label.includes('(hh:mm:ss)') || label.includes('tempo inicial') || label.includes('tempo final') || ph.includes('00:00:00') || ph.includes('00:10:00')) {
+                        attachMask(inp);
+                    }
+                });
+            } catch (e) {}
+        }
+
+        setInterval(scanTimeInputs, 400);
+        scanTimeInputs();
+    })();
+    </script>
+    """
+    components.html(mask_script, height=0, width=0)
+
+inject_time_mask_js()
 
 def safe_display_image(img_source, caption=None, use_container_width=True):
     """
@@ -2159,9 +2230,31 @@ if st.session_state.transcription_done:
             st.session_state.cut_ready_banner = ""
             st.rerun()
 
+    def _on_start_time_change():
+        val = st.session_state.get("final_start_time", "")
+        if val:
+            st.session_state.final_start_time = normalize_time_mask(val)
+
+    def _on_end_time_change():
+        val = st.session_state.get("final_end_time", "")
+        if val:
+            st.session_state.final_end_time = normalize_time_mask(val)
+
     col_start, col_end = st.columns(2)
-    start_time = col_start.text_input("Tempo Inicial (HH:MM:SS)", key="final_start_time", placeholder="00:00:00")
-    end_time = col_end.text_input("Tempo Final (HH:MM:SS)", key="final_end_time", placeholder="00:10:00")
+    start_time = col_start.text_input(
+        "Tempo Inicial (HH:MM:SS)",
+        key="final_start_time",
+        placeholder="00:00:00",
+        on_change=_on_start_time_change,
+        help="Máscara automática (HH:MM:SS) — digite os números ou use o formato HH:MM:SS"
+    )
+    end_time = col_end.text_input(
+        "Tempo Final (HH:MM:SS)",
+        key="final_end_time",
+        placeholder="00:10:00",
+        on_change=_on_end_time_change,
+        help="Máscara automática (HH:MM:SS) — digite os números ou use o formato HH:MM:SS"
+    )
 
     _aspect_list = [
         "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen - Estilo Podpah & Flow)",

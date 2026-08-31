@@ -18,7 +18,7 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
 | **Processamento de Vídeo** | `FFmpeg` (com `libass` e NVENC) | Recorte, filtros complexos, sidechain compress, equalização e queima de legendas/overlays |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
-| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (68 testes) |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (71 testes) |
 
 ---
 
@@ -163,9 +163,11 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Auto-detecção espacial de debate/sabatina com Bounding Box composta.
 - **🎨 Motor de Sobreposição de Banners, Tarjas (GC) e Logos (`core/overlay_manager.py`)**:
   - Modos `fill`, `fit`, `cover`, logo embutido secundário e prévia instantânea de frame.
-- **🔍 Aproximação / Zoom no Modo Horizontal 16:9 (1.0x a 1.5x)** (`core/video_processor.py`).
+- **⏱️ Máscara Interativa & Normalização de Tempo (`HH:MM:SS`) (`core/analyzer.py`, `app.py`)**:
+  - Injeção de máscara interativa JavaScript nos campos de tempo (`Tempo Inicial` e `Tempo Final`) formatando dígitos automaticamente no padrão `HH:MM:SS` durante a digitação.
+  - Normalizador Python robusto (`normalize_time_mask`) com callbacks imediatos `on_change` que convertem qualquer formato digitado (ex: `1000` -> `00:10:00`, `1:30` -> `00:01:30`, `45` -> `00:00:45`, `001000` -> `00:10:00`) com segurança e precisão.
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
-- **🧪 Suíte de 70 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 71 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest`.
 
 ---
