@@ -167,9 +167,9 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Prioridade máxima e estrita para transcrições oficiais do YouTube em Português (`pt-BR`, `pt`, `pt-PT`), evitando o download de legendas em inglês por engano.
   - Mapeamento dinâmico de todas as faixas de legenda disponíveis no YouTube com badge/sinalização de múltiplos idiomas detectados.
   - Fixação mandatória de `language="pt"` no fallback do Faster-Whisper, garantindo transcrição em português mesmo em vídeos com vinhetas musicais ou ruídos no início.
-- **⏱️ Máscara Interativa & Normalização de Tempo (`HH:MM:SS`) (`core/analyzer.py`, `app.py`)**:
-  - Injeção de máscara interativa JavaScript nos campos de tempo (`Tempo Inicial` e `Tempo Final`) formatando dígitos automaticamente no padrão `HH:MM:SS` durante a digitação.
-  - Normalizador Python robusto (`normalize_time_mask`) com callbacks imediatos `on_change` que convertem qualquer formato digitado (ex: `1000` -> `00:10:00`, `1:30` -> `00:01:30`, `45` -> `00:00:45`, `001000` -> `00:10:00`) com segurança e precisão.
+- **⏱️ Máscara Interativa & Normalização de Tempo com Milissegundos (`HH:MM:SS.ms`) (`core/analyzer.py`, `app.py`)**:
+  - Injeção de máscara interativa JavaScript nos campos de tempo (`Tempo Inicial` e `Tempo Final`) formatando dígitos automaticamente no padrão `HH:MM:SS.ms` (com 2 dígitos de milissegundos) durante a digitação.
+  - Normalizador Python de alta precisão (`normalize_time_mask`) e parser float (`parse_time_str_to_seconds`) com suporte integral a cortes no milissegundo exato (ex: `00:01:30.50`, `00:00:45.00`, `1000` -> `00:10:00.00`).
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
 - **🧪 Suíte de 72 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest`.

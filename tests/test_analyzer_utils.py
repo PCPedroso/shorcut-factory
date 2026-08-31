@@ -11,14 +11,17 @@ class TestAnalyzerUtils(unittest.TestCase):
 
     def test_parse_time_str_to_seconds(self):
         self.assertEqual(parse_time_str_to_seconds("00:01:30"), 90.0)
-        self.assertEqual(parse_time_str_to_seconds("01:00:00"), 3600.0)
+        self.assertEqual(parse_time_str_to_seconds("00:01:30.50"), 90.5)
+        self.assertEqual(parse_time_str_to_seconds("00:01:30,25"), 90.25)
+        self.assertEqual(parse_time_str_to_seconds("01:00:00.00"), 3600.0)
         self.assertEqual(parse_time_str_to_seconds("02:15"), 135.0)
         self.assertEqual(parse_time_str_to_seconds("45"), 45.0)
 
     def test_format_seconds_to_time(self):
         self.assertEqual(format_seconds_to_time(90), "00:01:30")
-        self.assertEqual(format_seconds_to_time(3665), "01:01:05")
-        self.assertEqual(format_seconds_to_time(0), "00:00:00")
+        self.assertEqual(format_seconds_to_time(90.5, include_ms=True), "00:01:30.50")
+        self.assertEqual(format_seconds_to_time(3665.25, include_ms=True), "01:01:05.25")
+        self.assertEqual(format_seconds_to_time(0, include_ms=True), "00:00:00.00")
 
     def test_format_duration_human(self):
         self.assertEqual(format_duration_human(90), "1m 30s")
@@ -27,15 +30,16 @@ class TestAnalyzerUtils(unittest.TestCase):
 
     def test_normalize_time_mask(self):
         from core.analyzer import normalize_time_mask
-        self.assertEqual(normalize_time_mask("00:00"), "00:00:00")
-        self.assertEqual(normalize_time_mask("10:00"), "00:10:00")
-        self.assertEqual(normalize_time_mask("00:10:00"), "00:10:00")
-        self.assertEqual(normalize_time_mask("1:30"), "00:01:30")
-        self.assertEqual(normalize_time_mask("1:15:30"), "01:15:30")
-        self.assertEqual(normalize_time_mask("001000"), "00:10:00")
-        self.assertEqual(normalize_time_mask("1000"), "00:10:00")
-        self.assertEqual(normalize_time_mask("45"), "00:00:45")
-        self.assertEqual(normalize_time_mask("5"), "00:00:05")
+        self.assertEqual(normalize_time_mask("00:00"), "00:00:00.00")
+        self.assertEqual(normalize_time_mask("10:00"), "00:10:00.00")
+        self.assertEqual(normalize_time_mask("00:10:00"), "00:10:00.00")
+        self.assertEqual(normalize_time_mask("00:01:30.50"), "00:01:30.50")
+        self.assertEqual(normalize_time_mask("1:30.5"), "00:01:30.50")
+        self.assertEqual(normalize_time_mask("1:15:30.25"), "01:15:30.25")
+        self.assertEqual(normalize_time_mask("00100000"), "00:10:00.00")
+        self.assertEqual(normalize_time_mask("1000"), "00:10:00.00")
+        self.assertEqual(normalize_time_mask("45"), "00:00:45.00")
+        self.assertEqual(normalize_time_mask("5"), "00:00:05.00")
         self.assertEqual(normalize_time_mask(""), "")
 
     def test_clean_ai_title(self):

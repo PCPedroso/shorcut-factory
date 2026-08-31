@@ -101,21 +101,39 @@ def get_video_id(url):
 st.title("✂️ ViralCut - Fábrica de Cortes")
 
 def inject_time_mask_js():
-    """Injeta JavaScript no navegador para aplicar máscara interativa HH:MM:SS aos inputs de tempo."""
+    """Injeta JavaScript no navegador para aplicar máscara interativa HH:MM:SS.ms (com milissegundos de 2 dígitos) aos inputs de tempo."""
     import streamlit.components.v1 as components
     mask_script = """
     <script>
     (function() {
         function formatDigits(val) {
-            let digits = val.replace(/\\D/g, '').slice(0, 6);
-            if (!digits) return '';
-            if (digits.length <= 2) {
-                return digits;
-            } else if (digits.length <= 4) {
-                return digits.slice(0, 2) + ':' + digits.slice(2);
-            } else {
-                return digits.slice(0, 2) + ':' + digits.slice(2, 4) + ':' + digits.slice(4);
+            let clean = val.replace(',', '.');
+            let hasDot = clean.includes('.');
+            let parts = clean.split('.');
+            let mainDigits = parts[0].replace(/\\D/g, '').slice(0, 6);
+            let msDigits = parts.length > 1 ? parts[1].replace(/\\D/g, '').slice(0, 2) : '';
+
+            if (!hasDot && clean.replace(/\\D/g, '').length > 6) {
+                let fullDigits = clean.replace(/\\D/g, '').slice(0, 8);
+                mainDigits = fullDigits.slice(0, 6);
+                msDigits = fullDigits.slice(6, 8);
             }
+
+            let base = '';
+            if (!mainDigits) {
+                base = '';
+            } else if (mainDigits.length <= 2) {
+                base = mainDigits;
+            } else if (mainDigits.length <= 4) {
+                base = mainDigits.slice(0, 2) + ':' + mainDigits.slice(2);
+            } else {
+                base = mainDigits.slice(0, 2) + ':' + mainDigits.slice(2, 4) + ':' + mainDigits.slice(4);
+            }
+
+            if (hasDot || msDigits) {
+                return base + '.' + msDigits;
+            }
+            return base;
         }
 
         function attachMask(input) {
@@ -132,14 +150,22 @@ def inject_time_mask_js():
             });
 
             input.addEventListener('blur', function() {
-                let digits = input.value.replace(/\\D/g, '');
-                if (!digits) return;
-                while (digits.length < 6) {
-                    if (digits.length <= 2) digits = digits.padStart(6, '0');
-                    else if (digits.length === 3 || digits.length === 4) digits = '00' + digits;
-                    else if (digits.length === 5) digits = '0' + digits;
+                let val = input.value.trim().replace(',', '.');
+                if (!val) return;
+                let parts = val.split('.');
+                let mainDigits = parts[0].replace(/\\D/g, '');
+                let msDigits = parts.length > 1 ? parts[1].replace(/\\D/g, '') : '00';
+
+                if (msDigits.length === 1) msDigits = msDigits + '0';
+                else if (msDigits.length > 2) msDigits = msDigits.slice(0, 2);
+                else if (!msDigits) msDigits = '00';
+
+                while (mainDigits.length < 6) {
+                    if (mainDigits.length <= 2) mainDigits = mainDigits.padStart(6, '0');
+                    else if (mainDigits.length === 3 || mainDigits.length === 4) mainDigits = '00' + mainDigits;
+                    else if (mainDigits.length === 5) mainDigits = '0' + mainDigits;
                 }
-                const finalVal = digits.slice(0, 2) + ':' + digits.slice(2, 4) + ':' + digits.slice(4, 6);
+                const finalVal = mainDigits.slice(0, 2) + ':' + mainDigits.slice(2, 4) + ':' + mainDigits.slice(4, 6) + '.' + msDigits;
                 if (input.value !== finalVal) {
                     input.value = finalVal;
                     input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -155,7 +181,7 @@ def inject_time_mask_js():
                 inputs.forEach(inp => {
                     const label = (inp.getAttribute('aria-label') || '').toLowerCase();
                     const ph = (inp.getAttribute('placeholder') || '').toLowerCase();
-                    if (label.includes('(hh:mm:ss)') || label.includes('tempo inicial') || label.includes('tempo final') || ph.includes('00:00:00') || ph.includes('00:10:00')) {
+                    if (label.includes('(hh:mm:ss') || label.includes('tempo inicial') || label.includes('tempo final') || ph.includes('00:00:00') || ph.includes('00:10:00')) {
                         attachMask(inp);
                     }
                 });
@@ -1644,8 +1670,8 @@ if st.session_state.transcription_done:
                 col_ap1, col_ap2 = st.columns([2, 1])
                 with col_ap1:
                     if st.button("✂️ Carregar Seleção para Exportação (Seção 3)", key="btn_apply_composed", type="primary", use_container_width=True):
-                        st.session_state.final_start_time = comb_start
-                        st.session_state.final_end_time = comb_end
+                        st.session_state.final_start_time = normalize_time_mask(comb_start)
+                        st.session_state.final_end_time = normalize_time_mask(comb_end)
                         st.session_state.final_corte_title = comb_title
                         st.session_state.cut_ready_banner = f"✅ Composição pronta para corte: [{comb_start} → {comb_end}] ({comb_dur_fmt})"
                         st.rerun()
@@ -2219,10 +2245,10 @@ if st.session_state.transcription_done:
                 _total_dur = get_video_duration(_vid_path_full)
                 def _fmt(s):
                     h, m, sec = int(s // 3600), int((s % 3600) // 60), int(s % 60)
-                    return f"{h:02d}:{m:02d}:{sec:02d}"
-                st.session_state.final_start_time = "00:00:00"
+                    return f"{h:02d}:{m:02d}:{sec:02d}.00"
+                st.session_state.final_start_time = "00:00:00.00"
                 st.session_state.final_end_time = _fmt(_total_dur)
-                st.session_state.cut_ready_banner = f"✅ Vídeo inteiro selecionado: [00:00:00 → {_fmt(_total_dur)}]"
+                st.session_state.cut_ready_banner = f"✅ Vídeo inteiro selecionado: [00:00:00.00 → {_fmt(_total_dur)}]"
                 st.rerun()
             else:
                 st.warning("⚠️ Vídeo ainda não baixado. Gere o corte uma vez para baixar o vídeo completo.")
@@ -2246,18 +2272,18 @@ if st.session_state.transcription_done:
 
     col_start, col_end = st.columns(2)
     start_time = col_start.text_input(
-        "Tempo Inicial (HH:MM:SS)",
+        "Tempo Inicial (HH:MM:SS.ms)",
         key="final_start_time",
-        placeholder="00:00:00",
+        placeholder="00:00:00.00",
         on_change=_on_start_time_change,
-        help="Máscara automática (HH:MM:SS) — digite os números ou use o formato HH:MM:SS"
+        help="Máscara automática (HH:MM:SS.ms) com 2 dígitos de milissegundos — digite os números ou use o formato HH:MM:SS.ms"
     )
     end_time = col_end.text_input(
-        "Tempo Final (HH:MM:SS)",
+        "Tempo Final (HH:MM:SS.ms)",
         key="final_end_time",
-        placeholder="00:10:00",
+        placeholder="00:10:00.00",
         on_change=_on_end_time_change,
-        help="Máscara automática (HH:MM:SS) — digite os números ou use o formato HH:MM:SS"
+        help="Máscara automática (HH:MM:SS.ms) com 2 dígitos de milissegundos — digite os números ou use o formato HH:MM:SS.ms"
     )
 
     _aspect_list = [

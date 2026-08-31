@@ -16,21 +16,33 @@ import ollama
 # ──────────────────────────────────────────────────────────────────────────────
 
 def parse_time_str_to_seconds(t_str: str) -> float:
-    """Converte 'HH:MM:SS' ou 'MM:SS' para segundos float."""
-    parts = t_str.strip().split(':')
+    """Converte 'HH:MM:SS', 'HH:MM:SS.ms', 'HH:MM:SS,ms' ou 'MM:SS' para segundos float."""
+    if not t_str:
+        return 0.0
+    clean = str(t_str).strip().replace(',', '.')
+    parts = clean.split(':')
     if len(parts) == 3:
         return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
     elif len(parts) == 2:
         return int(parts[0]) * 60 + float(parts[1])
-    return float(t_str)
+    try:
+        return float(clean)
+    except Exception:
+        return 0.0
 
 
-def format_seconds_to_time(secs: float) -> str:
-    """Converte segundos para 'HH:MM:SS'."""
-    secs = max(0, int(secs))
-    h = secs // 3600
-    m = (secs % 3600) // 60
-    s = secs % 60
+def format_seconds_to_time(secs: float, include_ms: bool = False) -> str:
+    """Converte segundos para 'HH:MM:SS.ms' (2 dígitos de milissegundos) ou 'HH:MM:SS'."""
+    secs = max(0.0, float(secs))
+    total_int = int(secs)
+    h = total_int // 3600
+    m = (total_int % 3600) // 60
+    s = total_int % 60
+    if include_ms:
+        ms = int(round((secs - total_int) * 100))
+        if ms >= 100:
+            ms = 99
+        return f"{h:02d}:{m:02d}:{s:02d}.{ms:02d}"
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
@@ -45,60 +57,77 @@ def format_duration_human(secs: float) -> str:
 
 def normalize_time_mask(t_str: str) -> str:
     """
-    Aplica máscara e normaliza qualquer string de tempo para o formato estrito 'HH:MM:SS'.
+    Aplica máscara e normaliza qualquer string de tempo para o formato estrito 'HH:MM:SS.ms' (2 dígitos de milissegundos).
     Exemplos:
-      - '0' / '00:00' -> '00:00:00'
-      - '10:00' -> '00:10:00'
-      - '1:30' -> '00:01:30'
-      - '1:15:30' -> '01:15:30'
-      - '001000' -> '00:10:00'
-      - '45' -> '00:00:45'
+      - '0' / '00:00' -> '00:00:00.00'
+      - '10:00' -> '00:10:00.00'
+      - '00:10:00' -> '00:10:00.00'
+      - '00:01:30.50' -> '00:01:30.50'
+      - '1:30.5' -> '00:01:30.50'
+      - '1:15:30.25' -> '01:15:30.25'
+      - '00100000' -> '00:10:00.00'
+      - '45' -> '00:00:45.00'
     """
     if not t_str:
         return ""
-    val = str(t_str).strip()
+    val = str(t_str).strip().replace(',', '.')
     if not val:
         return ""
 
-    # Se contém ':'
-    if ":" in val:
-        parts = [p.strip() for p in val.split(":") if p.strip() != ""]
+    # Trata separação de milissegundos se houver ponto '.'
+    ms_part = "00"
+    main_time = val
+    if "." in val:
+        p_dot = val.split(".", 1)
+        main_time = p_dot[0].strip()
+        raw_ms = re.sub(r"\D", "", p_dot[1])
+        if len(raw_ms) == 1:
+            ms_part = f"{raw_ms}0"
+        elif len(raw_ms) >= 2:
+            ms_part = raw_ms[:2]
+
+    if ":" in main_time:
+        parts = [p.strip() for p in main_time.split(":") if p.strip() != ""]
         try:
             if len(parts) == 1:
                 n = int(parts[0])
-                return f"00:{n:02d}:00"
+                return f"00:{n:02d}:00.{ms_part}"
             elif len(parts) == 2:
                 m = int(parts[0])
                 s = int(parts[1])
                 h = m // 60
                 m = m % 60
-                return f"{h:02d}:{m:02d}:{s:02d}"
+                return f"{h:02d}:{m:02d}:{s:02d}.{ms_part}"
             elif len(parts) >= 3:
                 h = int(parts[0])
                 m = int(parts[1])
                 s = int(parts[2])
-                return f"{h:02d}:{m:02d}:{s:02d}"
+                return f"{h:02d}:{m:02d}:{s:02d}.{ms_part}"
         except Exception:
             pass
 
-    # Apenas dígitos
     digits = re.sub(r"\D", "", val)
     if not digits:
-        return val
+        return f"00:00:00.{ms_part}"
+
+    # Se tiver 7 ou 8 dígitos, considera os últimos 2 como milissegundos
+    if len(digits) >= 7 and "." not in val:
+        ms_part = digits[-2:]
+        digits = digits[:-2]
 
     digits = digits[-6:]
     if len(digits) == 1:
-        return f"00:00:0{digits}"
+        return f"00:00:0{digits}.{ms_part}"
     elif len(digits) == 2:
-        return f"00:00:{digits}"
+        return f"00:00:{digits}.{ms_part}"
     elif len(digits) == 3:
-        return f"00:0{digits[0]}:{digits[1:]}"
+        return f"00:0{digits[0]}:{digits[1:]}.{ms_part}"
     elif len(digits) == 4:
-        return f"00:{digits[:2]}:{digits[2:]}"
+        return f"00:{digits[:2]}:{digits[2:]}.{ms_part}"
     elif len(digits) == 5:
-        return f"0{digits[0]}:{digits[1:3]}:{digits[3:]}"
-    else:  # 6 dígitos
-        return f"{digits[:2]}:{digits[2:4]}:{digits[4:]}"
+        return f"0{digits[0]}:{digits[1:3]}:{digits[3:]}.{ms_part}"
+    else:
+        return f"{digits[:2]}:{digits[2:4]}:{digits[4:]}.{ms_part}"
 
 
 def _clean_ai_title(title: str) -> str:
