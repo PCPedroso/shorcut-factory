@@ -1278,39 +1278,45 @@ if input_mode.startswith("🌐 Link"):
                             langs = transcribe_res.get("available_languages", [])
                             if len(langs) > 1:
                                 st.caption(f"🌐 **Idiomas detectados no YouTube ({len(langs)} faixas):** {', '.join([l['name'] for l in langs])}")
-                        else:
-                            st.info("Legendas oficiais em português não encontradas no YouTube. Processando áudio via Whisper local (PT-BR)...")
-                            if os.path.exists(audio_path):
-                                audio_res = {"path": audio_path, "error": None}
-                            else:
-                                with st.spinner("Baixando áudio gravado até o momento atual..."):
-                                    audio_res = download_audio(video_url, output_path=audio_path, is_live=is_live_flag)
-                                    
-                            if audio_res.get("error"):
-                                st.error(f"Erro no download: {audio_res['error']}")
-                                transcribe_res = {"error": audio_res["error"]}
-                            else:
-                                # Atualiza a duração se era desconhecida
-                                if not v_dur and os.path.exists(audio_path):
-                                    v_dur = get_video_duration(audio_path)
-                                    add_or_update_video_in_library(
-                                        video_id=video_id,
-                                        title=v_title,
-                                        upload_date_raw=v_date,
-                                        url=video_url,
-                                        thumbnail_url=v_thumb,
-                                        duration_sec=v_dur,
-                                        channel=meta.get("channel"),
-                                        is_live=is_live_flag
-                                    )
 
-                                with st.spinner(f"Transcrevendo áudio com Whisper ({model_size}) em Português na {device_option.upper()}..."):
-                                    transcribe_res = transcribe_audio(
-                                        audio_res["path"], 
-                                        model_size=model_size, 
-                                        device=device_option,
-                                        language="pt"
-                                    )
+                    # Se não obteve segmentos oficiais (ou for Instagram/TikTok/Web), processa áudio via Whisper local
+                    if not transcribe_res.get("transcript_segments"):
+                        if not video_id.startswith(("ig_", "tt_", "tw_", "local_")):
+                            st.info("Legendas oficiais em português não encontradas no YouTube. Processando áudio via Whisper local (PT-BR)...")
+                        else:
+                            st.info(f"Processando áudio do {platform_label} via Whisper local (PT-BR)...")
+
+                        if os.path.exists(audio_path):
+                            audio_res = {"path": audio_path, "error": None}
+                        else:
+                            with st.spinner(f"Baixando áudio do vídeo ({platform_label})..."):
+                                audio_res = download_audio(video_url, output_path=audio_path, is_live=is_live_flag)
+                                
+                        if audio_res.get("error"):
+                            st.error(f"Erro no download: {audio_res['error']}")
+                            transcribe_res = {"error": audio_res["error"]}
+                        else:
+                            # Atualiza a duração se era desconhecida
+                            if not v_dur and os.path.exists(audio_path):
+                                v_dur = get_video_duration(audio_path)
+                                add_or_update_video_in_library(
+                                    video_id=video_id,
+                                    title=v_title,
+                                    upload_date_raw=v_date,
+                                    url=video_url,
+                                    thumbnail_url=v_thumb,
+                                    duration_sec=v_dur,
+                                    channel=meta.get("channel"),
+                                    is_live=is_live_flag
+                                )
+
+                            with st.spinner(f"Transcrevendo áudio com Whisper ({model_size}) em Português na {device_option.upper()}..."):
+                                transcribe_res = transcribe_audio(
+                                    audio_res["path"], 
+                                    model_size=model_size, 
+                                    device=device_option,
+                                    language="pt"
+                                )
                                 
                     if transcribe_res.get("error"):
                         st.error(f"Erro na transcrição: {transcribe_res['error']}")
