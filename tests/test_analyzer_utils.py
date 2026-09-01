@@ -147,6 +147,46 @@ class TestAnalyzerUtils(unittest.TestCase):
             self.assertEqual(len(res["available_languages"]), 1)
             self.assertEqual(res["available_languages"][0]["code"], "pt-BR")
 
+    def test_build_golden_rule_micro_cuts_custom_max_duration(self):
+        from core.analyzer import build_golden_rule_micro_cuts
+        pautas = [
+            {
+                "title": "Pergunta de Abertura",
+                "start": "00:00:10",
+                "end": "00:00:50",
+                "start_s": 10.0,
+                "end_s": 50.0,
+                "duration_s": 40.0,
+                "text_snippet": "Pergunta e resposta rápida."
+            },
+            {
+                "title": "Discurso Longo",
+                "start": "00:01:00",
+                "end": "00:04:00",
+                "start_s": 60.0,
+                "end_s": 240.0,
+                "duration_s": 180.0,
+                "text_snippet": "Fala longa com vários pontos."
+            }
+        ]
+        segments = [
+            {"start": 10.0, "end": 20.0, "text": "Qual a sua opinião sobre o assunto?"},
+            {"start": 20.0, "end": 50.0, "text": ">> A minha opinião é totalmente favorável."},
+            {"start": 60.0, "end": 75.0, "text": "Vamos falar sobre o grande problema atual."},
+            {"start": 75.0, "end": 105.0, "text": ">> O segredo é ter coerência e agir rápido."},
+            {"start": 105.0, "end": 130.0, "text": "Em segundo lugar, a realidade é outra."}
+        ]
+
+        # Teste com max 45s
+        cuts_45 = build_golden_rule_micro_cuts(pautas, segments, max_duration_s=45.0)
+        self.assertTrue(len(cuts_45) > 0)
+        for c in cuts_45:
+            self.assertLessEqual(c["duration_s"], 50.0)
+
+        # Teste com max 90s
+        cuts_90 = build_golden_rule_micro_cuts(pautas, segments, max_duration_s=90.0)
+        self.assertTrue(len(cuts_90) > 0)
+
 
 if __name__ == '__main__':
     unittest.main()

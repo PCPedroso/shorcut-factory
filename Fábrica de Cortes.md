@@ -18,7 +18,7 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
 | **Processamento de Vídeo** | `FFmpeg` (com `libass` e NVENC) | Recorte, filtros complexos, sidechain compress, equalização e queima de legendas/overlays |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
-| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (74 testes) |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (75 testes) |
 
 ---
 
@@ -174,8 +174,11 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Reconhecimento automático de links de múltiplas redes sociais: **Instagram Reels / Posts / TV** (`ig_...`), **TikTok** (`tt_...`), **Twitter/X** (`tw_...`), **YouTube** e links web genéricos.
   - Suporte automático a arquivos de autenticação/cookies (`data/cookies.txt` ou `data/instagram_cookies.txt`) para extração sem restrições de bloqueio de bots.
   - Transcrição automática instantânea com Faster-Whisper em Português-BR para qualquer vídeo baixado das redes.
+- **🔥 Ganchos Virais & Duração Máxima Configurável para Shorts (`core/analyzer.py`, `app.py`)**:
+  - Opção interativa para definir o teto de duração máxima dos Shorts/Reels/TikTok (ex: 30s, 45s, 60s, 90s até 180s) com persistência automática em `app_settings.json`.
+  - Reestruturação instantânea de micro-cortes sob as 6 Regras de Ouro sem necessidade de reprocessar o Ollama.
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
-- **🧪 Suíte de 74 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 75 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest`.
 
 ---

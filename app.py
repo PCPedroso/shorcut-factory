@@ -45,7 +45,7 @@ importlib.reload(core.overlay_manager)
 
 from core.extractor import download_audio, get_video_metadata, get_video_id
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
-from core.analyzer import analyze_transcript, build_suggested_bundles, normalize_time_mask
+from core.analyzer import analyze_transcript, build_suggested_bundles, build_golden_rule_micro_cuts, normalize_time_mask
 from core.video_processor import (
     download_full_video, cut_video, get_video_resolution,
     extract_audio_from_local_video, extract_thumbnail_from_video, generate_local_video_id
@@ -1931,28 +1931,53 @@ if st.session_state.transcription_done:
     # ── TAB 3: GANCHOS VIRAIS & PEQUENOS CORTES (SHORTS / REELS) ───────────────
     with tab_shorts:
         st.markdown(
-            "Geração de **Pequenos Cortes (20s a 75s)** estruturados sob as **6 Regras de Ouro Editoriais**."
+            "Geração de **Pequenos Cortes** para Shorts/Reels estruturados sob as **6 Regras de Ouro Editoriais**."
         )
         
-        if st.button("🔥 Gerar Pequenos Cortes", key="btn_shorts", type="primary"):
-            with st.spinner("Estruturando pequenos cortes com coerência editorial..."):
-                res = analyze_transcript(
-                    chunked_transcript, "ganchos",
-                    model=ollama_model,
-                    chunks_list=chunks_list,
-                    segments=st.session_state.segments,
-                    strategy="qa_interview" if "Entrevistas" in strategy_choice else "semantic_topics"
-                )
-                if res.get("error"):
-                    st.error(f"Erro na análise: {res['error']}")
-                else:
-                    st.session_state.shorts = res.get("micro_cuts", []) or res.get("cortes", [])
-                    st.session_state.pautas = res.get("pautas", [])
-                    st.session_state.ai_raw = res.get("raw", "")
+        col_sh_max, col_sh_btn = st.columns([1.5, 2.5])
+        with col_sh_max:
+            saved_max_shorts = float(_cfg.get("shorts_max_seconds", 60.0))
+            shorts_max_secs = st.number_input(
+                "⏱️ Duração Máxima do Short (segundos):",
+                min_value=15.0,
+                max_value=180.0,
+                value=saved_max_shorts,
+                step=5.0,
+                key="shorts_max_seconds_input",
+                on_change=lambda: save_setting("shorts_max_seconds", st.session_state.shorts_max_seconds_input),
+                help="Define o teto de duração máxima para cada corte vertical gerado (Shorts, Reels, TikTok)."
+            )
+
+        with col_sh_btn:
+            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            _btn_sh_label = f"🔥 Gerar / Reestruturar Pequenos Cortes (Até {shorts_max_secs:.0f}s)"
+            if st.button(_btn_sh_label, key="btn_shorts", type="primary", use_container_width=True):
+                with st.spinner(f"Estruturando pequenos cortes (máx. {shorts_max_secs:.0f}s) sob as 6 Regras de Ouro..."):
+                    if 'pautas' in st.session_state and st.session_state.pautas:
+                        st.session_state.shorts = build_golden_rule_micro_cuts(
+                            st.session_state.pautas,
+                            st.session_state.segments,
+                            max_duration_s=shorts_max_secs
+                        )
+                    else:
+                        res = analyze_transcript(
+                            chunked_transcript, "ganchos",
+                            model=ollama_model,
+                            chunks_list=chunks_list,
+                            segments=st.session_state.segments,
+                            strategy="qa_interview" if "Entrevistas" in strategy_choice else "semantic_topics",
+                            max_shorts_seconds=shorts_max_secs
+                        )
+                        if res.get("error"):
+                            st.error(f"Erro na análise: {res['error']}")
+                        else:
+                            st.session_state.shorts = res.get("micro_cuts", []) or res.get("cortes", [])
+                            st.session_state.pautas = res.get("pautas", [])
+                            st.session_state.ai_raw = res.get("raw", "")
                     
                     active_u = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
                     v_id = get_video_id(active_u)
-                    if v_id:
+                    if v_id and 'shorts' in st.session_state:
                         sh_file = os.path.join("data", v_id, "shorts.json")
                         with open(sh_file, "w", encoding="utf-8") as f:
                             json.dump(st.session_state.shorts, f, ensure_ascii=False, indent=4)

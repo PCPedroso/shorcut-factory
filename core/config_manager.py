@@ -16,6 +16,7 @@ DEFAULT_SETTINGS = {
     "ollama_model": "llama3",
     "analysis_strategy": "🎙️ Entrevistas & Sabatinas (Detecção Q&A [INÍCIO -> FIM])",
     "series_min_minutes": 10.0,
+    "shorts_max_seconds": 60.0,
 
     # Enquadramento selecionado (índice da lista)
     "aspect_option": "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)",

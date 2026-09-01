@@ -475,19 +475,22 @@ TRANSITION_KEYWORDS = re.compile(
 )
 
 
-def build_golden_rule_micro_cuts(pautas: list, segments: list) -> list:
+def build_golden_rule_micro_cuts(pautas: list, segments: list, max_duration_s: float = 60.0, min_duration_s: float = 15.0) -> list:
     """
     Gera micro-cortes para Shorts/Reels/TikTok aplicando as 6 Regras de Ouro Editoriais
-    e Mineração Multi-Corte em falas/respostas longas (> 80s):
+    e Mineração Multi-Corte em falas/respostas longas:
     1. Clean Entry: Ponto de entrada limpo no início da fala/pergunta com respiro de áudio.
     2. Clean Exit: Fechamento completo da oração com respiro, sem vazamento da próxima pauta.
     3. Autonomia Semântica: Compreensão autônoma no feed sem necessidade de contexto externo.
     4. Tipologia Clara: Classifica em Q&A Completo, Declaração/Punchline, Argumento ou Debate/Réplica.
     5. Anti-Vazamento: Isolamento rígido dos limites de assunto.
-    6. Retenção Ótima: Janela temporal calibrada entre 20s e 75s.
+    6. Retenção Ótima: Janela temporal calibrada configurável (padrão 15s até max_duration_s).
     """
     if not pautas:
         return []
+
+    max_dur = float(max_duration_s)
+    min_dur = float(min_duration_s)
 
     micro_cuts = []
     seen_windows = []
@@ -501,8 +504,8 @@ def build_golden_rule_micro_cuts(pautas: list, segments: list) -> list:
         if not p_segs:
             continue
 
-        # Caso 1: Pauta curta (20s a 80s) -> 1 corte Q&A direto
-        if 20.0 <= dur <= 80.0:
+        # Caso 1: Pauta curta (entre min_dur e max_dur) -> 1 corte Q&A direto
+        if min_dur <= dur <= max_dur:
             micro_cuts.append({
                 "type": "🏷️ [Q&A] Pergunta & Resposta Completa",
                 "start": p["start"],
@@ -518,7 +521,7 @@ def build_golden_rule_micro_cuts(pautas: list, segments: list) -> list:
             seen_windows.append((p["start_s"], p["end_s"]))
             continue
 
-        # Caso 2: Pauta longa (> 80s) -> Mineração Multi-Corte de Teses / Respostas
+        # Caso 2: Pauta longa (> max_dur) -> Mineração Multi-Corte de Teses / Respostas
         candidate_starts = []
 
         # 1. Ponto de resposta inicial
@@ -530,11 +533,12 @@ def build_golden_rule_micro_cuts(pautas: list, segments: list) -> list:
 
         # 2. Varredura interna por transições semânticas e réplicas
         last_added_t = candidate_starts[0][0]
+        step_min = max(20.0, min_dur * 1.2)
         for seg in p_segs:
             t = seg.get("start", 0)
             txt = seg.get("text", "")
             
-            if t - last_added_t < 35.0:
+            if t - last_added_t < step_min:
                 continue
 
             if ">>" in txt:
@@ -544,25 +548,25 @@ def build_golden_rule_micro_cuts(pautas: list, segments: list) -> list:
                 candidate_starts.append((t, "🏷️ [Punchline] Declaração / Tese de Impacto"))
                 last_added_t = t
 
-        # Para cada candidate start, busca o melhor fechamento em ponto final entre 30s e 75s
+        # Para cada candidate start, busca o melhor fechamento em ponto final respeitando max_dur
         for c_start, c_type in candidate_starts:
-            if any(abs(c_start - sw[0]) < 25.0 for sw in seen_windows):
+            if any(abs(c_start - sw[0]) < min_dur for sw in seen_windows):
                 continue
 
             potential_ends = [
                 s for s in p_segs 
-                if c_start + 25.0 <= s["end"] <= c_start + 75.0 
+                if c_start + min_dur <= s["end"] <= c_start + max_dur 
                 and s.get("text", "").strip().endswith(('.', '!', '?'))
             ]
 
             if potential_ends:
                 c_end = potential_ends[-1]["end"]
             else:
-                fallback_ends = [s for s in p_segs if c_start + 25.0 <= s["end"] <= c_start + 65.0]
-                c_end = fallback_ends[-1]["end"] if fallback_ends else min(p["end_s"], c_start + 55.0)
+                fallback_ends = [s for s in p_segs if c_start + min_dur <= s["end"] <= c_start + max_dur]
+                c_end = fallback_ends[-1]["end"] if fallback_ends else min(p["end_s"], c_start + max_dur)
 
             c_dur = c_end - c_start
-            if 20.0 <= c_dur <= 85.0:
+            if min_dur <= c_dur <= max_dur + 5.0:
                 cut_text_segs = [s.get("text", "").replace(">>", "").strip() for s in p_segs if c_start <= s["start"] <= c_end]
                 cut_text = " ".join(cut_text_segs)
                 
@@ -589,7 +593,7 @@ def build_golden_rule_micro_cuts(pautas: list, segments: list) -> list:
     if not micro_cuts:
         for p in pautas:
             if "Abertura" not in p["title"] and "Encerramento" not in p["title"]:
-                dur = min(p["duration_s"], 55.0)
+                dur = min(p["duration_s"], max_dur)
                 end_s = p["start_s"] + dur
                 micro_cuts.append({
                     "type": "🏷️ [Short] Momento de Destaque",
@@ -600,7 +604,7 @@ def build_golden_rule_micro_cuts(pautas: list, segments: list) -> list:
                     "duration_s": dur,
                     "duration_label": format_duration_human(dur),
                     "title": p["title"],
-                    "notes": "Trecho destacado com duração otimizada para Shorts/Reels.",
+                    "notes": f"Trecho destacado com duração otimizada para Shorts/Reels (máx. {max_dur:.0f}s).",
                     "snippet": p.get("text_snippet", "")
                 })
 
@@ -618,7 +622,8 @@ def analyze_transcript(
     chunks_list: list = None,
     segments: list = None,
     strategy: str = "qa_interview",
-    min_series_minutes: float = 10.0
+    min_series_minutes: float = 10.0,
+    max_shorts_seconds: float = 60.0
 ) -> dict:
     """
     Executa a identificação de pautas ou ganchos adaptando-se ao tipo de vídeo.
@@ -634,7 +639,7 @@ def analyze_transcript(
             pautas = detect_semantic_topics(chunks_list, model=model)
 
         bundles = build_suggested_bundles(pautas, min_minutes=min_series_minutes)
-        micro_cuts = build_golden_rule_micro_cuts(pautas, segments)
+        micro_cuts = build_golden_rule_micro_cuts(pautas, segments, max_duration_s=max_shorts_seconds)
 
         return {
             "pautas": pautas,
