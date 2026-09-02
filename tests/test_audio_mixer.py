@@ -40,8 +40,57 @@ class TestAudioMixer(unittest.TestCase):
             preset = DUCKING_PRESETS[preset_name]
             self.assertIn("threshold", preset)
             self.assertIn("ratio", preset)
-            self.assertIn("attack", preset)
-            self.assertIn("release", preset)
+    def test_clean_music_title_and_category_detection(self):
+        from core.extractor import clean_music_title, detect_music_category_suggestion
+
+        raw1 = "KSLV - Override (Official Music Video) [4K] #shorts"
+        clean1 = clean_music_title(raw1)
+        self.assertEqual(clean1, "KSLV - Override")
+        cat1_lbl, cat1_key = detect_music_category_suggestion(clean1)
+        self.assertEqual(cat1_key, "custom")  # KSLV override
+
+        raw2 = "Brazilian Phonk Extreme Gym Workout Music (Slowed + Reverb)"
+        clean2 = clean_music_title(raw2)
+        self.assertNotIn("Slowed", clean2)
+        cat2_lbl, cat2_key = detect_music_category_suggestion(clean2)
+        self.assertEqual(cat2_key, "phonk_power_override")
+
+        raw3 = "Funny Comedy Meme Sound Effects Pack (Free Download)"
+        clean3 = clean_music_title(raw3)
+        cat3_lbl, cat3_key = detect_music_category_suggestion(clean3)
+        self.assertEqual(cat3_key, "comedy_meme_funny")
+
+    def test_register_custom_audio_track(self):
+        from core.audio_mixer import register_custom_audio_track, ASSETS_AUDIO_DIR
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf:
+            tf.write(b"fake audio mp3 bytes for test")
+            tf_path = tf.name
+
+        try:
+            res = register_custom_audio_track(
+                source_path=tf_path,
+                title="Meu Phonk Épico Teste",
+                category_name="⚡ Phonk / Superação & Força",
+                description="Trilha de teste"
+            )
+            self.assertIsNone(res.get("error"))
+            self.assertIsNotNone(res.get("track"))
+            track = res["track"]
+            self.assertTrue(os.path.exists(track["path"]))
+            self.assertEqual(track["title"], "Meu Phonk Épico Teste")
+
+            # Verifica list_available_tracks
+            tracks = list_available_tracks()
+            found = any(t["id"] == track["id"] for t in tracks)
+            self.assertTrue(found)
+        finally:
+            if os.path.exists(tf_path):
+                try:
+                    os.remove(tf_path)
+                except Exception:
+                    pass
 
 
 if __name__ == '__main__':

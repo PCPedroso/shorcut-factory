@@ -5,6 +5,9 @@ e subir com presença nos silêncios/pausas.
 """
 
 import os
+import re
+import json
+import shutil
 import math
 import wave
 import struct
@@ -339,14 +342,81 @@ def ensure_default_tracks():
                 pass
 
 
+CUSTOM_TRACKS_FILE = os.path.join(ASSETS_AUDIO_DIR, "custom_tracks.json")
+
+
+def load_custom_tracks_metadata() -> dict:
+    """Carrega o catálogo de metadados das trilhas customizadas."""
+    if os.path.exists(CUSTOM_TRACKS_FILE):
+        try:
+            with open(CUSTOM_TRACKS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_custom_tracks_metadata(data: dict):
+    """Salva o catálogo de metadados das trilhas customizadas."""
+    os.makedirs(ASSETS_AUDIO_DIR, exist_ok=True)
+    with open(CUSTOM_TRACKS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+
+def register_custom_audio_track(
+    source_path: str,
+    title: str,
+    category_name: str = "🎵 Trilha Personalizada",
+    description: str = ""
+) -> dict:
+    """
+    Registra um arquivo de áudio extraído/importado diretamente na biblioteca permanente de trilhas.
+    """
+    os.makedirs(ASSETS_AUDIO_DIR, exist_ok=True)
+    if not os.path.exists(source_path):
+        return {"error": f"Arquivo fonte não encontrado: {source_path}", "track": None}
+
+    # Gera nome de arquivo limpo e seguro
+    clean_title_slug = re.sub(r'[^a-zA-Z0-9_]+', '_', title).strip('_').lower()[:35] or "track"
+    ext = os.path.splitext(source_path)[1].lower() or ".mp3"
+    dest_filename = f"{clean_title_slug}{ext}"
+    dest_path = os.path.join(ASSETS_AUDIO_DIR, dest_filename)
+
+    # Evita sobrescrever se for arquivo diferente
+    counter = 1
+    while os.path.exists(dest_path) and os.path.abspath(source_path) != os.path.abspath(dest_path):
+        dest_filename = f"{clean_title_slug}_{counter}{ext}"
+        dest_path = os.path.join(ASSETS_AUDIO_DIR, dest_filename)
+        counter += 1
+
+    if os.path.abspath(source_path) != os.path.abspath(dest_path):
+        shutil.copy2(source_path, dest_path)
+
+    track_id = dest_filename
+    meta_db = load_custom_tracks_metadata()
+    track_info = {
+        "id": track_id,
+        "filename": dest_filename,
+        "title": title.strip() or f"🎵 {dest_filename}",
+        "category": category_name,
+        "description": description.strip() or f"Extraído para cortes ({category_name})",
+        "path": dest_path,
+        "is_builtin": False
+    }
+    meta_db[track_id] = track_info
+    save_custom_tracks_metadata(meta_db)
+
+    return {"error": None, "track": track_info}
+
+
 def list_available_tracks() -> list:
     """
-    Retorna lista de todas as trilhas disponíveis (embutidas + arquivos customizados na pasta).
+    Retorna lista de todas as trilhas disponíveis (embutidas + customizadas com metadados).
     """
     ensure_default_tracks()
     tracks = []
     
-    # 1. Adiciona as categorias mapeadas
+    # 1. Adiciona as categorias mapeadas nativas
     for key, info in MUSIC_CATEGORIES.items():
         fpath = os.path.join(ASSETS_AUDIO_DIR, info["filename"])
         tracks.append({
@@ -357,7 +427,10 @@ def list_available_tracks() -> list:
             "is_builtin": True
         })
         
-    # 2. Adiciona quaisquer arquivos MP3/WAV extras adicionados pelo usuário
+    # 2. Adiciona metadados de trilhas customizadas salvas
+    custom_meta = load_custom_tracks_metadata()
+
+    # 3. Adiciona quaisquer arquivos MP3/WAV extras adicionados pelo usuário na pasta
     if os.path.exists(ASSETS_AUDIO_DIR):
         for f in os.listdir(ASSETS_AUDIO_DIR):
             ext = os.path.splitext(f)[1].lower()
@@ -365,13 +438,23 @@ def list_available_tracks() -> list:
                 # Verifica se não é um dos built-in
                 if not any(f == info["filename"] for info in MUSIC_CATEGORIES.values()):
                     fpath = os.path.join(ASSETS_AUDIO_DIR, f)
-                    tracks.append({
-                        "id": f,
-                        "title": f"🎵 {f}",
-                        "description": "Trilha personalizada do usuário",
-                        "path": fpath,
-                        "is_builtin": False
-                    })
+                    if f in custom_meta:
+                        c_info = custom_meta[f]
+                        tracks.append({
+                            "id": f,
+                            "title": c_info.get("title", f"🎵 {f}"),
+                            "description": c_info.get("description", c_info.get("category", "Trilha personalizada")),
+                            "path": fpath,
+                            "is_builtin": False
+                        })
+                    else:
+                        tracks.append({
+                            "id": f,
+                            "title": f"🎵 {f}",
+                            "description": "Trilha personalizada do usuário",
+                            "path": fpath,
+                            "is_builtin": False
+                        })
                     
     return tracks
 

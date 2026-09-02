@@ -187,12 +187,14 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Parte 2 (Transição)**: Assim que o 1º vídeo termina, o 2º vídeo assume automaticamente **100% da tela cheia** com áudio ativo.
   - **Ambientação Sonora Independente**: Possibilidade de escolher uma trilha sonora específica para o 1º vídeo (ex: Cômico / Humor / Lo-Fi) e outra para o 2º vídeo (ex: Phonk Agressivo / Heavy Rock / Superação) com volumes individuais e **Audio Ducking inteligente** aplicado em ambas as partes.
   - Renderização acelerada via NVENC GPU/FFmpeg (`compose_dual_video_split_sequence`) com geração unificada de áudio (`audio.mp3`) e transcrição Whisper contínua para alimentação de toda a esteira de cortes, IA e legendas.
-- **🎵 Extração de Áudio Isolado & Download MP3 (`core/extractor.py`, `core/export_kit.py`, `app.py`)**:
-  - **Links da Web (YouTube, Instagram, TikTok, etc.)**: Botão direto `🎵 Extrair Apenas Áudio (MP3)` na Seção 1 para baixar a faixa sonora em 192kbps MP3 com player e download imediato, sem necessidade de baixar o vídeo completo.
+- **🎵 Extração de Áudio Isolado, Reconhecimento de Música & Biblioteca (`core/extractor.py`, `core/audio_mixer.py`, `core/export_kit.py`, `app.py`)**:
+  - **Identificação Inteligente do Nome da Música**: Limpeza automática de ruídos de título (`clean_music_title`) e sugestão da categoria musical (`detect_music_category_suggestion`) a partir dos metadados oficiais (`artist`, `track`, `album`) de links e vídeos locais.
+  - **Inclusão na Biblioteca de Trilhas (`assets/audio/`)**: Botão `🌟 Adicionar à Biblioteca de Trilhas de Fundo` que salva o som extraído na pasta de assets com metadados persistentes (`custom_tracks.json`), disponibilizando-o imediatamente em todas as seleções de música e composições duplas.
+  - **Links da Web (YouTube, Instagram, TikTok, etc.)**: Extração direta de áudio em 192kbps MP3 com player e download imediato.
   - **Arquivos Locais (1 ou 2 Vídeos)**: Extração ultra-rápida via FFmpeg do áudio individual ou unificado da composição dupla com ambientação musical personalizada.
   - **Vídeos Processados & Galeria de Cortes**: Player e botão `📥 Baixar Áudio Completo (MP3)` no cabeçalho do projeto ativo e `🎵 Baixar Áudio do Corte (MP3)` em cada corte/instância gerada no pacote de publicação viral.
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
-- **🧪 Suíte de 78 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 80 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest`.
 
 ---

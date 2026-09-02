@@ -120,14 +120,29 @@ def get_video_metadata(url: str):
                 thumbnail = info.get('thumbnail')
                 uploader = info.get('uploader') or info.get('channel') or info.get('uploader_id') or "Perfil / Canal"
                 webpage_url = info.get('webpage_url') or url
+                track_name = info.get('track')
+                artist_name = info.get('artist') or info.get('creator')
+                album_name = info.get('album')
+                genre_name = info.get('genre')
                 
                 # Detecção de Live Stream / Transmissão ao Vivo
                 live_status = info.get('live_status') or ('is_live' if info.get('is_live') else 'not_live')
                 is_live = bool(info.get('is_live') or (live_status == 'is_live'))
                 was_live = bool(info.get('was_live') or (live_status in ('was_live', 'post_live')))
 
+                # Identificação inteligente do nome da música
+                clean_track_title = clean_music_title(title, artist=artist_name, track=track_name)
+                suggested_cat_label, suggested_cat_key = detect_music_category_suggestion(clean_track_title or title)
+
                 return {
                     "title": title,
+                    "clean_music_title": clean_track_title,
+                    "artist": artist_name,
+                    "track": track_name,
+                    "album": album_name,
+                    "genre": genre_name,
+                    "suggested_category_label": suggested_cat_label,
+                    "suggested_category_key": suggested_cat_key,
                     "heatmap": heatmap,
                     "duration": duration,
                     "upload_date": upload_date,
@@ -145,6 +160,13 @@ def get_video_metadata(url: str):
 
     return {
         "title": None,
+        "clean_music_title": None,
+        "artist": None,
+        "track": None,
+        "album": None,
+        "genre": None,
+        "suggested_category_label": "🎵 Trilha Personalizada",
+        "suggested_category_key": "custom",
         "heatmap": None,
         "duration": None,
         "upload_date": None,
@@ -156,6 +178,66 @@ def get_video_metadata(url: str):
         "live_status": "not_live",
         "error": last_error or "Erro ao extrair metadados do vídeo"
     }
+
+
+def clean_music_title(raw_title: str, artist: str = None, track: str = None) -> str:
+    """
+    Limpa títulos de músicas removendo ruídos de clipes e tags comuns do YouTube/TikTok.
+    Ex: 'Kordhell - Murder In My Mind (Official Music Video) [4K]' -> 'Kordhell - Murder In My Mind'
+    """
+    if track and artist:
+        return f"{artist.strip()} - {track.strip()}"
+    if track:
+        return track.strip()
+    
+    t = raw_title or "Trilha Sonora"
+    patterns_to_remove = [
+        r'\[official\s+(?:music\s+)?video\]',
+        r'\(official\s+(?:music\s+)?video\)',
+        r'\[official\s+audio\]',
+        r'\(official\s+audio\)',
+        r'\[audio\s+oficial\]',
+        r'\(audio\s+oficial\)',
+        r'\[clipe\s+oficial\]',
+        r'\(clipe\s+oficial\)',
+        r'\[video\s+oficial\]',
+        r'\(video\s+oficial\)',
+        r'\[hd\]', r'\(hd\)',
+        r'\[4k\]', r'\(4k\)',
+        r'\[lyrics\]', r'\(lyrics\)',
+        r'\[letra\]', r'\(letra\)',
+        r'\[visualizer\]', r'\(visualizer\)',
+        r'\(slowed\s*\+\s*reverb\)',
+        r'\[slowed\s*\+\s*reverb\]',
+        r'\[prod\.\s*by\s*[^\]]+\]',
+        r'\(prod\.\s*by\s*[^\)]+\)',
+        r'\[free\]', r'\(free\)',
+        r'\|\s*tiktok\s*(?:sound|trend|viral)?',
+        r'#shorts', r'#viral', r'#tiktok'
+    ]
+    for pat in patterns_to_remove:
+        t = re.sub(pat, '', t, flags=re.IGNORECASE)
+    
+    t = re.sub(r'\s+', ' ', t).strip(' -_[]()|')
+    return t or raw_title
+
+
+def detect_music_category_suggestion(title_text: str) -> tuple:
+    """Sugere a categoria/vibe do som baseado em palavras-chave no título."""
+    txt = (title_text or "").lower()
+    if any(k in txt for k in ["phonk", "drift", "sigma", "gym", "workout", "brazilian phonk", "montagem"]):
+        return "⚡ Phonk / Superação & Força", "phonk_power_override"
+    if any(k in txt for k in ["rock", "metal", "guitar", "heavy", "punk", "overdrive", "riff"]):
+        return "🎸 Heavy Rock / Adrenalina", "heavy_rock_overdrive"
+    if any(k in txt for k in ["meme", "funny", "comedy", "engraçado", "comedia", "risada", "cartoon", "troll", "laugh"]):
+        return "🎭 Cômico / Meme & Humor", "comedy_meme_funny"
+    if any(k in txt for k in ["epic", "cinematic", "glory", "soundtrack", "trailer", "orchestra", "hans zimmer", "two steps", "épico"]):
+        return "🏆 Épico / Glória & Inspiração", "epic_hype_glory"
+    if any(k in txt for k in ["lofi", "lo-fi", "chill", "relax", "study", "calm", "suave"]):
+        return "🧘 Lo-Fi Chill / Relax", "lofi_chill"
+    if any(k in txt for k in ["suspense", "tension", "dark", "mystery", "terror", "drama", "tensão"]):
+        return "🔥 Tensão / Suspense", "tension_suspense"
+    return "🎵 Trilha Personalizada", "custom"
 
 
 def download_audio(url: str, output_path: str = "temp_audio.mp3", is_live: bool = False):

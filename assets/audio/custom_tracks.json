@@ -1,0 +1,20 @@
+{
+    "meu_phonk_pico_teste.mp3": {
+        "id": "meu_phonk_pico_teste.mp3",
+        "filename": "meu_phonk_pico_teste.mp3",
+        "title": "Meu Phonk Épico Teste",
+        "category": "⚡ Phonk / Superação & Força",
+        "description": "Trilha de teste",
+        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\meu_phonk_pico_teste.mp3",
+        "is_builtin": false
+    },
+    "meu_phonk_pico_teste_1.mp3": {
+        "id": "meu_phonk_pico_teste_1.mp3",
+        "filename": "meu_phonk_pico_teste_1.mp3",
+        "title": "Meu Phonk Épico Teste",
+        "category": "⚡ Phonk / Superação & Força",
+        "description": "Trilha de teste",
+        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\meu_phonk_pico_teste_1.mp3",
+        "is_builtin": false
+    }
+}

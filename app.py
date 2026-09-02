@@ -1218,9 +1218,11 @@ if input_mode.startswith("🌐 Link"):
                 os.makedirs(data_dir, exist_ok=True)
                 audio_path = os.path.join(data_dir, "audio.mp3")
 
-                with st.spinner("🎵 Extraindo áudio de alta qualidade (192kbps MP3) do link..."):
+                with st.spinner("🎵 Extraindo áudio de alta qualidade (192kbps MP3) e identificando música..."):
                     meta = get_video_metadata(video_url)
                     v_title = meta.get("title") or f"Áudio {video_id}"
+                    v_clean_music = meta.get("clean_music_title") or clean_music_title(v_title)
+                    v_sugg_cat = meta.get("suggested_category_label") or "🎵 Trilha Personalizada"
                     v_date = meta.get("upload_date")
                     v_thumb = meta.get("thumbnail")
                     v_dur = meta.get("duration")
@@ -1241,23 +1243,75 @@ if input_mode.startswith("🌐 Link"):
                         download_audio(video_url, audio_path, is_live=is_live_flag)
 
                 if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
-                    st.success(f"🎉 Áudio extraído com sucesso: **{v_title}**")
-                    col_ap1, col_ap2 = st.columns([2, 1])
-                    with col_ap1:
-                        with open(audio_path, "rb") as af_dl:
-                            st.audio(af_dl.read(), format="audio/mp3")
-                    with col_ap2:
-                        with open(audio_path, "rb") as af_dl:
-                            st.download_button(
-                                label="📥 Baixar Arquivo MP3",
-                                data=af_dl.read(),
-                                file_name=f"{re.sub(r'[^a-zA-Z0-9_]+', '_', v_title)[:30]}.mp3",
-                                mime="audio/mp3",
-                                use_container_width=True,
-                                key="btn_download_extracted_audio_yt"
-                            )
+                    st.session_state["extracted_music_card"] = {
+                        "path": audio_path,
+                        "clean_title": v_clean_music,
+                        "orig_title": v_title,
+                        "suggested_category": v_sugg_cat,
+                        "video_id": video_id
+                    }
                 else:
                     st.error("Não foi possível extrair o áudio do link fornecido.")
+
+    # Renderiza o Card de Identificação e Biblioteca se houver música extraída
+    if "extracted_music_card" in st.session_state and st.session_state["extracted_music_card"]:
+        m_info = st.session_state["extracted_music_card"]
+        m_path = m_info["path"]
+        if os.path.exists(m_path):
+            with st.container():
+                st.success(f"🎉 **Música / Som Identificado com Sucesso!**")
+                col_mc1, col_mc2 = st.columns([2, 1.2])
+                with col_mc1:
+                    custom_m_name = st.text_input(
+                        "🏷️ Nome da Música / Som (Identificado):",
+                        value=m_info.get("clean_title", "Trilha Sonora"),
+                        help="Nome com o qual a trilha aparecerá nos seletores de música de fundo e cortes.",
+                        key="input_clean_music_name"
+                    )
+                    all_cat_options = [
+                        "⚡ Phonk / Superação & Força",
+                        "🎸 Heavy Rock / Adrenalina",
+                        "🎭 Cômico / Meme & Humor",
+                        "🏆 Épico / Glória & Inspiração",
+                        "🧘 Lo-Fi Chill / Relax",
+                        "🔥 Tensão / Suspense",
+                        "🎵 Trilha Personalizada"
+                    ]
+                    default_cat_idx = all_cat_options.index(m_info.get("suggested_category")) if m_info.get("suggested_category") in all_cat_options else 6
+                    custom_m_cat = st.selectbox(
+                        "🎨 Estilo / Vibe do Som:",
+                        all_cat_options,
+                        index=default_cat_idx,
+                        key="sel_music_detected_cat"
+                    )
+
+                    with open(m_path, "rb") as af_dl:
+                        st.audio(af_dl.read(), format="audio/mp3")
+
+                with col_mc2:
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                    with open(m_path, "rb") as af_dl:
+                        st.download_button(
+                            label="📥 Baixar MP3 no Computador",
+                            data=af_dl.read(),
+                            file_name=f"{re.sub(r'[^a-zA-Z0-9_]+', '_', custom_m_name)[:35]}.mp3",
+                            mime="audio/mp3",
+                            use_container_width=True,
+                            key="btn_download_extracted_audio_yt"
+                        )
+                    
+                    if st.button("🌟 Adicionar à Biblioteca de Trilhas de Fundo", type="primary", use_container_width=True, key="btn_add_to_audio_library"):
+                        reg_res = register_custom_audio_track(
+                            source_path=m_path,
+                            title=custom_m_name,
+                            category_name=custom_m_cat,
+                            description=f"Som de fundo ({custom_m_cat}) extraído do vídeo"
+                        )
+                        if reg_res.get("error"):
+                            st.error(reg_res["error"])
+                        else:
+                            st.success(f"🚀 **{custom_m_name}** foi adicionada permanentemente à biblioteca `assets/audio` e já pode ser usada em qualquer corte!")
+                            st.rerun()
 
     if btn_process_yt:
         if not video_url:
@@ -1449,8 +1503,10 @@ else:
             v_full_path = os.path.join(data_dir, "video_full.mp4")
             audio_path = os.path.join(data_dir, "audio.mp3")
             v_title = custom_local_title.strip() if custom_local_title.strip() else os.path.splitext(orig_filename)[0]
+            v_clean_music = clean_music_title(v_title)
+            v_sugg_cat, _ = detect_music_category_suggestion(v_clean_music)
 
-            with st.spinner("🎵 Extraindo faixa de áudio de alta qualidade do arquivo local..."):
+            with st.spinner("🎵 Extraindo faixa de áudio de alta qualidade e identificando som..."):
                 file_bytes = uploaded_file.getbuffer()
                 with open(v_full_path, "wb") as f_out:
                     f_out.write(file_bytes)
@@ -1469,21 +1525,13 @@ else:
                 )
 
             if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
-                st.success(f"🎉 Áudio extraído com sucesso: **{v_title}**")
-                col_alp1, col_alp2 = st.columns([2, 1])
-                with col_alp1:
-                    with open(audio_path, "rb") as af_dl:
-                        st.audio(af_dl.read(), format="audio/mp3")
-                with col_alp2:
-                    with open(audio_path, "rb") as af_dl:
-                        st.download_button(
-                            label="📥 Baixar Arquivo MP3",
-                            data=af_dl.read(),
-                            file_name=f"{re.sub(r'[^a-zA-Z0-9_]+', '_', v_title)[:30]}.mp3",
-                            mime="audio/mp3",
-                            use_container_width=True,
-                            key="btn_download_extracted_audio_local"
-                        )
+                st.session_state["extracted_music_card"] = {
+                    "path": audio_path,
+                    "clean_title": v_clean_music,
+                    "orig_title": v_title,
+                    "suggested_category": v_sugg_cat,
+                    "video_id": video_id
+                }
             else:
                 st.error("Não foi possível extrair o áudio do arquivo selecionado.")
 
