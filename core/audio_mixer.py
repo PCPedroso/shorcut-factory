@@ -504,11 +504,11 @@ def apply_audio_ducking(
         
     try:
         # Monta filtro de áudio:
-        # 1. Loop infinito da música de fundo + ajuste de volume base
+        # 1. Ajuste de volume base da música de fundo (com -stream_loop nativo no input)
         # 2. Sidechaincompress na música usando a faixa de voz [0:a] como trigger
         # 3. Mixagem do áudio da voz limpo com a música ducked
         filter_complex = (
-            f"[1:a]aloop=loop=-1:size=2e+09,volume={music_volume}[bg];"
+            f"[1:a]volume={music_volume}[bg];"
             f"[bg][0:a]sidechaincompress=threshold={threshold}:ratio={ratio}:attack={attack}:release={release}[ducked_bg];"
             f"[0:a][ducked_bg]amix=inputs=2:duration=first:dropout_transition=2[aout]"
         )
@@ -516,13 +516,14 @@ def apply_audio_ducking(
         cmd = [
             FFMPEG_EXE, "-y",
             "-i", input_video_path,
-            "-i", music_track_path,
+            "-stream_loop", "-1", "-i", music_track_path,
             "-filter_complex", filter_complex,
             "-map", "0:v",
             "-map", "[aout]",
             "-c:v", "copy",
             "-c:a", "aac",
             "-b:a", "192k",
+            "-shortest",
             "-movflags", "+faststart",
             tmp_output
         ]

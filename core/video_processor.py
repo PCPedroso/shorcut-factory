@@ -1004,13 +1004,13 @@ def compose_dual_video_split_sequence(
         v1_music_idx = None
         if v1_music_path:
             v1_music_idx = curr_input_idx
-            base_cmd.extend(["-i", v1_music_path])
+            base_cmd.extend(["-stream_loop", "-1", "-i", v1_music_path])
             curr_input_idx += 1
 
         v2_music_idx = None
         if v2_music_path:
             v2_music_idx = curr_input_idx
-            base_cmd.extend(["-i", v2_music_path])
+            base_cmd.extend(["-stream_loop", "-1", "-i", v2_music_path])
             curr_input_idx += 1
 
         has_a1 = check_has_audio_stream(video1_path)
@@ -1052,7 +1052,7 @@ def compose_dual_video_split_sequence(
 
         if v1_music_idx is not None:
             filter_parts.append(
-                f"[{v1_music_idx}:a]aloop=loop=-1:size=2e+09,atrim=0:{dur1:.3f},asetpts=PTS-STARTPTS,volume={video1_audio_volume:.2f},aformat=sample_rates=48000:channel_layouts=stereo[m1_raw]"
+                f"[{v1_music_idx}:a]atrim=0:{dur1:.3f},asetpts=PTS-STARTPTS,volume={video1_audio_volume:.2f},aformat=sample_rates=48000:channel_layouts=stereo[m1_raw]"
             )
             if audio_ducking_enabled and has_a1:
                 filter_parts.append(
@@ -1087,7 +1087,7 @@ def compose_dual_video_split_sequence(
 
         if v2_music_idx is not None:
             filter_parts.append(
-                f"[{v2_music_idx}:a]aloop=loop=-1:size=2e+09,atrim=0:{dur2:.3f},asetpts=PTS-STARTPTS,volume={video2_audio_volume:.2f},aformat=sample_rates=48000:channel_layouts=stereo[m2_raw]"
+                f"[{v2_music_idx}:a]atrim=0:{dur2:.3f},asetpts=PTS-STARTPTS,volume={video2_audio_volume:.2f},aformat=sample_rates=48000:channel_layouts=stereo[m2_raw]"
             )
             if audio_ducking_enabled and has_a2:
                 filter_parts.append(
