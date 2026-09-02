@@ -177,8 +177,13 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 - **🔥 Ganchos Virais & Duração Máxima Configurável para Shorts (`core/analyzer.py`, `app.py`)**:
   - Opção interativa para definir o teto de duração máxima dos Shorts/Reels/TikTok (ex: 30s, 45s, 60s, 90s até 180s) com persistência automática em `app_settings.json`.
   - Reestruturação instantânea de micro-cortes sob as 6 Regras de Ouro sem necessidade de reprocessar o Ollama.
+- **🎬 Composição Sequencial Dupla no Carregamento de Arquivo (Split P&B ➔ Full Screen) (`core/video_processor.py`, `app.py`)**:
+  - Suporte ao upload de até **2 arquivos de vídeo locais** com escolha interativa da **ordem de reprodução**.
+  - **Parte 1 (Início)**: Tela dividida (Split Screen) com o 1º vídeo reproduzindo normalmente no topo e o 2º vídeo congelado na base em modo **Monocromático (Preto e Branco)**.
+  - **Parte 2 (Transição)**: Assim que o 1º vídeo termina, o 2º vídeo assume automaticamente **100% da tela cheia** com áudio ativo.
+  - Renderização acelerada via NVENC GPU/FFmpeg (`compose_dual_video_split_sequence`) com geração unificada de áudio (`audio.mp3`) e transcrição Whisper contínua para alimentação de toda a esteira de cortes, IA e legendas.
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
-- **🧪 Suíte de 75 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 77 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest`.
 
 ---

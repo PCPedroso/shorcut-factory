@@ -48,7 +48,8 @@ from core.transcriber import transcribe_audio, fetch_youtube_transcript
 from core.analyzer import analyze_transcript, build_suggested_bundles, build_golden_rule_micro_cuts, normalize_time_mask
 from core.video_processor import (
     download_full_video, cut_video, get_video_resolution,
-    extract_audio_from_local_video, extract_thumbnail_from_video, generate_local_video_id
+    extract_audio_from_local_video, extract_thumbnail_from_video, generate_local_video_id,
+    generate_local_dual_video_id, generate_dual_split_preview, compose_dual_video_split_sequence
 )
 from core.library_manager import get_library, add_or_update_video_in_library, remove_video_from_library
 from core.config_manager import load_settings, save_all_settings, save_setting
@@ -1346,29 +1347,36 @@ if input_mode.startswith("🌐 Link"):
                                 st.success("🎥 Vídeo completo baixado e pronto para recorte na Seção 3!")
 
 else:
-    # 💻 Modo Arquivo de Vídeo Local do Computador
-    uploaded_file = st.file_uploader(
-        "Selecione ou arraste um arquivo de vídeo do seu computador:",
+    # 💻 Modo Arquivo de Vídeo Local do Computador (Suporte a 1 ou 2 vídeos)
+    uploaded_files = st.file_uploader(
+        "Selecione ou arraste até 2 arquivos de vídeo do seu computador:",
         type=["mp4", "mov", "mkv", "avi", "webm"],
+        accept_multiple_files=True,
         key="local_video_uploader",
-        help="Formatos suportados: MP4, MOV, MKV, AVI, WebM"
+        help="Formatos suportados: MP4, MOV, MKV, AVI, WebM. Selecione 1 arquivo para corte individual ou 2 arquivos para composição sequencial inteligente."
     )
 
-    col_loc1, col_loc2 = st.columns([2, 1])
-    with col_loc1:
-        custom_local_title = st.text_input(
-            "Título do Vídeo (Opcional):",
-            value=os.path.splitext(uploaded_file.name)[0] if uploaded_file else "",
-            placeholder="Ex: Entrevista Podcast com Convidado",
-            key="custom_local_title"
-        )
-    with col_loc2:
-        st.caption("📁 Arquivo carregado direto do disco, processado 100% offline com Whisper e GPU.")
+    if not uploaded_files:
+        st.info("💡 **Dica**: Você pode carregar **1 arquivo** para processamento padrão ou até **2 arquivos** para criar uma **Composição Dupla (Split Screen com frame P&B ➔ Transição para Tela Cheia)**.")
 
-    if st.button("🚀 Processar Arquivo de Vídeo Local", type="primary", key="btn_process_local"):
-        if not uploaded_file:
-            st.warning("Por favor, selecione um arquivo de vídeo do seu computador.")
-        else:
+    elif len(uploaded_files) > 2:
+        st.warning("⚠️ **Limite excedido**: Você selecionou mais de 2 arquivos. Por favor, remova os excedentes e selecione no máximo 2 vídeos.")
+
+    elif len(uploaded_files) == 1:
+        # Modo Individual (1 Vídeo)
+        uploaded_file = uploaded_files[0]
+        col_loc1, col_loc2 = st.columns([2, 1])
+        with col_loc1:
+            custom_local_title = st.text_input(
+                "Título do Vídeo (Opcional):",
+                value=os.path.splitext(uploaded_file.name)[0] if uploaded_file else "",
+                placeholder="Ex: Entrevista Podcast com Convidado",
+                key="custom_local_title"
+            )
+        with col_loc2:
+            st.caption("📁 Arquivo individual carregado do disco, processado 100% offline com Whisper e GPU.")
+
+        if st.button("🚀 Processar Arquivo de Vídeo Local", type="primary", key="btn_process_local"):
             orig_filename = uploaded_file.name
             video_id = generate_local_video_id(orig_filename)
             local_url = f"local://{video_id}"
@@ -1437,6 +1445,167 @@ else:
                                 "segments": st.session_state.segments,
                                 "source": st.session_state.transcript_source
                             }, f, ensure_ascii=False, indent=4)
+
+    else:
+        # Modo Composição Dupla (2 Vídeos Selecionados)
+        file_a = uploaded_files[0]
+        file_b = uploaded_files[1]
+
+        st.info(
+            "✨ **Composição Sequencial Dupla Ativada (2 Vídeos Selecionados)**\n\n"
+            "• **1ª Etapa (Início)**: A tela fica dividida (Split). O **1º vídeo** é reproduzido na parte superior com áudio ativo, enquanto o **2º vídeo** fica congelado na parte inferior em modo **Monocromático (Preto e Branco)**.\n"
+            "• **2ª Etapa (Transição)**: Assim que o 1º vídeo termina, o **2º vídeo assume 100% da tela cheia** com áudio ativo até a conclusão."
+        )
+
+        st.markdown("### 🎬 1. Configuração da Ordem de Reprodução")
+        order_choice = st.radio(
+            "Escolha qual vídeo será reproduzido primeiro:",
+            [
+                f"1️⃣ Início: **{file_a.name}** (Topo) ➔ Sequência: **{file_b.name}** (Base P&B ➔ Tela Cheia)",
+                f"2️⃣ Início: **{file_b.name}** (Topo) ➔ Sequência: **{file_a.name}** (Base P&B ➔ Tela Cheia)"
+            ],
+            index=0,
+            key="dual_video_order_selection"
+        )
+
+        first_file = file_a if order_choice.startswith("1️⃣") else file_b
+        second_file = file_b if order_choice.startswith("1️⃣") else file_a
+
+        st.markdown("### ⚙️ 2. Ajustes Visuais da Composição")
+        col_d1, col_d2 = st.columns([2, 2])
+        with col_d1:
+            default_dual_title = f"{os.path.splitext(first_file.name)[0]} + {os.path.splitext(second_file.name)[0]}"
+            custom_dual_title = st.text_input(
+                "Título do Projeto Composto (Opcional):",
+                value=default_dual_title,
+                key="custom_dual_title"
+            )
+            dual_freeze_bw = st.checkbox(
+                "🖼️ Efeito Monocromático (Preto e Branco) no frame congelado da base",
+                value=True,
+                help="Mantém o segundo vídeo em preto e branco enquanto o primeiro vídeo está tocando no topo.",
+                key="dual_freeze_bw_toggle"
+            )
+
+        with col_d2:
+            dual_freeze_ts = st.number_input(
+                "⏱️ Segundo do frame congelado do 2º vídeo:",
+                min_value=0.0,
+                max_value=3600.0,
+                value=0.0,
+                step=0.5,
+                help="Timestamp do segundo vídeo que será capturado para servir de imagem congelada na base.",
+                key="dual_freeze_ts_input"
+            )
+            col_d2_sub1, col_d2_sub2 = st.columns(2)
+            with col_d2_sub1:
+                dual_aspect_choice = st.selectbox(
+                    "📐 Formato Final:",
+                    ["9:16 (Vertical Reels/TikTok/Shorts)", "16:9 (Horizontal)"],
+                    index=0,
+                    key="dual_aspect_choice"
+                )
+            with col_d2_sub2:
+                dual_divider_color = st.selectbox(
+                    "Linha Divisória:",
+                    ["black", "white", "gray", "none"],
+                    format_func=lambda x: {"black": "Preta", "white": "Branca", "gray": "Cinza", "none": "Sem Linha"}[x],
+                    index=0,
+                    key="dual_divider_color_choice"
+                )
+
+        if st.button("🚀 Processar Composição Dupla (Split ➔ Full Screen)", type="primary", key="btn_process_dual_local"):
+            video_id = generate_local_dual_video_id(first_file.name, second_file.name)
+            local_url = f"local://{video_id}"
+            st.session_state.video_url = local_url
+            st.session_state.input_yt_url = local_url
+
+            data_dir = os.path.join("data", video_id)
+            os.makedirs(data_dir, exist_ok=True)
+            raw_v1_path = os.path.join(data_dir, "raw_video_1.mp4")
+            raw_v2_path = os.path.join(data_dir, "raw_video_2.mp4")
+            v_full_path = os.path.join(data_dir, "video_full.mp4")
+            audio_path = os.path.join(data_dir, "audio.mp3")
+            thumb_path = os.path.join(data_dir, "thumbnail.jpg")
+            transcript_file = os.path.join(data_dir, "transcript.json")
+
+            # 1. Salva os dois arquivos de vídeo brutos
+            with st.spinner("Salvando os dois arquivos de vídeo locais..."):
+                with open(raw_v1_path, "wb") as f1_out:
+                    f1_out.write(first_file.getbuffer())
+                with open(raw_v2_path, "wb") as f2_out:
+                    f2_out.write(second_file.getbuffer())
+
+            # 2. Renderiza a Composição Sequencial Completa
+            with st.spinner("🎬 Renderizando composição inteligente (Split com Base P&B ➔ Tela Cheia)..."):
+                comp_res = compose_dual_video_split_sequence(
+                    video1_path=raw_v1_path,
+                    video2_path=raw_v2_path,
+                    output_path=v_full_path,
+                    freeze_timestamp_sec=float(dual_freeze_ts),
+                    freeze_monochrome=dual_freeze_bw,
+                    aspect_ratio="9:16" if "9:16" in dual_aspect_choice else "16:9",
+                    divider_color=dual_divider_color,
+                    divider_width=4 if dual_divider_color != "none" else 0
+                )
+
+            if comp_res.get("error"):
+                st.error(f"Erro na composição dos vídeos: {comp_res['error']}")
+            else:
+                st.success(
+                    f"✨ Composição gerada com sucesso! Duração total: **{comp_res.get('total_duration', 0.0):.1f}s** "
+                    f"(1º Vídeo: `{comp_res.get('video1_duration', 0.0):.1f}s` | 2º Vídeo: `{comp_res.get('video2_duration', 0.0):.1f}s`)"
+                )
+
+                # 3. Metadados e Thumbnail
+                v_title = custom_dual_title.strip() if custom_dual_title.strip() else default_dual_title
+                tot_dur = comp_res.get("total_duration") or get_video_duration(v_full_path)
+                extract_thumbnail_from_video(v_full_path, thumb_path, timestamp_sec=min(2.0, max(0.0, tot_dur * 0.1)))
+
+                add_or_update_video_in_library(
+                    video_id=video_id,
+                    title=v_title,
+                    upload_date_raw=datetime.now().strftime("%d/%m/%Y"),
+                    url=local_url,
+                    thumbnail_url=thumb_path if os.path.exists(thumb_path) else None,
+                    duration_sec=int(tot_dur),
+                    channel="Composição Dupla (Split ➔ Full)",
+                    is_live=False
+                )
+
+                # 4. Extração de Áudio e Transcrição Unificada
+                if os.path.exists(transcript_file):
+                    st.success("✅ Cache de transcrição encontrado para esta composição! Carregando...")
+                    load_video_saved_artifacts(video_id)
+                else:
+                    with st.spinner("Extraindo faixa de áudio unificada da composição..."):
+                        audio_res = extract_audio_from_local_video(v_full_path, audio_path)
+
+                    if audio_res.get("error"):
+                        st.error(f"Erro ao extrair áudio: {audio_res['error']}")
+                    else:
+                        with st.spinner(f"Transcrevendo áudio unificado com Whisper ({model_size}) na {device_option.upper()}..."):
+                            transcribe_res = transcribe_audio(
+                                audio_path,
+                                model_size=model_size,
+                                device=device_option
+                            )
+
+                        if transcribe_res.get("error"):
+                            st.error(f"Erro na transcrição: {transcribe_res['error']}")
+                        else:
+                            st.success("🎉 Transcrição da composição concluída com sucesso! Pronta para cortes e IA.")
+                            st.session_state.transcription_done = True
+                            st.session_state.full_text = transcribe_res["full_text"]
+                            st.session_state.segments = transcribe_res["transcript_segments"]
+                            st.session_state.transcript_source = "Whisper Local (Composição Dupla)"
+
+                            with open(transcript_file, "w", encoding="utf-8") as f:
+                                json.dump({
+                                    "full_text": st.session_state.full_text,
+                                    "segments": st.session_state.segments,
+                                    "source": st.session_state.transcript_source
+                                }, f, ensure_ascii=False, indent=4)
 
 
 if st.session_state.transcription_done:

@@ -10,6 +10,8 @@ from moviepy.video.io.VideoFileClip import VideoFileClip
 
 import re
 import hashlib
+import cv2
+import numpy as np
 
 # Garante que o Deno e o FFmpeg estejam no PATH do processo
 DENO_DIR = os.path.expanduser(r"~/.deno/bin")
@@ -47,6 +49,20 @@ def generate_local_video_id(filename_or_path: str) -> str:
     # Gera hash curto de 8 caracteres baseado no nome
     hash_str = hashlib.md5(filename_or_path.encode('utf-8')).hexdigest()[:8]
     return f"local_{slug}_{hash_str}"
+
+
+def generate_local_dual_video_id(filename1: str, filename2: str) -> str:
+    """
+    Gera um identificador único para composição de dois vídeos locais.
+    Exemplo: 'Entrevista.mp4' e 'Reacao.mp4' -> 'local_dual_entrevista_e_reacao_a1b2c3d4'
+    """
+    base1 = os.path.splitext(os.path.basename(filename1))[0]
+    base2 = os.path.splitext(os.path.basename(filename2))[0]
+    slug1 = re.sub(r'[^a-zA-Z0-9_]+', '_', base1).strip('_').lower()[:18] or "vid1"
+    slug2 = re.sub(r'[^a-zA-Z0-9_]+', '_', base2).strip('_').lower()[:18] or "vid2"
+    combo_str = f"{filename1}__AND__{filename2}"
+    hash_str = hashlib.md5(combo_str.encode('utf-8')).hexdigest()[:8]
+    return f"local_dual_{slug1}_e_{slug2}_{hash_str}"
 
 
 def extract_audio_from_local_video(video_path: str, output_path: str = "temp_audio.mp3") -> dict:
@@ -782,4 +798,293 @@ def ensure_faststart(video_path: str) -> str:
     except Exception:
         pass
     return video_path
+
+
+def check_has_audio_stream(video_path: str) -> bool:
+    """Verifica se o arquivo de vídeo possui uma faixa de áudio utilizável."""
+    if not video_path or not os.path.exists(video_path):
+        return False
+    try:
+        cmd = [FFMPEG_EXE, "-i", video_path]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        err_txt = res.stderr.decode('utf-8', errors='replace')
+        return "Audio:" in err_txt
+    except Exception:
+        return False
+
+
+def fit_frame_to_aspect_slot(img: np.ndarray, target_w: int, target_h: int) -> np.ndarray:
+    """Redimensiona e recorta centralizadamente o frame para preencher o slot (target_w x target_h)."""
+    if img is None:
+        return np.zeros((target_h, target_w, 3), dtype=np.uint8)
+    ih, iw = img.shape[:2]
+    if ih == 0 or iw == 0:
+        return np.zeros((target_h, target_w, 3), dtype=np.uint8)
+    
+    scale = max(float(target_w) / float(iw), float(target_h) / float(ih))
+    new_w = int(round(iw * scale))
+    new_h = int(round(ih * scale))
+    
+    interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+    resized = cv2.resize(img, (new_w, new_h), interpolation=interp)
+    
+    x1 = max(0, (new_w - target_w) // 2)
+    y1 = max(0, (new_h - target_h) // 2)
+    cropped = resized[y1 : y1 + target_h, x1 : x1 + target_w]
+    if cropped.shape[0] != target_h or cropped.shape[1] != target_w:
+        cropped = cv2.resize(cropped, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+    return cropped
+
+
+def generate_dual_split_preview(
+    video1_path: str,
+    video2_path: str,
+    output_preview_path: str = "temp_dual_split_preview.jpg",
+    video1_ts: float = 0.0,
+    video2_ts: float = 0.0,
+    freeze_monochrome: bool = True,
+    aspect_ratio: str = "9:16",
+    divider_color: str = "black",
+    divider_width: int = 4
+) -> dict:
+    """
+    Gera imagem JPG de prévia da composição inicial dividida:
+    - Topo: Frame do Vídeo 1 no timestamp video1_ts
+    - Base: Frame do Vídeo 2 no timestamp video2_ts (monocromático se freeze_monochrome=True)
+    - Linha divisória configurável
+    """
+    try:
+        target_w, target_h = (1080, 1920) if aspect_ratio == "9:16" else (1920, 1080)
+        slot_h = target_h // 2
+        
+        # Frame do Vídeo 1 (Topo)
+        cap1 = cv2.VideoCapture(video1_path)
+        cap1.set(cv2.CAP_PROP_POS_MSEC, max(0.0, float(video1_ts)) * 1000.0)
+        ret1, frame1 = cap1.read()
+        cap1.release()
+        if not ret1 or frame1 is None:
+            top_res = np.zeros((slot_h, target_w, 3), dtype=np.uint8)
+        else:
+            top_res = fit_frame_to_aspect_slot(frame1, target_w, slot_h)
+
+        # Frame do Vídeo 2 (Base)
+        cap2 = cv2.VideoCapture(video2_path)
+        cap2.set(cv2.CAP_PROP_POS_MSEC, max(0.0, float(video2_ts)) * 1000.0)
+        ret2, frame2 = cap2.read()
+        cap2.release()
+        if not ret2 or frame2 is None:
+            bot_res = np.zeros((slot_h, target_w, 3), dtype=np.uint8)
+        else:
+            bot_res = fit_frame_to_aspect_slot(frame2, target_w, slot_h)
+            if freeze_monochrome:
+                gray = cv2.cvtColor(bot_res, cv2.COLOR_BGR2GRAY)
+                bot_res = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+        # Junta topo e base
+        canvas = cv2.vconcat([top_res, bot_res])
+
+        # Divisor
+        if divider_width > 0 and divider_color != "none":
+            div_c = (0, 0, 0) if divider_color == "black" else ((255, 255, 255) if divider_color == "white" else (128, 128, 128))
+            y_mid = slot_h
+            y1 = max(0, y_mid - divider_width // 2)
+            y2 = min(target_h, y_mid + divider_width // 2)
+            canvas[y1:y2, :] = div_c
+
+        out_dir = os.path.dirname(output_preview_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        cv2.imwrite(output_preview_path, canvas)
+        return {"path": output_preview_path, "error": None}
+    except Exception as exc:
+        return {"path": None, "error": str(exc)}
+
+
+def compose_dual_video_split_sequence(
+    video1_path: str,
+    video2_path: str,
+    output_path: str = "video_composed_full.mp4",
+    freeze_timestamp_sec: float = 0.0,
+    freeze_monochrome: bool = True,
+    aspect_ratio: str = "9:16",
+    divider_width: int = 4,
+    divider_color: str = "black"
+) -> dict:
+    """
+    Renderiza composição sequencial inteligente de 2 vídeos:
+    1. Parte 1 (duração = Vídeo 1):
+       - Topo: Vídeo 1 reproduzindo normalmente com seu áudio.
+       - Base: Frame estático do Vídeo 2 (em freeze_timestamp_sec), opcionalmente monocromático (preto e branco).
+    2. Parte 2 (duração = Vídeo 2):
+       - O Vídeo 2 assume tela cheia (1080x1920 ou 1920x1080) e toca até o final com seu áudio.
+    """
+    temp_frozen_png = None
+    try:
+        from core.quick_editor import get_video_duration
+
+        if not os.path.exists(video1_path):
+            return {"path": None, "error": f"Arquivo do Vídeo 1 não encontrado: {video1_path}"}
+        if not os.path.exists(video2_path):
+            return {"path": None, "error": f"Arquivo do Vídeo 2 não encontrado: {video2_path}"}
+
+        dur1 = get_video_duration(video1_path)
+        dur2 = get_video_duration(video2_path)
+
+        if dur1 <= 0.0:
+            return {"path": None, "error": "Não foi possível obter a duração do Vídeo 1."}
+        if dur2 <= 0.0:
+            return {"path": None, "error": "Não foi possível obter a duração do Vídeo 2."}
+
+        target_w, target_h = (1080, 1920) if aspect_ratio == "9:16" else (1920, 1080)
+        slot_h = target_h // 2
+
+        out_dir = os.path.dirname(os.path.abspath(output_path))
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+            except Exception:
+                pass
+
+        # 1. Extrai frame estático do Vídeo 2
+        temp_frozen_png = os.path.join(out_dir, "temp_freeze_bottom.png") if out_dir else "temp_freeze_bottom.png"
+        cap2 = cv2.VideoCapture(video2_path)
+        cap2.set(cv2.CAP_PROP_POS_MSEC, max(0.0, min(float(freeze_timestamp_sec), max(0.0, dur2 - 0.1))) * 1000.0)
+        ret2, frame2 = cap2.read()
+        cap2.release()
+
+        if not ret2 or frame2 is None:
+            # Fallback para primeiro frame
+            cap2 = cv2.VideoCapture(video2_path)
+            ret2, frame2 = cap2.read()
+            cap2.release()
+
+        if not ret2 or frame2 is None:
+            bot_frame = np.zeros((slot_h, target_w, 3), dtype=np.uint8)
+        else:
+            bot_frame = fit_frame_to_aspect_slot(frame2, target_w, slot_h)
+            if freeze_monochrome:
+                gray = cv2.cvtColor(bot_frame, cv2.COLOR_BGR2GRAY)
+                bot_frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+        cv2.imwrite(temp_frozen_png, bot_frame)
+
+        # 2. Verifica faixas de áudio
+        has_a1 = check_has_audio_stream(video1_path)
+        has_a2 = check_has_audio_stream(video2_path)
+
+        # 3. Monta grafo de filtros FFmpeg
+        filter_parts = []
+
+        # Parte 1: Topo Vídeo 1 + Base Imagem Congelada
+        filter_parts.append(
+            f"[0:v]scale={target_w}:{slot_h}:force_original_aspect_ratio=increase,crop={target_w}:{slot_h},setsar=1,fps=30[v1_top]"
+        )
+        filter_parts.append(
+            f"[1:v]scale={target_w}:{slot_h}:force_original_aspect_ratio=increase,crop={target_w}:{slot_h},setsar=1,fps=30[v2_bot]"
+        )
+        filter_parts.append(
+            "[v1_top][v2_bot]vstack=inputs=2[seg1_raw]"
+        )
+
+        if divider_width > 0 and divider_color != "none":
+            div_col = "black" if divider_color == "black" else ("white" if divider_color == "white" else "gray")
+            filter_parts.append(
+                f"[seg1_raw]drawbox=x=0:y={slot_h - divider_width // 2}:w={target_w}:h={divider_width}:color={div_col}@1:t=fill[seg1_v]"
+            )
+        else:
+            filter_parts.append(
+                "[seg1_raw]null[seg1_v]"
+            )
+
+        if has_a1:
+            filter_parts.append(
+                "[0:a]aformat=sample_rates=48000:channel_layouts=stereo[seg1_a]"
+            )
+        else:
+            filter_parts.append(
+                f"anullsrc=r=48000:cl=stereo,atrim=duration={dur1:.3f}[seg1_a]"
+            )
+
+        # Parte 2: Vídeo 2 em Tela Cheia
+        filter_parts.append(
+            f"[2:v]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h},setsar=1,fps=30[seg2_v]"
+        )
+
+        if has_a2:
+            filter_parts.append(
+                "[2:a]aformat=sample_rates=48000:channel_layouts=stereo[seg2_a]"
+            )
+        else:
+            filter_parts.append(
+                f"anullsrc=r=48000:cl=stereo,atrim=duration={dur2:.3f}[seg2_a]"
+            )
+
+        # Concatenação sequencial
+        filter_parts.append(
+            "[seg1_v][seg1_a][seg2_v][seg2_a]concat=n=2:v=1:a=1[out_v][out_a]"
+        )
+
+        filter_complex = ";".join(filter_parts)
+
+        # 4. Execução FFmpeg com aceleração NVENC e fallback CPU
+        base_cmd = [
+            FFMPEG_EXE, "-y",
+            "-i", video1_path,
+            "-loop", "1", "-t", f"{dur1:.3f}", "-i", temp_frozen_png,
+            "-i", video2_path,
+            "-filter_complex", filter_complex,
+            "-map", "[out_v]",
+            "-map", "[out_a]"
+        ]
+
+        nvenc_cmd = base_cmd + [
+            "-c:v", "h264_nvenc",
+            "-preset", "p4",
+            "-b:v", "8M",
+            "-maxrate", "10M",
+            "-bufsize", "16M",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            output_path
+        ]
+
+        res = subprocess.run(nvenc_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        if res.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            cpu_cmd = base_cmd + [
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "20",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                output_path
+            ]
+            res_cpu = subprocess.run(cpu_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            if res_cpu.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+                err_txt = res_cpu.stderr.decode('utf-8', errors='replace')[-300:] if res_cpu.stderr else "Erro desconhecido"
+                return {"path": None, "error": f"Falha ao renderizar composição dupla: {err_txt}"}
+
+        ensure_faststart(output_path)
+        return {
+            "path": output_path,
+            "error": None,
+            "total_duration": dur1 + dur2,
+            "video1_duration": dur1,
+            "video2_duration": dur2
+        }
+
+    except Exception as exc:
+        return {"path": None, "error": str(exc)}
+    finally:
+        if temp_frozen_png and os.path.exists(temp_frozen_png):
+            try:
+                os.remove(temp_frozen_png)
+            except Exception:
+                pass
 
