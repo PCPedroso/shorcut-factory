@@ -12,9 +12,13 @@ class TestAudioMixer(unittest.TestCase):
 
     def test_builtin_tracks_exist_in_assets(self):
         tracks = list_available_tracks()
-        self.assertGreaterEqual(len(tracks), 4)
+        self.assertGreaterEqual(len(tracks), 8)
 
         track_ids = [t["id"] for t in tracks]
+        self.assertIn("phonk_power_override", track_ids)
+        self.assertIn("heavy_rock_overdrive", track_ids)
+        self.assertIn("comedy_meme_funny", track_ids)
+        self.assertIn("epic_hype_glory", track_ids)
         self.assertIn("lofi_chill", track_ids)
         self.assertIn("dynamic_pulse", track_ids)
         self.assertIn("tension_suspense", track_ids)

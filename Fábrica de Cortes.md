@@ -177,6 +177,10 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 - **🔥 Ganchos Virais & Duração Máxima Configurável para Shorts (`core/analyzer.py`, `app.py`)**:
   - Opção interativa para definir o teto de duração máxima dos Shorts/Reels/TikTok (ex: 30s, 45s, 60s, 90s até 180s) com persistência automática em `app_settings.json`.
   - Reestruturação instantânea de micro-cortes sob as 6 Regras de Ouro sem necessidade de reprocessar o Ollama.
+- **🎵 Biblioteca Expandida de Trilhas Sonoras & Audio Ducking (`core/audio_mixer.py`, `app.py`)**:
+  - **8 Categorias Pré-configuradas**: `Phonk Agressivo / Sigma` (808 + Cowbell Memphis para superação e força), `Heavy Rock / Overdrive` (Guitarras distorcidas e bateria pesada para adrenalina), `Cômico / Meme & Humor` (Ragtime e efeitos cartoon para gafes e piadas), `Épico / Glória` (Orquestra imponente para discursos e vitórias), além de `Lo-Fi Chill`, `Dinâmica / Ritmo Moderno`, `Tensão / Suspense` e `Inspiracional Suave`.
+  - **Player de Pré-Escuta Integrado**: Permite ouvir qualquer trilha antes de renderizar o corte.
+  - **Importação Direta & Abertura de Pasta**: Uploader na interface para adicionar arquivos `.mp3`/`.wav` personalizados e botão para abrir diretamente a pasta `assets/audio` no Windows Explorer.
 - **🎬 Composição Sequencial Dupla no Carregamento de Arquivo (Split P&B ➔ Full Screen) (`core/video_processor.py`, `app.py`)**:
   - Suporte ao upload de até **2 arquivos de vídeo locais** com escolha interativa da **ordem de reprodução**.
   - **Parte 1 (Início)**: Tela dividida (Split Screen) com o 1º vídeo reproduzindo normalmente no topo e o 2º vídeo congelado na base em modo **Monocromático (Preto e Branco)**.

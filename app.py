@@ -3328,7 +3328,8 @@ if st.session_state.transcription_done:
                 # Player de áudio para prévia da música
                 if os.path.exists(bg_music_track_path):
                     with open(bg_music_track_path, "rb") as af_prev:
-                        st.audio(af_prev.read(), format="audio/wav")
+                        _fmt = "audio/mp3" if bg_music_track_path.endswith(".mp3") else "audio/wav"
+                        st.audio(af_prev.read(), format=_fmt)
 
             with col_m2:
                 bg_music_volume = st.number_input("Volume da Música:", min_value=0.01, max_value=1.00, value=bg_music_volume, step=0.02, format="%.2f", help="Volume base da música quando não houver fala.")
@@ -3337,6 +3338,31 @@ if st.session_state.transcription_done:
                 cur_duck_idx = duck_keys.index(ducking_preset) if ducking_preset in duck_keys else 1
                 sel_duck_label = st.selectbox("Atenuação na Fala (Ducking):", duck_labels, index=cur_duck_idx)
                 ducking_preset = duck_keys[duck_labels.index(sel_duck_label)]
+
+            # Uploader de músicas e botão de abrir pasta
+            col_u1, col_u2 = st.columns([2, 1])
+            with col_u1:
+                upload_custom_music = st.file_uploader(
+                    "➕ Importar Trilha / Som Personalizado (.mp3 ou .wav):",
+                    type=["mp3", "wav", "m4a", "aac"],
+                    key="custom_music_uploader",
+                    help="Arraste qualquer música ou efeito sonoro do seu computador para adicioná-lo permanentemente à biblioteca."
+                )
+                if upload_custom_music is not None:
+                    dest_music_path = os.path.join(ASSETS_AUDIO_DIR if 'ASSETS_AUDIO_DIR' in locals() or 'ASSETS_AUDIO_DIR' in globals() else os.path.join("assets", "audio"), upload_custom_music.name)
+                    os.makedirs(os.path.dirname(dest_music_path), exist_ok=True)
+                    if not os.path.exists(dest_music_path):
+                        with open(dest_music_path, "wb") as f_m_out:
+                            f_m_out.write(upload_custom_music.getbuffer())
+                        st.success(f"🎉 Trilha **{upload_custom_music.name}** adicionada com sucesso à biblioteca!")
+                        st.rerun()
+
+            with col_u2:
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                if st.button("📂 Abrir Pasta de Áudios", key="btn_open_audio_dir", use_container_width=True):
+                    _a_dir = os.path.abspath(os.path.join("assets", "audio"))
+                    os.makedirs(_a_dir, exist_ok=True)
+                    os.startfile(_a_dir)
 
         elif not available_tracks:
             st.info("Nenhuma trilha encontrada em assets/audio.")

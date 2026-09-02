@@ -17,7 +17,32 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 ASSETS_AUDIO_DIR = os.path.join(PROJECT_ROOT, "assets", "audio")
 
 # Categorias de Trilhas Padrão
+# Categorias de Trilhas Padrão
 MUSIC_CATEGORIES = {
+    "phonk_power_override": {
+        "title": "⚡ Phonk Agressivo / Sigma (Superação & Força)",
+        "filename": "phonk_power_override.wav",
+        "description": "Grave 808 pesado, cowbells distorcidos e batida acelerada para extrema força e foco",
+        "base_bpm": 135,
+    },
+    "heavy_rock_overdrive": {
+        "title": "🎸 Heavy Rock / Overdrive (Adrenalina & Atitude)",
+        "filename": "heavy_rock_overdrive.wav",
+        "description": "Riffs pesados com distorção de guitarra e ritmo agressivo para impacto forte",
+        "base_bpm": 130,
+    },
+    "comedy_meme_funny": {
+        "title": "🎭 Cômico / Meme & Humor (Gafes & Situações Engraçadas)",
+        "filename": "comedy_meme_funny.wav",
+        "description": "Melodia saltitante, efeitos cartoon e clima divertido para momentos hilários",
+        "base_bpm": 115,
+    },
+    "epic_hype_glory": {
+        "title": "🏆 Épico / Glória & Vitória (Conquista & Inspiração)",
+        "filename": "epic_hype_glory.wav",
+        "description": "Orquestra imponente e percussão de cinema para discursos grandiosos",
+        "base_bpm": 95,
+    },
     "lofi_chill": {
         "title": "🧘 Lo-Fi Chill / Relax",
         "filename": "lofi_chill.wav",
@@ -25,7 +50,7 @@ MUSIC_CATEGORIES = {
         "base_bpm": 80,
     },
     "dynamic_pulse": {
-        "title": "⚡ Dinâmica / Ritmo",
+        "title": "⚡ Dinâmica / Ritmo Moderno",
         "filename": "dynamic_pulse.wav",
         "description": "Batida moderna e acelerada para dicas rápidas e vendas",
         "base_bpm": 120,
@@ -37,7 +62,7 @@ MUSIC_CATEGORIES = {
         "base_bpm": 70,
     },
     "inspirational_epic": {
-        "title": "✨ Inspiracional / Motivacional",
+        "title": "✨ Inspiracional / Motivacional Suave",
         "filename": "inspirational_epic.wav",
         "description": "Harmonia expansiva para discursos, superação e negócios",
         "base_bpm": 90,
@@ -82,9 +107,131 @@ def _generate_synthetic_track(filepath: str, style: str, duration_sec: int = 45)
     sample_rate = 44100
     total_samples = int(sample_rate * duration_sec)
     
-    # Progressões de acordes (Frequências em Hz)
-    if style == "lofi_chill":
-        # Acordes Cmaj7 -> Am7 -> Dm7 -> G7
+    samples = []
+    
+    if style == "phonk_power_override":
+        # ⚡ PHONK AGRESSIVO: 808 pesado + Cowbell Memphis + Hi-Hats rápidos
+        cowbell_melody = [739.99, 880.00, 830.61, 659.25, 739.99, 1108.73, 987.77, 739.99]
+        step_len = 0.222  # ~135 BPM 8th notes
+        for i in range(total_samples):
+            t = i / sample_rate
+            step_idx = int((t / step_len) % len(cowbell_melody))
+            note_f = cowbell_melody[step_idx]
+            dt = t % step_len
+            
+            # Cowbell metálico com decay rápido
+            cb_env = math.exp(-dt * 14.0)
+            cb_val = (math.sin(2.0 * math.pi * note_f * t) + 0.45 * math.sin(2.0 * math.pi * note_f * 2.4 * t)) * cb_env * 0.35
+            
+            # Sub-Bass 808 potente (46.25 Hz em F#) com leve saturação
+            bass_env = 0.85 + 0.15 * math.sin(2.0 * math.pi * 0.5 * t)
+            bass_val = math.sin(2.0 * math.pi * 46.25 * t) * 0.42 * bass_env
+            # Adiciona punch no início de cada compasso (0.888s)
+            punch_t = t % 0.888
+            punch_env = math.exp(-punch_t * 9.0) * 0.30
+            bass_val += math.sin(2.0 * math.pi * 58.0 * t) * punch_env
+            
+            # Hi-hat rápido (ruído com decay curto)
+            hh_t = t % 0.111
+            hh_env = math.exp(-hh_t * 45.0)
+            hh_val = math.sin(2.0 * math.pi * 8500.0 * t) * hh_env * 0.08
+            
+            raw_v = cb_val + bass_val + hh_val
+            # Distorção harmônica suave (clip phonk)
+            val = math.tanh(raw_v * 1.6) * 0.90
+            samples.append(int(val * 32767.0))
+
+    elif style == "heavy_rock_overdrive":
+        # 🎸 HEAVY ROCK / OVERDRIVE: Power chords distorcidos (E5, G5, A5) + Bateria agressiva
+        riffs = [
+            [82.41, 123.47, 164.81],   # E5
+            [98.00, 146.83, 196.00],   # G5
+            [110.00, 164.81, 220.00],  # A5
+            [82.41, 123.47, 164.81],   # E5
+        ]
+        riff_len = 1.846  # ~130 BPM
+        for i in range(total_samples):
+            t = i / sample_rate
+            riff_idx = int((t / riff_len) % len(riffs))
+            chord = riffs[riff_idx]
+            
+            # Guitarra com Drive / Overdrive
+            g_raw = 0.0
+            for nf in chord:
+                g_raw += math.sin(2.0 * math.pi * nf * t) * 0.22
+                g_raw += math.sin(2.0 * math.pi * (nf * 2.0) * t) * 0.12
+                g_raw += math.sin(2.0 * math.pi * (nf * 3.0) * t) * 0.06
+            # Distorção de amplificador overdrive
+            g_dist = math.tanh(g_raw * 2.8) * 0.55
+            
+            # Bateria Rock: Bumbo no tempo 1 e 3, Caixa no tempo 2 e 4
+            beat_cycle = t % (60.0 / 130.0 * 2.0) # Ciclo de 2 tempos (~0.923s)
+            # Kick (bumbo forte)
+            kick_t = beat_cycle % 0.4615
+            if beat_cycle < 0.4615:
+                kick_env = math.exp(-kick_t * 12.0) * 0.35
+                drum_val = math.sin(2.0 * math.pi * 55.0 * t) * kick_env
+            else:
+                # Snare (caixa estalada)
+                snare_t = kick_t
+                snare_env = math.exp(-snare_t * 18.0) * 0.28
+                drum_val = (math.sin(2.0 * math.pi * 180.0 * t) + math.sin(2.0 * math.pi * 3200.0 * t) * 0.5) * snare_env
+            
+            raw_v = g_dist + drum_val
+            val = max(-0.95, min(0.95, raw_v))
+            samples.append(int(val * 32767.0))
+
+    elif style == "comedy_meme_funny":
+        # 🎭 CÔMICO / MEME: Ragtime staccato saltitante + Efeitos cômicos
+        notes = [523.25, 659.25, 783.99, 880.00, 783.99, 659.25, 587.33, 493.88] # C5, E5, G5, A5...
+        step_len = 0.260 # ~115 BPM
+        for i in range(total_samples):
+            t = i / sample_rate
+            idx = int((t / step_len) % len(notes))
+            freq = notes[idx]
+            dt = t % step_len
+            
+            # Nota staccato com decay rápido (som de xilofone / desenho animado)
+            env = math.exp(-dt * 16.0) if dt < 0.20 else 0.0
+            melody = (math.sin(2.0 * math.pi * freq * t) + 0.3 * math.sin(2.0 * math.pi * (freq * 2) * t)) * env * 0.38
+            
+            # Baixo saltitante (Tuba / Baixo acústico)
+            bass_f = 130.81 if (idx % 2 == 0) else 196.00 # C3 ou G3
+            bass_env = math.exp(-dt * 8.0)
+            bass = math.sin(2.0 * math.pi * bass_f * t) * bass_env * 0.30
+            
+            raw_v = melody + bass
+            val = max(-0.95, min(0.95, raw_v))
+            samples.append(int(val * 32767.0))
+
+    elif style == "epic_hype_glory":
+        # 🏆 ÉPICO / GLÓRIA: Metais cinematográficos + Tímpanos de impacto
+        chords = [
+            [146.83, 220.00, 293.66, 349.23, 440.00], # Dm
+            [116.54, 174.61, 233.08, 349.23, 466.16], # Bb
+            [130.81, 196.00, 261.63, 329.63, 523.25], # C
+            [146.83, 220.00, 293.66, 370.00, 440.00], # D
+        ]
+        chord_len = 2.526 # ~95 BPM
+        for i in range(total_samples):
+            t = i / sample_rate
+            chord_idx = int((t / chord_len) % len(chords))
+            current_chord = chords[chord_idx]
+            
+            val = 0.0
+            for note_f in current_chord:
+                val += math.sin(2.0 * math.pi * note_f * t) * 0.16
+                val += math.sin(2.0 * math.pi * (note_f * 0.5) * t) * 0.10
+            
+            # Tímpano de impacto a cada novo acorde
+            timp_t = t % chord_len
+            timp_env = math.exp(-timp_t * 4.0) * 0.32
+            val += math.sin(2.0 * math.pi * 50.0 * t) * timp_env
+            
+            val = max(-0.95, min(0.95, val))
+            samples.append(int(val * 32767.0))
+
+    elif style == "lofi_chill":
         chords = [
             [261.63, 329.63, 392.00, 493.88],  # Cmaj7
             [220.00, 261.63, 329.63, 392.00],  # Am7
@@ -92,8 +239,21 @@ def _generate_synthetic_track(filepath: str, style: str, duration_sec: int = 45)
             [196.00, 246.94, 293.66, 349.23],  # G7
         ]
         chord_len = 3.0
+        for i in range(total_samples):
+            t = i / sample_rate
+            chord_idx = int((t / chord_len) % len(chords))
+            current_chord = chords[chord_idx]
+            val = 0.0
+            for note_f in current_chord:
+                val += math.sin(2.0 * math.pi * note_f * t) * 0.18
+                val += math.sin(math.pi * note_f * t) * 0.12
+            beat_t = t % 0.5
+            beat_env = math.exp(-beat_t * 8.0) * 0.15
+            val += math.sin(2.0 * math.pi * 65.0 * t) * beat_env
+            val = max(-0.95, min(0.95, val))
+            samples.append(int(val * 32767.0))
+
     elif style == "tension_suspense":
-        # Dó menor tenso com intervalo de trítono
         chords = [
             [130.81, 155.56, 196.00, 277.18],
             [123.47, 146.83, 185.00, 261.63],
@@ -101,8 +261,21 @@ def _generate_synthetic_track(filepath: str, style: str, duration_sec: int = 45)
             [130.81, 155.56, 196.00, 261.63],
         ]
         chord_len = 3.5
+        for i in range(total_samples):
+            t = i / sample_rate
+            chord_idx = int((t / chord_len) % len(chords))
+            current_chord = chords[chord_idx]
+            val = 0.0
+            for note_f in current_chord:
+                val += math.sin(2.0 * math.pi * note_f * t) * 0.18
+                val += math.sin(math.pi * note_f * t) * 0.12
+            beat_t = t % 0.5
+            beat_env = math.exp(-beat_t * 8.0) * 0.15
+            val += math.sin(2.0 * math.pi * 65.0 * t) * beat_env
+            val = max(-0.95, min(0.95, val))
+            samples.append(int(val * 32767.0))
+
     elif style == "inspirational_epic":
-        # Progressão Épica: F -> G -> Am -> Em
         chords = [
             [174.61, 220.00, 261.63, 349.23],
             [196.00, 246.94, 293.66, 392.00],
@@ -110,8 +283,21 @@ def _generate_synthetic_track(filepath: str, style: str, duration_sec: int = 45)
             [164.81, 196.00, 246.94, 329.63],
         ]
         chord_len = 2.5
+        for i in range(total_samples):
+            t = i / sample_rate
+            chord_idx = int((t / chord_len) % len(chords))
+            current_chord = chords[chord_idx]
+            val = 0.0
+            for note_f in current_chord:
+                val += math.sin(2.0 * math.pi * note_f * t) * 0.18
+                val += math.sin(math.pi * note_f * t) * 0.12
+            beat_t = t % 0.5
+            beat_env = math.exp(-beat_t * 8.0) * 0.15
+            val += math.sin(2.0 * math.pi * 65.0 * t) * beat_env
+            val = max(-0.95, min(0.95, val))
+            samples.append(int(val * 32767.0))
+
     else:  # dynamic_pulse
-        # Ritmo pulsante em Ré Menor
         chords = [
             [146.83, 220.00, 293.66, 349.23],
             [174.61, 261.63, 349.23, 440.00],
@@ -119,28 +305,19 @@ def _generate_synthetic_track(filepath: str, style: str, duration_sec: int = 45)
             [146.83, 220.00, 293.66, 440.00],
         ]
         chord_len = 2.0
-
-    samples = []
-    for i in range(total_samples):
-        t = i / sample_rate
-        chord_idx = int((t / chord_len) % len(chords))
-        current_chord = chords[chord_idx]
-        
-        # Síntese aditiva suave com envelope harmônico
-        val = 0.0
-        for note_f in current_chord:
-            val += math.sin(2.0 * math.pi * note_f * t) * 0.18
-            # Sub-harmônico suave (baixo quente)
-            val += math.sin(math.pi * note_f * t) * 0.12
-
-        # Pulso rítmico suave (beat sutil a cada 0.5s)
-        beat_t = t % 0.5
-        beat_env = math.exp(-beat_t * 8.0) * 0.15
-        val += math.sin(2.0 * math.pi * 65.0 * t) * beat_env
-        
-        # Limiter suave
-        val = max(-0.95, min(0.95, val))
-        samples.append(int(val * 32767.0))
+        for i in range(total_samples):
+            t = i / sample_rate
+            chord_idx = int((t / chord_len) % len(chords))
+            current_chord = chords[chord_idx]
+            val = 0.0
+            for note_f in current_chord:
+                val += math.sin(2.0 * math.pi * note_f * t) * 0.18
+                val += math.sin(math.pi * note_f * t) * 0.12
+            beat_t = t % 0.5
+            beat_env = math.exp(-beat_t * 8.0) * 0.15
+            val += math.sin(2.0 * math.pi * 65.0 * t) * beat_env
+            val = max(-0.95, min(0.95, val))
+            samples.append(int(val * 32767.0))
 
     with wave.open(filepath, "wb") as wav_file:
         wav_file.setnchannels(1)  # Mono para leveza

@@ -13,10 +13,14 @@ Este guia documenta o módulo `core/audio_mixer.py` e a implementação do motor
 ## 1. Trilha Sonora de Fundo & Sidechain Audio Ducking (`core/audio_mixer.py`)
 
 - **Catálogo de Trilhas (`assets/audio/`)**:
-  - `lofi_chill`: Ideal para vídeos educativos, reflexivos e podcasts calmos.
-  - `dynamic_pulse`: Batida moderna para cortes de ação, negócios e tecnologia.
-  - `tension_suspense`: Clima dramático para revelações, debates e polêmicas.
-  - `inspirational_epic`: Trilha crescente para histórias de superação e motivação.
+  - `phonk_power_override`: Grave 808 pesado, cowbell Memphis e batida acelerada para superação, força extrema e mindset.
+  - `heavy_rock_overdrive`: Riffs de guitarra com distorção pesada e bateria explosiva para adrenalina, debates e confrontos.
+  - `comedy_meme_funny`: Melodia ragtime saltitante e efeitos cartoon para gafes, piadas e momentos hilários.
+  - `epic_hype_glory`: Orquestra cinematográfica imponente e tímpanos para glória, superação e vitória.
+  - `lofi_chill`: Ideal para conversas reflexivas, estudos e tecnologia.
+  - `dynamic_pulse`: Batida moderna e acelerada para dicas rápidas e vendas.
+  - `tension_suspense`: Clima de mistério, curiosidade e revelações.
+  - `inspirational_epic`: Harmonia expansiva para discursos motivacionais suaves.
 - **Filtro FFmpeg Sidechain Ducking**:
   - Utiliza o compressor de áudio lateral do FFmpeg (`sidechaincompress` / `acompressor`):
   - Quando a voz do orador ultrapassa o limiar (threshold), o volume da música de fundo é atenuado de forma imperceptível (ducking de 15% a 30%).
