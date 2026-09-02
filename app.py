@@ -1729,6 +1729,12 @@ else:
         if v2_default_idx == 0 and len(dual_available_tracks) > 1 and not last_up_v2:
             v2_default_idx = 1 # Phonk ou primeiro
 
+        # Aplica qualquer override de upload pendente ANTES de instanciar os selectboxes
+        if "_override_dual_v1_music" in st.session_state:
+            st.session_state["sel_dual_v1_music"] = st.session_state.pop("_override_dual_v1_music")
+        if "_override_dual_v2_music" in st.session_state:
+            st.session_state["sel_dual_v2_music"] = st.session_state.pop("_override_dual_v2_music")
+
         if "sel_dual_v1_music" in st.session_state and st.session_state["sel_dual_v1_music"] not in dual_track_labels:
             st.session_state["sel_dual_v1_music"] = dual_track_labels[v1_default_idx]
         if "sel_dual_v2_music" in st.session_state and st.session_state["sel_dual_v2_music"] not in dual_track_labels:
@@ -1760,7 +1766,7 @@ else:
                         _reg_v1 = register_custom_audio_track(_tmp_p1, title=f"📁 {os.path.splitext(up_v1.name)[0]}", category_name="Personalizada (Parte 1)")
                         if _reg_v1.get("track"):
                             st.session_state["_last_uploaded_dual_v1"] = _reg_v1["track"]["id"]
-                            st.session_state["sel_dual_v1_music"] = _reg_v1["track"]["title"]
+                            st.session_state["_override_dual_v1_music"] = _reg_v1["track"]["title"]
                             st.rerun()
 
         with col_snd2:
@@ -1788,7 +1794,7 @@ else:
                         _reg_v2 = register_custom_audio_track(_tmp_p2, title=f"📁 {os.path.splitext(up_v2.name)[0]}", category_name="Personalizada (Parte 2)")
                         if _reg_v2.get("track"):
                             st.session_state["_last_uploaded_dual_v2"] = _reg_v2["track"]["id"]
-                            st.session_state["sel_dual_v2_music"] = _reg_v2["track"]["title"]
+                            st.session_state["_override_dual_v2_music"] = _reg_v2["track"]["title"]
                             st.rerun()
 
         dual_audio_ducking = st.checkbox(
