@@ -1059,15 +1059,15 @@ def compose_dual_video_split_sequence(
                     f"[m1_raw][v1_voice]sidechaincompress=threshold=0.08:ratio=5:attack=30:release=300[m1_ducked]"
                 )
                 filter_parts.append(
-                    f"[v1_voice][m1_ducked]amix=inputs=2:duration=first:dropout_transition=2[seg1_a]"
+                    f"[v1_voice][m1_ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[seg1_a]"
                 )
             else:
                 filter_parts.append(
-                    f"[v1_voice][m1_raw]amix=inputs=2:duration=first:dropout_transition=2[seg1_a]"
+                    f"[v1_voice][m1_raw]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[seg1_a]"
                 )
         else:
             filter_parts.append(
-                "[v1_voice]anull[seg1_a]"
+                "[v1_voice]aformat=sample_rates=48000:channel_layouts=stereo[seg1_a]"
             )
 
         # -- Vídeo Parte 2 (Tela Cheia Vídeo 2) --
@@ -1094,15 +1094,15 @@ def compose_dual_video_split_sequence(
                     f"[m2_raw][v2_voice]sidechaincompress=threshold=0.08:ratio=5:attack=30:release=300[m2_ducked]"
                 )
                 filter_parts.append(
-                    f"[v2_voice][m2_ducked]amix=inputs=2:duration=first:dropout_transition=2[seg2_a]"
+                    f"[v2_voice][m2_ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[seg2_a]"
                 )
             else:
                 filter_parts.append(
-                    f"[v2_voice][m2_raw]amix=inputs=2:duration=first:dropout_transition=2[seg2_a]"
+                    f"[v2_voice][m2_raw]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[seg2_a]"
                 )
         else:
             filter_parts.append(
-                "[v2_voice]anull[seg2_a]"
+                "[v2_voice]aformat=sample_rates=48000:channel_layouts=stereo[seg2_a]"
             )
 
         # -- Concatenação Final Sequencial --
