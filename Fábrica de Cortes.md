@@ -194,7 +194,8 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Inclusão na Biblioteca de Trilhas (`assets/audio/`)**: Botão `🌟 Adicionar à Biblioteca de Trilhas de Fundo` que salva o som extraído na pasta de assets com metadados persistentes (`custom_tracks.json`), disponibilizando-o imediatamente em todas as seleções de música e composições duplas.
   - **Links da Web (YouTube, Instagram, TikTok, etc.)**: Extração direta de áudio em 192kbps MP3 com player e download imediato.
   - **Arquivos Locais (1 ou 2 Vídeos)**: Extração ultra-rápida via FFmpeg do áudio individual ou unificado da composição dupla com ambientação musical personalizada.
-  - **Vídeos Processados & Galeria de Cortes**: Player e botão `📥 Baixar Áudio Completo (MP3)` no cabeçalho do projeto ativo e `🎵 Baixar Áudio do Corte (MP3)` em cada corte/instância gerada no pacote de publicação viral.
+  - **Renderização Segmentada & Concatenação Lossless da Composição Dupla**: Renderiza a Parte 1 (Split Top + Base Congelada + Trilha 1 + Ducking) e a Parte 2 (Tela Cheia + Trilha 2 + Ducking) de forma isolada, concatenando-as via *FFmpeg Concat Demuxer* com fluxo de áudio e vídeo 100% sincronizado, eliminando desvios ou repetições de áudio.
+  - **Upload Direto de Arquivos Locais para Trilhas Sonoras**: Permite carregar diretamente arquivos de som do computador nas Partes 1 e 2 da Composição Dupla e na Seção 3 da Fábrica de Cortes, com registro instantâneo no catálogo permanente.
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
 - **🧪 Suíte de 84 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest`.
