@@ -43,7 +43,10 @@ importlib.reload(core.thumbnail_generator)
 importlib.reload(core.quick_editor)
 importlib.reload(core.overlay_manager)
 
-from core.extractor import download_audio, get_video_metadata, get_video_id
+from core.extractor import (
+    download_audio, get_video_metadata, get_video_id,
+    clean_music_title, detect_music_category_suggestion
+)
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
 from core.analyzer import analyze_transcript, build_suggested_bundles, build_golden_rule_micro_cuts, normalize_time_mask
 from core.video_processor import (
@@ -60,7 +63,8 @@ from core.headline_drawer import (
     HEADLINE_PRESETS, generate_headline_preview, apply_headline_to_video,
     clean_and_condense_headline, format_headline_text
 )
-from core.audio_mixer import list_available_tracks, DUCKING_PRESETS
+from core.audio_mixer import list_available_tracks, DUCKING_PRESETS, register_custom_audio_track
+from core.music_recognizer import identify_song_from_audio_and_meta
 from core.retention_effects import PROGRESS_BAR_COLORS, ENGAGEMENT_CALLOUT_PRESETS
 from core.thumbnail_generator import create_cut_thumbnail
 from core.integrations import (
