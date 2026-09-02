@@ -1,26 +1,8 @@
 {
-    "meu_phonk_pico_teste.mp3": {
-        "id": "meu_phonk_pico_teste.mp3",
-        "filename": "meu_phonk_pico_teste.mp3",
-        "title": "Meu Phonk Épico Teste",
-        "category": "⚡ Phonk / Superação & Força",
-        "description": "Trilha de teste",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\meu_phonk_pico_teste.mp3",
-        "is_builtin": false
-    },
-    "meu_phonk_pico_teste_1.mp3": {
-        "id": "meu_phonk_pico_teste_1.mp3",
-        "filename": "meu_phonk_pico_teste_1.mp3",
-        "title": "Meu Phonk Épico Teste",
-        "category": "⚡ Phonk / Superação & Força",
-        "description": "Trilha de teste",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\meu_phonk_pico_teste_1.mp3",
-        "is_builtin": false
-    },
     "the_office_scranton_crew.mp3": {
         "id": "the_office_scranton_crew.mp3",
         "filename": "the_office_scranton_crew.mp3",
-        "title": "The Office  Scranton Crew",
+        "title": "The Office - Scranton Crew",
         "category": "🎭 Cômico / Meme & Humor",
         "description": "Som de fundo (🎭 Cômico / Meme & Humor) extraído do vídeo",
         "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\the_office_scranton_crew.mp3",
@@ -33,6 +15,15 @@
         "category": "🎵 Trilha Personalizada",
         "description": "Som de fundo (🎵 Trilha Personalizada) extraído do vídeo",
         "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\trilha_sonora.mp3",
+        "is_builtin": false
+    },
+    "acamvi_modoboaw.mp3": {
+        "id": "acamvi_modoboaw.mp3",
+        "filename": "acamvi_modoboaw.mp3",
+        "title": "📁 Acamvi - Modoboaw",
+        "category": "Personalizada (Parte 1)",
+        "description": "Extraído para cortes (Personalizada (Parte 1))",
+        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\acamvi_modoboaw.mp3",
         "is_builtin": false
     }
 }

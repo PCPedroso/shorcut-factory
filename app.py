@@ -1745,15 +1745,17 @@ else:
             with st.expander("📁 Carregar Arquivo de Som do Computador (Parte 1)", expanded=False):
                 up_v1 = st.file_uploader("Upload de Áudio (.mp3, .wav, .m4a):", type=["mp3", "wav", "m4a", "aac", "ogg"], key="uploader_dual_v1")
                 if up_v1 is not None:
-                    _tmp_p1 = os.path.join("data", f"temp_dual1_{up_v1.name}")
-                    os.makedirs("data", exist_ok=True)
-                    with open(_tmp_p1, "wb") as _f_up1:
-                        _f_up1.write(up_v1.getbuffer())
-                    _reg_v1 = register_custom_audio_track(_tmp_p1, title=f"📁 {os.path.splitext(up_v1.name)[0]}", category_name="Personalizada (Parte 1)")
-                    if _reg_v1.get("track"):
-                        st.session_state["_last_uploaded_dual_v1"] = _reg_v1["track"]["id"]
-                        st.success(f"🎉 Trilha **{up_v1.name}** adicionada e selecionada!")
-                        st.rerun()
+                    _sig_v1 = f"{up_v1.name}_{up_v1.size}"
+                    if st.session_state.get("_processed_sig_v1") != _sig_v1:
+                        st.session_state["_processed_sig_v1"] = _sig_v1
+                        _tmp_p1 = os.path.join("data", f"temp_dual1_{up_v1.name}")
+                        os.makedirs("data", exist_ok=True)
+                        with open(_tmp_p1, "wb") as _f_up1:
+                            _f_up1.write(up_v1.getbuffer())
+                        _reg_v1 = register_custom_audio_track(_tmp_p1, title=f"📁 {os.path.splitext(up_v1.name)[0]}", category_name="Personalizada (Parte 1)")
+                        if _reg_v1.get("track"):
+                            st.session_state["_last_uploaded_dual_v1"] = _reg_v1["track"]["id"]
+                            st.rerun()
 
         with col_snd2:
             st.markdown(f"**⚡ Som do 2º Vídeo** (`{second_file.name[:25]}...` - Tela Cheia):")
@@ -1770,15 +1772,17 @@ else:
             with st.expander("📁 Carregar Arquivo de Som do Computador (Parte 2)", expanded=False):
                 up_v2 = st.file_uploader("Upload de Áudio (.mp3, .wav, .m4a):", type=["mp3", "wav", "m4a", "aac", "ogg"], key="uploader_dual_v2")
                 if up_v2 is not None:
-                    _tmp_p2 = os.path.join("data", f"temp_dual2_{up_v2.name}")
-                    os.makedirs("data", exist_ok=True)
-                    with open(_tmp_p2, "wb") as _f_up2:
-                        _f_up2.write(up_v2.getbuffer())
-                    _reg_v2 = register_custom_audio_track(_tmp_p2, title=f"📁 {os.path.splitext(up_v2.name)[0]}", category_name="Personalizada (Parte 2)")
-                    if _reg_v2.get("track"):
-                        st.session_state["_last_uploaded_dual_v2"] = _reg_v2["track"]["id"]
-                        st.success(f"🎉 Trilha **{up_v2.name}** adicionada e selecionada!")
-                        st.rerun()
+                    _sig_v2 = f"{up_v2.name}_{up_v2.size}"
+                    if st.session_state.get("_processed_sig_v2") != _sig_v2:
+                        st.session_state["_processed_sig_v2"] = _sig_v2
+                        _tmp_p2 = os.path.join("data", f"temp_dual2_{up_v2.name}")
+                        os.makedirs("data", exist_ok=True)
+                        with open(_tmp_p2, "wb") as _f_up2:
+                            _f_up2.write(up_v2.getbuffer())
+                        _reg_v2 = register_custom_audio_track(_tmp_p2, title=f"📁 {os.path.splitext(up_v2.name)[0]}", category_name="Personalizada (Parte 2)")
+                        if _reg_v2.get("track"):
+                            st.session_state["_last_uploaded_dual_v2"] = _reg_v2["track"]["id"]
+                            st.rerun()
 
         dual_audio_ducking = st.checkbox(
             "🎧 Aplicar Audio Ducking Inteligente (Atenua a música automaticamente durante as falas)",
@@ -3718,15 +3722,17 @@ if st.session_state.transcription_done:
                     help="Arraste qualquer música ou efeito sonoro do seu computador para adicioná-lo permanentemente à biblioteca."
                 )
                 if upload_custom_music is not None:
-                    _tmp_sec3 = os.path.join("data", f"temp_sec3_{upload_custom_music.name}")
-                    os.makedirs("data", exist_ok=True)
-                    with open(_tmp_sec3, "wb") as f_m_out:
-                        f_m_out.write(upload_custom_music.getbuffer())
-                    _reg_sec3 = register_custom_audio_track(_tmp_sec3, title=f"📁 {os.path.splitext(upload_custom_music.name)[0]}", category_name="Personalizada")
-                    if _reg_sec3.get("track"):
-                        save_setting("bg_music_track_id", _reg_sec3["track"]["id"])
-                        st.success(f"🎉 Trilha **{upload_custom_music.name}** adicionada com sucesso à biblioteca e selecionada!")
-                        st.rerun()
+                    _sig_sec3 = f"{upload_custom_music.name}_{upload_custom_music.size}"
+                    if st.session_state.get("_processed_sig_sec3") != _sig_sec3:
+                        st.session_state["_processed_sig_sec3"] = _sig_sec3
+                        _tmp_sec3 = os.path.join("data", f"temp_sec3_{upload_custom_music.name}")
+                        os.makedirs("data", exist_ok=True)
+                        with open(_tmp_sec3, "wb") as f_m_out:
+                            f_m_out.write(upload_custom_music.getbuffer())
+                        _reg_sec3 = register_custom_audio_track(_tmp_sec3, title=f"📁 {os.path.splitext(upload_custom_music.name)[0]}", category_name="Personalizada")
+                        if _reg_sec3.get("track"):
+                            save_setting("bg_music_track_id", _reg_sec3["track"]["id"])
+                            st.rerun()
 
             with col_u2:
                 st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
