@@ -1514,6 +1514,58 @@ else:
                     key="dual_divider_color_choice"
                 )
 
+        # 3. Ambientação Sonora Independente para Cada Vídeo
+        st.markdown("### 🎧 3. Ambientação Sonora Diferenciada (Música para Cada Vídeo)")
+        st.caption("Escolha uma trilha sonora para ilustrar o contraste entre o 1º vídeo (Início/Split) e o 2º vídeo (Superação/Tela Cheia).")
+        
+        dual_available_tracks = [{"id": "none", "title": "🚫 Sem Trilha (Apenas Áudio Original)", "path": None}] + list_available_tracks()
+        dual_track_labels = [f"{t['title']}" for t in dual_available_tracks]
+        
+        # Padrões sugeridos: 1º Vídeo = Cômico/Humor (se existir) ou Lo-Fi; 2º Vídeo = Phonk Agressivo (se existir) ou Heavy Rock
+        v1_default_idx = 0
+        v2_default_idx = 0
+        for i_t, t_obj in enumerate(dual_available_tracks):
+            if t_obj["id"] == "comedy_meme_funny":
+                v1_default_idx = i_t
+            elif t_obj["id"] == "phonk_power_override":
+                v2_default_idx = i_t
+        if v1_default_idx == 0 and len(dual_available_tracks) > 5:
+            v1_default_idx = 5 # Lo-fi
+        if v2_default_idx == 0 and len(dual_available_tracks) > 1:
+            v2_default_idx = 1 # Phonk ou primeiro
+
+        col_snd1, col_snd2 = st.columns(2)
+        with col_snd1:
+            st.markdown(f"**🎵 Som do 1º Vídeo** (`{first_file.name[:25]}...` - Split Top):")
+            sel_v1_lbl = st.selectbox("Trilha Sonora da Parte 1:", dual_track_labels, index=v1_default_idx, key="sel_dual_v1_music")
+            sel_v1_obj = dual_available_tracks[dual_track_labels.index(sel_v1_lbl)]
+            dual_v1_track_id = sel_v1_obj["id"]
+            
+            dual_v1_vol = st.slider("Volume da Trilha 1:", min_value=0.05, max_value=0.60, value=0.18, step=0.02, key="sl_dual_v1_vol")
+            if sel_v1_obj.get("path") and os.path.exists(sel_v1_obj["path"]):
+                with open(sel_v1_obj["path"], "rb") as af_p1:
+                    _fmt1 = "audio/mp3" if sel_v1_obj["path"].endswith(".mp3") else "audio/wav"
+                    st.audio(af_p1.read(), format=_fmt1)
+
+        with col_snd2:
+            st.markdown(f"**⚡ Som do 2º Vídeo** (`{second_file.name[:25]}...` - Tela Cheia):")
+            sel_v2_lbl = st.selectbox("Trilha Sonora da Parte 2:", dual_track_labels, index=v2_default_idx, key="sel_dual_v2_music")
+            sel_v2_obj = dual_available_tracks[dual_track_labels.index(sel_v2_lbl)]
+            dual_v2_track_id = sel_v2_obj["id"]
+            
+            dual_v2_vol = st.slider("Volume da Trilha 2:", min_value=0.05, max_value=0.70, value=0.25, step=0.02, key="sl_dual_v2_vol")
+            if sel_v2_obj.get("path") and os.path.exists(sel_v2_obj["path"]):
+                with open(sel_v2_obj["path"], "rb") as af_p2:
+                    _fmt2 = "audio/mp3" if sel_v2_obj["path"].endswith(".mp3") else "audio/wav"
+                    st.audio(af_p2.read(), format=_fmt2)
+
+        dual_audio_ducking = st.checkbox(
+            "🎧 Aplicar Audio Ducking Inteligente (Atenua a música automaticamente durante as falas)",
+            value=True,
+            key="dual_audio_ducking_tgl",
+            help="Reduz suavemente o volume das trilhas enquanto os oradores falam, garantindo 100% de clareza nas vozes."
+        )
+
         if st.button("🚀 Processar Composição Dupla (Split ➔ Full Screen)", type="primary", key="btn_process_dual_local"):
             video_id = generate_local_dual_video_id(first_file.name, second_file.name)
             local_url = f"local://{video_id}"
@@ -1537,7 +1589,7 @@ else:
                     f2_out.write(second_file.getbuffer())
 
             # 2. Renderiza a Composição Sequencial Completa
-            with st.spinner("🎬 Renderizando composição inteligente (Split com Base P&B ➔ Tela Cheia)..."):
+            with st.spinner("🎬 Renderizando composição inteligente (Split com Base P&B ➔ Tela Cheia com Trilhas)..."):
                 comp_res = compose_dual_video_split_sequence(
                     video1_path=raw_v1_path,
                     video2_path=raw_v2_path,
@@ -1546,7 +1598,12 @@ else:
                     freeze_monochrome=dual_freeze_bw,
                     aspect_ratio="9:16" if "9:16" in dual_aspect_choice else "16:9",
                     divider_color=dual_divider_color,
-                    divider_width=4 if dual_divider_color != "none" else 0
+                    divider_width=4 if dual_divider_color != "none" else 0,
+                    video1_audio_track=dual_v1_track_id,
+                    video1_audio_volume=float(dual_v1_vol),
+                    video2_audio_track=dual_v2_track_id,
+                    video2_audio_volume=float(dual_v2_vol),
+                    audio_ducking_enabled=dual_audio_ducking
                 )
 
             if comp_res.get("error"):

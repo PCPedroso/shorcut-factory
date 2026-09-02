@@ -908,19 +908,27 @@ def compose_dual_video_split_sequence(
     freeze_monochrome: bool = True,
     aspect_ratio: str = "9:16",
     divider_width: int = 4,
-    divider_color: str = "black"
+    divider_color: str = "black",
+    video1_audio_track: str = None,
+    video1_audio_volume: float = 0.20,
+    video2_audio_track: str = None,
+    video2_audio_volume: float = 0.25,
+    audio_ducking_enabled: bool = True
 ) -> dict:
     """
     Renderiza composição sequencial inteligente de 2 vídeos:
     1. Parte 1 (duração = Vídeo 1):
        - Topo: Vídeo 1 reproduzindo normalmente com seu áudio.
        - Base: Frame estático do Vídeo 2 (em freeze_timestamp_sec), opcionalmente monocromático (preto e branco).
+       - Trilha Sonora 1: Música de fundo específica para a Parte 1 (com Audio Ducking).
     2. Parte 2 (duração = Vídeo 2):
        - O Vídeo 2 assume tela cheia (1080x1920 ou 1920x1080) e toca até o final com seu áudio.
+       - Trilha Sonora 2: Música de fundo específica para a Parte 2 (com Audio Ducking).
     """
     temp_frozen_png = None
     try:
         from core.quick_editor import get_video_duration
+        from core.audio_mixer import get_track_path_by_id
 
         if not os.path.exists(video1_path):
             return {"path": None, "error": f"Arquivo do Vídeo 1 não encontrado: {video1_path}"}
@@ -971,14 +979,47 @@ def compose_dual_video_split_sequence(
 
         cv2.imwrite(temp_frozen_png, bot_frame)
 
-        # 2. Verifica faixas de áudio
+        # 2. Resolução de Trilhas Musicais
+        v1_music_path = None
+        if video1_audio_track and video1_audio_track not in ["none", "nenhum", ""]:
+            v1_music_path = get_track_path_by_id(video1_audio_track)
+            if not v1_music_path or not os.path.exists(v1_music_path):
+                v1_music_path = None
+
+        v2_music_path = None
+        if video2_audio_track and video2_audio_track not in ["none", "nenhum", ""]:
+            v2_music_path = get_track_path_by_id(video2_audio_track)
+            if not v2_music_path or not os.path.exists(v2_music_path):
+                v2_music_path = None
+
+        # 3. Mapeamento de Entradas FFmpeg
+        base_cmd = [
+            FFMPEG_EXE, "-y",
+            "-i", video1_path,                               # Input 0
+            "-loop", "1", "-t", f"{dur1:.3f}", "-i", temp_frozen_png, # Input 1
+            "-i", video2_path                                # Input 2
+        ]
+
+        curr_input_idx = 3
+        v1_music_idx = None
+        if v1_music_path:
+            v1_music_idx = curr_input_idx
+            base_cmd.extend(["-i", v1_music_path])
+            curr_input_idx += 1
+
+        v2_music_idx = None
+        if v2_music_path:
+            v2_music_idx = curr_input_idx
+            base_cmd.extend(["-i", v2_music_path])
+            curr_input_idx += 1
+
         has_a1 = check_has_audio_stream(video1_path)
         has_a2 = check_has_audio_stream(video2_path)
 
-        # 3. Monta grafo de filtros FFmpeg
+        # 4. Grafo de Filtros Complexos
         filter_parts = []
 
-        # Parte 1: Topo Vídeo 1 + Base Imagem Congelada
+        # -- Vídeo Parte 1 (Split Top / Base Congelada) --
         filter_parts.append(
             f"[0:v]scale={target_w}:{slot_h}:force_original_aspect_ratio=increase,crop={target_w}:{slot_h},setsar=1,fps=30[v1_top]"
         )
@@ -999,48 +1040,86 @@ def compose_dual_video_split_sequence(
                 "[seg1_raw]null[seg1_v]"
             )
 
+        # -- Áudio Parte 1 (Voz 1 + Música 1) --
         if has_a1:
             filter_parts.append(
-                "[0:a]aformat=sample_rates=48000:channel_layouts=stereo[seg1_a]"
+                f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=0:{dur1:.3f},asetpts=PTS-STARTPTS[v1_voice]"
             )
         else:
             filter_parts.append(
-                f"anullsrc=r=48000:cl=stereo,atrim=duration={dur1:.3f}[seg1_a]"
+                f"anullsrc=r=48000:cl=stereo,atrim=duration={dur1:.3f}[v1_voice]"
             )
 
-        # Parte 2: Vídeo 2 em Tela Cheia
+        if v1_music_idx is not None:
+            filter_parts.append(
+                f"[{v1_music_idx}:a]aloop=loop=-1:size=2e+09,atrim=0:{dur1:.3f},asetpts=PTS-STARTPTS,volume={video1_audio_volume:.2f},aformat=sample_rates=48000:channel_layouts=stereo[m1_raw]"
+            )
+            if audio_ducking_enabled and has_a1:
+                filter_parts.append(
+                    f"[m1_raw][v1_voice]sidechaincompress=threshold=0.08:ratio=5:attack=30:release=300[m1_ducked]"
+                )
+                filter_parts.append(
+                    f"[v1_voice][m1_ducked]amix=inputs=2:duration=first:dropout_transition=2[seg1_a]"
+                )
+            else:
+                filter_parts.append(
+                    f"[v1_voice][m1_raw]amix=inputs=2:duration=first:dropout_transition=2[seg1_a]"
+                )
+        else:
+            filter_parts.append(
+                "[v1_voice]anull[seg1_a]"
+            )
+
+        # -- Vídeo Parte 2 (Tela Cheia Vídeo 2) --
         filter_parts.append(
             f"[2:v]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h},setsar=1,fps=30[seg2_v]"
         )
 
+        # -- Áudio Parte 2 (Voz 2 + Música 2) --
         if has_a2:
             filter_parts.append(
-                "[2:a]aformat=sample_rates=48000:channel_layouts=stereo[seg2_a]"
+                f"[2:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=0:{dur2:.3f},asetpts=PTS-STARTPTS[v2_voice]"
             )
         else:
             filter_parts.append(
-                f"anullsrc=r=48000:cl=stereo,atrim=duration={dur2:.3f}[seg2_a]"
+                f"anullsrc=r=48000:cl=stereo,atrim=duration={dur2:.3f}[v2_voice]"
             )
 
-        # Concatenação sequencial
+        if v2_music_idx is not None:
+            filter_parts.append(
+                f"[{v2_music_idx}:a]aloop=loop=-1:size=2e+09,atrim=0:{dur2:.3f},asetpts=PTS-STARTPTS,volume={video2_audio_volume:.2f},aformat=sample_rates=48000:channel_layouts=stereo[m2_raw]"
+            )
+            if audio_ducking_enabled and has_a2:
+                filter_parts.append(
+                    f"[m2_raw][v2_voice]sidechaincompress=threshold=0.08:ratio=5:attack=30:release=300[m2_ducked]"
+                )
+                filter_parts.append(
+                    f"[v2_voice][m2_ducked]amix=inputs=2:duration=first:dropout_transition=2[seg2_a]"
+                )
+            else:
+                filter_parts.append(
+                    f"[v2_voice][m2_raw]amix=inputs=2:duration=first:dropout_transition=2[seg2_a]"
+                )
+        else:
+            filter_parts.append(
+                "[v2_voice]anull[seg2_a]"
+            )
+
+        # -- Concatenação Final Sequencial --
         filter_parts.append(
             "[seg1_v][seg1_a][seg2_v][seg2_a]concat=n=2:v=1:a=1[out_v][out_a]"
         )
 
         filter_complex = ";".join(filter_parts)
 
-        # 4. Execução FFmpeg com aceleração NVENC e fallback CPU
-        base_cmd = [
-            FFMPEG_EXE, "-y",
-            "-i", video1_path,
-            "-loop", "1", "-t", f"{dur1:.3f}", "-i", temp_frozen_png,
-            "-i", video2_path,
+        # 5. Execução FFmpeg com aceleração NVENC e fallback CPU
+        full_base_cmd = base_cmd + [
             "-filter_complex", filter_complex,
             "-map", "[out_v]",
             "-map", "[out_a]"
         ]
 
-        nvenc_cmd = base_cmd + [
+        nvenc_cmd = full_base_cmd + [
             "-c:v", "h264_nvenc",
             "-preset", "p4",
             "-b:v", "8M",
@@ -1055,7 +1134,7 @@ def compose_dual_video_split_sequence(
 
         res = subprocess.run(nvenc_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         if res.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            cpu_cmd = base_cmd + [
+            cpu_cmd = full_base_cmd + [
                 "-c:v", "libx264",
                 "-preset", "veryfast",
                 "-crf", "20",

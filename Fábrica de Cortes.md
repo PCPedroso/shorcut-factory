@@ -185,9 +185,10 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Suporte ao upload de até **2 arquivos de vídeo locais** com escolha interativa da **ordem de reprodução**.
   - **Parte 1 (Início)**: Tela dividida (Split Screen) com o 1º vídeo reproduzindo normalmente no topo e o 2º vídeo congelado na base em modo **Monocromático (Preto e Branco)**.
   - **Parte 2 (Transição)**: Assim que o 1º vídeo termina, o 2º vídeo assume automaticamente **100% da tela cheia** com áudio ativo.
+  - **Ambientação Sonora Independente**: Possibilidade de escolher uma trilha sonora específica para o 1º vídeo (ex: Cômico / Humor / Lo-Fi) e outra para o 2º vídeo (ex: Phonk Agressivo / Heavy Rock / Superação) com volumes individuais e **Audio Ducking inteligente** aplicado em ambas as partes.
   - Renderização acelerada via NVENC GPU/FFmpeg (`compose_dual_video_split_sequence`) com geração unificada de áudio (`audio.mp3`) e transcrição Whisper contínua para alimentação de toda a esteira de cortes, IA e legendas.
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
-- **🧪 Suíte de 77 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 78 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest`.
 
 ---
