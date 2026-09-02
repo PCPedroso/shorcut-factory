@@ -2680,27 +2680,33 @@ if st.session_state.transcription_done:
         mode_manual = st.radio("Modo de Seleção:", ["📜 Blocos de Legenda (Estilo YouTube)", "⏱️ Intervalos de 1 Minuto"], horizontal=True)
         
         if mode_manual == "📜 Blocos de Legenda (Estilo YouTube)":
-            block_labels = [
-                f"[{b['time_label']}]  {b['text'][:90]}..."
-                for b in yt_blocks
-            ]
-            col_s, col_e = st.columns(2)
-            idx_start = col_s.selectbox("Fala de Início:", range(len(yt_blocks)),
-                                         format_func=lambda i: block_labels[i], key="yt_block_start")
-            idx_end = col_e.selectbox("Fala de Fim:", range(len(yt_blocks)),
-                                       format_func=lambda i: block_labels[i],
-                                       index=min(len(yt_blocks)-1, 50), key="yt_block_end")
-            
-            if idx_end >= idx_start:
-                start_s = yt_blocks[idx_start]['start']
-                end_s = yt_blocks[idx_end]['end']
-                st.success(f"Trecho Selecionado: **{format_time(start_s)}** → **{format_time(end_s)}** ({(end_s - start_s)/60:.1f} min)")
-                if st.button("✂️ Usar este trecho na Fábrica de Cortes", key="btn_manual_yt"):
-                    st.session_state.final_start_time = format_time(start_s)
-                    st.session_state.final_end_time = format_time(end_s)
-                    st.session_state.final_corte_title = f"Corte Manual [{yt_blocks[idx_start]['time_label']} - {yt_blocks[idx_end]['time_label']}]"
-                    st.session_state.cut_ready_banner = f"✅ Corte manual: [{format_time(start_s)} → {format_time(end_s)}]"
-                    st.rerun()
+            if yt_blocks:
+                block_labels = [
+                    f"[{b['time_label']}]  {b['text'][:90]}..."
+                    for b in yt_blocks
+                ]
+                col_s, col_e = st.columns(2)
+                idx_start = col_s.selectbox("Fala de Início:", range(len(yt_blocks)),
+                                             format_func=lambda i: block_labels[i], key="yt_block_start")
+                idx_end = col_e.selectbox("Fala de Fim:", range(len(yt_blocks)),
+                                           format_func=lambda i: block_labels[i],
+                                           index=min(len(yt_blocks)-1, 50), key="yt_block_end")
+                
+                if idx_start is not None and idx_end is not None:
+                    if idx_end >= idx_start:
+                        start_s = yt_blocks[idx_start]['start']
+                        end_s = yt_blocks[idx_end]['end']
+                        st.success(f"Trecho Selecionado: **{format_time(start_s)}** → **{format_time(end_s)}** ({(end_s - start_s)/60:.1f} min)")
+                        if st.button("✂️ Usar este trecho na Fábrica de Cortes", key="btn_manual_yt"):
+                            st.session_state.final_start_time = format_time(start_s)
+                            st.session_state.final_end_time = format_time(end_s)
+                            st.session_state.final_corte_title = f"Corte Manual [{yt_blocks[idx_start]['time_label']} - {yt_blocks[idx_end]['time_label']}]"
+                            st.session_state.cut_ready_banner = f"✅ Corte manual: [{format_time(start_s)} → {format_time(end_s)}]"
+                            st.rerun()
+                    else:
+                        st.warning("⚠️ A fala de fim deve ser posterior ou igual à fala de início.")
+            else:
+                st.info("Nenhum bloco de legenda disponível para seleção manual neste vídeo.")
         else:
             if chunks_list:
                 chunk_labels = [
@@ -2714,16 +2720,21 @@ if st.session_state.transcription_done:
                                            format_func=lambda i: chunk_labels[i],
                                            index=min(len(chunks_list)-1, 9), key="manual_end")
                 
-                if idx_end >= idx_start:
-                    start_s = chunks_list[idx_start]['start']
-                    end_s = chunks_list[idx_end]['end']
-                    st.success(f"Trecho: **{format_time(start_s)}** → **{format_time(end_s)}** ({(end_s - start_s)/60:.1f} min)")
-                    if st.button("✂️ Usar este trecho na Fábrica de Cortes", key="btn_manual"):
-                        st.session_state.final_start_time = format_time(start_s)
-                        st.session_state.final_end_time = format_time(end_s)
-                        st.session_state.final_corte_title = "Corte Manual"
-                        st.session_state.cut_ready_banner = f"✅ Corte manual: [{format_time(start_s)} → {format_time(end_s)}]"
-                        st.rerun()
+                if idx_start is not None and idx_end is not None:
+                    if idx_end >= idx_start:
+                        start_s = chunks_list[idx_start]['start']
+                        end_s = chunks_list[idx_end]['end']
+                        st.success(f"Trecho: **{format_time(start_s)}** → **{format_time(end_s)}** ({(end_s - start_s)/60:.1f} min)")
+                        if st.button("✂️ Usar este trecho na Fábrica de Cortes", key="btn_manual"):
+                            st.session_state.final_start_time = format_time(start_s)
+                            st.session_state.final_end_time = format_time(end_s)
+                            st.session_state.final_corte_title = "Corte Manual"
+                            st.session_state.cut_ready_banner = f"✅ Corte manual: [{format_time(start_s)} → {format_time(end_s)}]"
+                            st.rerun()
+                    else:
+                        st.warning("⚠️ O intervalo de fim deve ser posterior ou igual ao intervalo de início.")
+            else:
+                st.info("Nenhum intervalo disponível para seleção manual.")
 
 
     if 'ai_raw' in st.session_state and st.session_state.ai_raw:
