@@ -1218,11 +1218,9 @@ if input_mode.startswith("🌐 Link"):
                 os.makedirs(data_dir, exist_ok=True)
                 audio_path = os.path.join(data_dir, "audio.mp3")
 
-                with st.spinner("🎵 Extraindo áudio de alta qualidade (192kbps MP3) e identificando música..."):
+                with st.spinner("🎵 Extraindo áudio de alta qualidade (192kbps MP3) e identificando a música exata..."):
                     meta = get_video_metadata(video_url)
                     v_title = meta.get("title") or f"Áudio {video_id}"
-                    v_clean_music = meta.get("clean_music_title") or clean_music_title(v_title)
-                    v_sugg_cat = meta.get("suggested_category_label") or "🎵 Trilha Personalizada"
                     v_date = meta.get("upload_date")
                     v_thumb = meta.get("thumbnail")
                     v_dur = meta.get("duration")
@@ -1242,12 +1240,25 @@ if input_mode.startswith("🌐 Link"):
                     if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
                         download_audio(video_url, audio_path, is_live=is_live_flag)
 
+                    # Identificação Inteligente da Música / Som (ignora títulos genéricos e busca o som real)
+                    from core.music_recognizer import identify_song_from_audio_and_meta
+                    rec_res = identify_song_from_audio_and_meta(
+                        audio_path=audio_path,
+                        meta=meta,
+                        ollama_model=ollama_model if 'ollama_model' in locals() or 'ollama_model' in globals() else "llama3:latest",
+                        use_ai=True
+                    )
+                    v_clean_music = rec_res["music_title"]
+                    v_sugg_cat = rec_res["category_label"]
+                    v_rec_source = rec_res.get("source", "Identificação Automática")
+
                 if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
                     st.session_state["extracted_music_card"] = {
                         "path": audio_path,
                         "clean_title": v_clean_music,
                         "orig_title": v_title,
                         "suggested_category": v_sugg_cat,
+                        "rec_source": v_rec_source,
                         "video_id": video_id
                     }
                 else:
@@ -1259,13 +1270,13 @@ if input_mode.startswith("🌐 Link"):
         m_path = m_info["path"]
         if os.path.exists(m_path):
             with st.container():
-                st.success(f"🎉 **Música / Som Identificado com Sucesso!**")
+                st.success(f"🎉 **Música / Som Identificado ({m_info.get('rec_source', 'Reconhecimento')})!**")
                 col_mc1, col_mc2 = st.columns([2, 1.2])
                 with col_mc1:
                     custom_m_name = st.text_input(
-                        "🏷️ Nome da Música / Som (Identificado):",
+                        "🏷️ Nome da Música / Artista (Identificado):",
                         value=m_info.get("clean_title", "Trilha Sonora"),
-                        help="Nome com o qual a trilha aparecerá nos seletores de música de fundo e cortes.",
+                        help="Nome real da música (ex: 'Iron Maiden - Fear of the Dark') que aparecerá nos seletores de trilha de fundo.",
                         key="input_clean_music_name"
                     )
                     all_cat_options = [
@@ -1503,10 +1514,8 @@ else:
             v_full_path = os.path.join(data_dir, "video_full.mp4")
             audio_path = os.path.join(data_dir, "audio.mp3")
             v_title = custom_local_title.strip() if custom_local_title.strip() else os.path.splitext(orig_filename)[0]
-            v_clean_music = clean_music_title(v_title)
-            v_sugg_cat, _ = detect_music_category_suggestion(v_clean_music)
 
-            with st.spinner("🎵 Extraindo faixa de áudio de alta qualidade e identificando som..."):
+            with st.spinner("🎵 Extraindo faixa de áudio de alta qualidade e identificando a música exata..."):
                 file_bytes = uploaded_file.getbuffer()
                 with open(v_full_path, "wb") as f_out:
                     f_out.write(file_bytes)
@@ -1524,12 +1533,24 @@ else:
                     is_live=False
                 )
 
+                from core.music_recognizer import identify_song_from_audio_and_meta
+                rec_res = identify_song_from_audio_and_meta(
+                    audio_path=audio_path,
+                    meta={"title": v_title},
+                    ollama_model=ollama_model if 'ollama_model' in locals() or 'ollama_model' in globals() else "llama3:latest",
+                    use_ai=True
+                )
+                v_clean_music = rec_res["music_title"]
+                v_sugg_cat = rec_res["category_label"]
+                v_rec_source = rec_res.get("source", "Identificação Automática")
+
             if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
                 st.session_state["extracted_music_card"] = {
                     "path": audio_path,
                     "clean_title": v_clean_music,
                     "orig_title": v_title,
                     "suggested_category": v_sugg_cat,
+                    "rec_source": v_rec_source,
                     "video_id": video_id
                 }
             else:
