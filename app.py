@@ -1708,14 +1708,25 @@ else:
         # Padrões sugeridos: 1º Vídeo = Cômico/Humor (se existir) ou Lo-Fi; 2º Vídeo = Phonk Agressivo (se existir) ou Heavy Rock
         v1_default_idx = 0
         v2_default_idx = 0
+        
+        # Verifica se houve upload recente pelo usuário
+        last_up_v1 = st.session_state.get("_last_uploaded_dual_v1")
+        last_up_v2 = st.session_state.get("_last_uploaded_dual_v2")
+
         for i_t, t_obj in enumerate(dual_available_tracks):
-            if t_obj["id"] == "comedy_meme_funny":
+            if last_up_v1 and t_obj["id"] == last_up_v1:
                 v1_default_idx = i_t
-            elif t_obj["id"] == "phonk_power_override":
+            elif not last_up_v1 and t_obj["id"] == "comedy_meme_funny":
+                v1_default_idx = i_t
+            
+            if last_up_v2 and t_obj["id"] == last_up_v2:
                 v2_default_idx = i_t
-        if v1_default_idx == 0 and len(dual_available_tracks) > 5:
+            elif not last_up_v2 and t_obj["id"] == "phonk_power_override":
+                v2_default_idx = i_t
+
+        if v1_default_idx == 0 and len(dual_available_tracks) > 5 and not last_up_v1:
             v1_default_idx = 5 # Lo-fi
-        if v2_default_idx == 0 and len(dual_available_tracks) > 1:
+        if v2_default_idx == 0 and len(dual_available_tracks) > 1 and not last_up_v2:
             v2_default_idx = 1 # Phonk ou primeiro
 
         col_snd1, col_snd2 = st.columns(2)
@@ -1731,6 +1742,19 @@ else:
                     _fmt1 = "audio/mp3" if sel_v1_obj["path"].endswith(".mp3") else "audio/wav"
                     st.audio(af_p1.read(), format=_fmt1)
 
+            with st.expander("📁 Carregar Arquivo de Som do Computador (Parte 1)", expanded=False):
+                up_v1 = st.file_uploader("Upload de Áudio (.mp3, .wav, .m4a):", type=["mp3", "wav", "m4a", "aac", "ogg"], key="uploader_dual_v1")
+                if up_v1 is not None:
+                    _tmp_p1 = os.path.join("data", f"temp_dual1_{up_v1.name}")
+                    os.makedirs("data", exist_ok=True)
+                    with open(_tmp_p1, "wb") as _f_up1:
+                        _f_up1.write(up_v1.getbuffer())
+                    _reg_v1 = register_custom_audio_track(_tmp_p1, title=f"📁 {os.path.splitext(up_v1.name)[0]}", category_name="Personalizada (Parte 1)")
+                    if _reg_v1.get("track"):
+                        st.session_state["_last_uploaded_dual_v1"] = _reg_v1["track"]["id"]
+                        st.success(f"🎉 Trilha **{up_v1.name}** adicionada e selecionada!")
+                        st.rerun()
+
         with col_snd2:
             st.markdown(f"**⚡ Som do 2º Vídeo** (`{second_file.name[:25]}...` - Tela Cheia):")
             sel_v2_lbl = st.selectbox("Trilha Sonora da Parte 2:", dual_track_labels, index=v2_default_idx, key="sel_dual_v2_music")
@@ -1742,6 +1766,19 @@ else:
                 with open(sel_v2_obj["path"], "rb") as af_p2:
                     _fmt2 = "audio/mp3" if sel_v2_obj["path"].endswith(".mp3") else "audio/wav"
                     st.audio(af_p2.read(), format=_fmt2)
+
+            with st.expander("📁 Carregar Arquivo de Som do Computador (Parte 2)", expanded=False):
+                up_v2 = st.file_uploader("Upload de Áudio (.mp3, .wav, .m4a):", type=["mp3", "wav", "m4a", "aac", "ogg"], key="uploader_dual_v2")
+                if up_v2 is not None:
+                    _tmp_p2 = os.path.join("data", f"temp_dual2_{up_v2.name}")
+                    os.makedirs("data", exist_ok=True)
+                    with open(_tmp_p2, "wb") as _f_up2:
+                        _f_up2.write(up_v2.getbuffer())
+                    _reg_v2 = register_custom_audio_track(_tmp_p2, title=f"📁 {os.path.splitext(up_v2.name)[0]}", category_name="Personalizada (Parte 2)")
+                    if _reg_v2.get("track"):
+                        st.session_state["_last_uploaded_dual_v2"] = _reg_v2["track"]["id"]
+                        st.success(f"🎉 Trilha **{up_v2.name}** adicionada e selecionada!")
+                        st.rerun()
 
         dual_audio_ducking = st.checkbox(
             "🎧 Aplicar Audio Ducking Inteligente (Atenua a música automaticamente durante as falas)",
@@ -3676,17 +3713,19 @@ if st.session_state.transcription_done:
             with col_u1:
                 upload_custom_music = st.file_uploader(
                     "➕ Importar Trilha / Som Personalizado (.mp3 ou .wav):",
-                    type=["mp3", "wav", "m4a", "aac"],
+                    type=["mp3", "wav", "m4a", "aac", "ogg"],
                     key="custom_music_uploader",
                     help="Arraste qualquer música ou efeito sonoro do seu computador para adicioná-lo permanentemente à biblioteca."
                 )
                 if upload_custom_music is not None:
-                    dest_music_path = os.path.join(ASSETS_AUDIO_DIR if 'ASSETS_AUDIO_DIR' in locals() or 'ASSETS_AUDIO_DIR' in globals() else os.path.join("assets", "audio"), upload_custom_music.name)
-                    os.makedirs(os.path.dirname(dest_music_path), exist_ok=True)
-                    if not os.path.exists(dest_music_path):
-                        with open(dest_music_path, "wb") as f_m_out:
-                            f_m_out.write(upload_custom_music.getbuffer())
-                        st.success(f"🎉 Trilha **{upload_custom_music.name}** adicionada com sucesso à biblioteca!")
+                    _tmp_sec3 = os.path.join("data", f"temp_sec3_{upload_custom_music.name}")
+                    os.makedirs("data", exist_ok=True)
+                    with open(_tmp_sec3, "wb") as f_m_out:
+                        f_m_out.write(upload_custom_music.getbuffer())
+                    _reg_sec3 = register_custom_audio_track(_tmp_sec3, title=f"📁 {os.path.splitext(upload_custom_music.name)[0]}", category_name="Personalizada")
+                    if _reg_sec3.get("track"):
+                        save_setting("bg_music_track_id", _reg_sec3["track"]["id"])
+                        st.success(f"🎉 Trilha **{upload_custom_music.name}** adicionada com sucesso à biblioteca e selecionada!")
                         st.rerun()
 
             with col_u2:
