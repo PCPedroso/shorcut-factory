@@ -1200,7 +1200,66 @@ if input_mode.startswith("🌐 Link"):
         placeholder="https://www.youtube.com/watch?v=... ou https://www.instagram.com/reel/..."
     )
 
-    if st.button("🚀 Processar Vídeo Online", type="primary", key="btn_process_yt"):
+    col_yt_b1, col_yt_b2 = st.columns([1.5, 1])
+    with col_yt_b1:
+        btn_process_yt = st.button("🚀 Processar Vídeo Online (Completo)", type="primary", key="btn_process_yt", use_container_width=True)
+    with col_yt_b2:
+        btn_audio_yt = st.button("🎵 Extrair Apenas Áudio (MP3)", key="btn_extract_audio_yt", use_container_width=True)
+
+    if btn_audio_yt:
+        if not video_url:
+            st.warning("Por favor, insira uma URL válida.")
+        else:
+            video_id = get_video_id(video_url)
+            if not video_id:
+                st.error("URL inválida ou formato de link não reconhecido.")
+            else:
+                data_dir = os.path.join("data", video_id)
+                os.makedirs(data_dir, exist_ok=True)
+                audio_path = os.path.join(data_dir, "audio.mp3")
+
+                with st.spinner("🎵 Extraindo áudio de alta qualidade (192kbps MP3) do link..."):
+                    meta = get_video_metadata(video_url)
+                    v_title = meta.get("title") or f"Áudio {video_id}"
+                    v_date = meta.get("upload_date")
+                    v_thumb = meta.get("thumbnail")
+                    v_dur = meta.get("duration")
+                    is_live_flag = meta.get("is_live", False)
+
+                    add_or_update_video_in_library(
+                        video_id=video_id,
+                        title=v_title,
+                        upload_date_raw=v_date,
+                        url=video_url,
+                        thumbnail_url=v_thumb,
+                        duration_sec=v_dur,
+                        channel=meta.get("channel"),
+                        is_live=is_live_flag
+                    )
+
+                    if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
+                        download_audio(video_url, audio_path, is_live=is_live_flag)
+
+                if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+                    st.success(f"🎉 Áudio extraído com sucesso: **{v_title}**")
+                    col_ap1, col_ap2 = st.columns([2, 1])
+                    with col_ap1:
+                        with open(audio_path, "rb") as af_dl:
+                            st.audio(af_dl.read(), format="audio/mp3")
+                    with col_ap2:
+                        with open(audio_path, "rb") as af_dl:
+                            st.download_button(
+                                label="📥 Baixar Arquivo MP3",
+                                data=af_dl.read(),
+                                file_name=f"{re.sub(r'[^a-zA-Z0-9_]+', '_', v_title)[:30]}.mp3",
+                                mime="audio/mp3",
+                                use_container_width=True,
+                                key="btn_download_extracted_audio_yt"
+                            )
+                else:
+                    st.error("Não foi possível extrair o áudio do link fornecido.")
+
+    if btn_process_yt:
         if not video_url:
             st.warning("Por favor, insira uma URL válida.")
         else:
@@ -1376,7 +1435,59 @@ else:
         with col_loc2:
             st.caption("📁 Arquivo individual carregado do disco, processado 100% offline com Whisper e GPU.")
 
-        if st.button("🚀 Processar Arquivo de Vídeo Local", type="primary", key="btn_process_local"):
+        col_loc_b1, col_loc_b2 = st.columns([1.5, 1])
+        with col_loc_b1:
+            btn_process_local = st.button("🚀 Processar Arquivo Local (Completo)", type="primary", key="btn_process_local", use_container_width=True)
+        with col_loc_b2:
+            btn_audio_local = st.button("🎵 Extrair Apenas Áudio (MP3)", key="btn_extract_audio_local", use_container_width=True)
+
+        if btn_audio_local:
+            orig_filename = uploaded_file.name
+            video_id = generate_local_video_id(orig_filename)
+            data_dir = os.path.join("data", video_id)
+            os.makedirs(data_dir, exist_ok=True)
+            v_full_path = os.path.join(data_dir, "video_full.mp4")
+            audio_path = os.path.join(data_dir, "audio.mp3")
+            v_title = custom_local_title.strip() if custom_local_title.strip() else os.path.splitext(orig_filename)[0]
+
+            with st.spinner("🎵 Extraindo faixa de áudio de alta qualidade do arquivo local..."):
+                file_bytes = uploaded_file.getbuffer()
+                with open(v_full_path, "wb") as f_out:
+                    f_out.write(file_bytes)
+                v_dur = get_video_duration(v_full_path)
+                extract_audio_from_local_video(v_full_path, audio_path)
+
+                add_or_update_video_in_library(
+                    video_id=video_id,
+                    title=v_title,
+                    upload_date_raw=datetime.now().strftime("%d/%m/%Y"),
+                    url=f"local://{video_id}",
+                    thumbnail_url=None,
+                    duration_sec=int(v_dur),
+                    channel="Vídeo Local (Upload)",
+                    is_live=False
+                )
+
+            if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+                st.success(f"🎉 Áudio extraído com sucesso: **{v_title}**")
+                col_alp1, col_alp2 = st.columns([2, 1])
+                with col_alp1:
+                    with open(audio_path, "rb") as af_dl:
+                        st.audio(af_dl.read(), format="audio/mp3")
+                with col_alp2:
+                    with open(audio_path, "rb") as af_dl:
+                        st.download_button(
+                            label="📥 Baixar Arquivo MP3",
+                            data=af_dl.read(),
+                            file_name=f"{re.sub(r'[^a-zA-Z0-9_]+', '_', v_title)[:30]}.mp3",
+                            mime="audio/mp3",
+                            use_container_width=True,
+                            key="btn_download_extracted_audio_local"
+                        )
+            else:
+                st.error("Não foi possível extrair o áudio do arquivo selecionado.")
+
+        if btn_process_local:
             orig_filename = uploaded_file.name
             video_id = generate_local_video_id(orig_filename)
             local_url = f"local://{video_id}"
@@ -1566,7 +1677,66 @@ else:
             help="Reduz suavemente o volume das trilhas enquanto os oradores falam, garantindo 100% de clareza nas vozes."
         )
 
-        if st.button("🚀 Processar Composição Dupla (Split ➔ Full Screen)", type="primary", key="btn_process_dual_local"):
+        col_dual_b1, col_dual_b2 = st.columns([1.5, 1])
+        with col_dual_b1:
+            btn_process_dual_local = st.button("🚀 Processar Composição Dupla (Split ➔ Full Screen)", type="primary", key="btn_process_dual_local", use_container_width=True)
+        with col_dual_b2:
+            btn_audio_dual = st.button("🎵 Extrair Áudio da Composição (MP3)", key="btn_extract_audio_dual", use_container_width=True)
+
+        if btn_audio_dual:
+            video_id = generate_local_dual_video_id(first_file.name, second_file.name)
+            data_dir = os.path.join("data", video_id)
+            os.makedirs(data_dir, exist_ok=True)
+            raw_v1_path = os.path.join(data_dir, "raw_video_1.mp4")
+            raw_v2_path = os.path.join(data_dir, "raw_video_2.mp4")
+            v_full_path = os.path.join(data_dir, "video_full.mp4")
+            audio_path = os.path.join(data_dir, "audio.mp3")
+            v_title = custom_dual_title.strip() if custom_dual_title.strip() else default_dual_title
+
+            with st.spinner("🎵 Extraindo e unificando trilha de áudio da composição dupla com ambientação sonora..."):
+                with open(raw_v1_path, "wb") as f1_out:
+                    f1_out.write(first_file.getbuffer())
+                with open(raw_v2_path, "wb") as f2_out:
+                    f2_out.write(second_file.getbuffer())
+
+                comp_res = compose_dual_video_split_sequence(
+                    video1_path=raw_v1_path,
+                    video2_path=raw_v2_path,
+                    output_path=v_full_path,
+                    freeze_timestamp_sec=float(dual_freeze_ts),
+                    freeze_monochrome=dual_freeze_bw,
+                    aspect_ratio="9:16" if "9:16" in dual_aspect_choice else "16:9",
+                    divider_color=dual_divider_color,
+                    divider_width=4 if dual_divider_color != "none" else 0,
+                    video1_audio_track=dual_v1_track_id,
+                    video1_audio_volume=float(dual_v1_vol),
+                    video2_audio_track=dual_v2_track_id,
+                    video2_audio_volume=float(dual_v2_vol),
+                    audio_ducking_enabled=dual_audio_ducking
+                )
+                if not comp_res.get("error"):
+                    extract_audio_from_local_video(v_full_path, audio_path)
+
+            if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+                st.success(f"🎉 Áudio da composição dupla extraído com sucesso: **{v_title}**")
+                col_adp1, col_adp2 = st.columns([2, 1])
+                with col_adp1:
+                    with open(audio_path, "rb") as af_dl:
+                        st.audio(af_dl.read(), format="audio/mp3")
+                with col_adp2:
+                    with open(audio_path, "rb") as af_dl:
+                        st.download_button(
+                            label="📥 Baixar Áudio Composto (MP3)",
+                            data=af_dl.read(),
+                            file_name=f"{re.sub(r'[^a-zA-Z0-9_]+', '_', v_title)[:30]}.mp3",
+                            mime="audio/mp3",
+                            use_container_width=True,
+                            key="btn_download_extracted_audio_dual"
+                        )
+            else:
+                st.error("Não foi possível gerar o áudio da composição.")
+
+        if btn_process_dual_local:
             video_id = generate_local_dual_video_id(first_file.name, second_file.name)
             local_url = f"local://{video_id}"
             st.session_state.video_url = local_url
@@ -1674,6 +1844,27 @@ if st.session_state.transcription_done:
 
     from core.transcriber import build_youtube_transcript_blocks, format_badge_time
     
+    active_u_main = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+    v_id_main = get_video_id(active_u_main)
+    main_audio_path = os.path.join("data", v_id_main, "audio.mp3") if v_id_main else None
+
+    if main_audio_path and os.path.exists(main_audio_path) and os.path.getsize(main_audio_path) > 0:
+        with st.expander("🎵 Faixa de Áudio Isolada do Vídeo Completo (MP3 de Alta Fidelidade)", expanded=False):
+            col_aud1, col_aud2 = st.columns([2.5, 1])
+            with col_aud1:
+                with open(main_audio_path, "rb") as f_m_aud:
+                    st.audio(f_m_aud.read(), format="audio/mp3")
+            with col_aud2:
+                with open(main_audio_path, "rb") as f_m_aud:
+                    st.download_button(
+                        label="📥 Baixar Áudio Completo (MP3)",
+                        data=f_m_aud.read(),
+                        file_name=f"{v_id_main}_audio_completo.mp3",
+                        mime="audio/mp3",
+                        use_container_width=True,
+                        key="btn_dl_main_audio_full"
+                    )
+
     yt_blocks = build_youtube_transcript_blocks(st.session_state.segments)
 
     src_badge = st.session_state.get("transcript_source", "YouTube Oficial")
@@ -3867,6 +4058,37 @@ if st.session_state.transcription_done:
                         type="secondary",
                         use_container_width=True,
                         key="btn_dl_cached_thumb"
+                    )
+
+        # Áudio Isolado do Corte (MP3)
+        cut_audio_file = None
+        if f_dir and os.path.exists(f_dir):
+            for _f in os.listdir(f_dir):
+                if _f.endswith(".mp3"):
+                    cut_audio_file = os.path.join(f_dir, _f)
+                    break
+        if not cut_audio_file and existing_inst.get("video_path") and os.path.exists(existing_inst["video_path"]):
+            cut_audio_file = os.path.splitext(existing_inst["video_path"])[0] + ".mp3"
+            if not os.path.exists(cut_audio_file):
+                try:
+                    extract_audio_from_local_video(existing_inst["video_path"], cut_audio_file)
+                except Exception:
+                    pass
+
+        if cut_audio_file and os.path.exists(cut_audio_file) and os.path.getsize(cut_audio_file) > 0:
+            col_ca_p1, col_ca_p2 = st.columns([2, 1])
+            with col_ca_p1:
+                with open(cut_audio_file, "rb") as af_cut:
+                    st.audio(af_cut.read(), format="audio/mp3")
+            with col_ca_p2:
+                with open(cut_audio_file, "rb") as af_cut:
+                    st.download_button(
+                        label=f"🎵 Baixar Áudio do Corte (MP3)",
+                        data=af_cut.read(),
+                        file_name=os.path.basename(cut_audio_file),
+                        mime="audio/mp3",
+                        use_container_width=True,
+                        key="btn_dl_cut_audio_inst"
                     )
         
         abs_fol_c = os.path.abspath(existing_inst.get("folder_path", ""))

@@ -52,6 +52,7 @@ class TestExportKit(unittest.TestCase):
 
             self.assertTrue(os.path.exists(pkg["package_dir"]))
             self.assertTrue(os.path.exists(pkg["video_dest_path"]))
+            self.assertIn("audio_filename", pkg)
 
             info_path = os.path.join(pkg["package_dir"], "info_publicacao.txt")
             desc_path = os.path.join(pkg["package_dir"], "descricao.txt")

@@ -88,6 +88,16 @@ def create_viral_package(
         if os.path.exists(video_path):
             shutil.copy2(video_path, video_dest_path)
 
+        # 1.1 Extrai a faixa de áudio isolada (.MP3) do corte em alta fidelidade
+        audio_filename = f"{folder_name}.mp3"
+        audio_dest_path = os.path.join(package_dir, audio_filename)
+        if os.path.exists(video_dest_path):
+            try:
+                from core.video_processor import extract_audio_from_local_video
+                extract_audio_from_local_video(video_dest_path, audio_dest_path)
+            except Exception:
+                pass
+
         # 2. Copia ou move a thumbnail gerada e suas variações estilizadas
         thumb_dest_path = None
         thumb_filename = "thumbnail.jpg"
@@ -150,6 +160,8 @@ def create_viral_package(
         if sub_res.get("txt_path"):
             sub_info_str += f"• Transcrição de Fala (.TXT): {os.path.basename(sub_res['txt_path'])}\n"
 
+        audio_info_str = f"• Áudio Isolado (.MP3): {audio_filename}\n" if os.path.exists(audio_dest_path) else ""
+
         # 4. info_publicacao.txt
         info_content = f"""════════════════════════════════════════════════════════════════
 🚀 PACOTE DE PUBLICAÇÃO VIRAL
@@ -169,7 +181,7 @@ def create_viral_package(
 
 🎬 ARQUIVOS GERADOS DO CORTE:
 • Vídeo (.MP4): {video_filename}
-{thumb_info_str}{sub_info_str}════════════════════════════════════════════════════════════════
+{audio_info_str}{thumb_info_str}{sub_info_str}════════════════════════════════════════════════════════════════
 📺 INFORMAÇÕES DO VÍDEO ORIGINAL
 ════════════════════════════════════════════════════════════════
 • Título Original: {orig_title}
@@ -196,6 +208,8 @@ def create_viral_package(
             "package_dir": package_dir,
             "video_filename": video_filename,
             "video_dest_path": video_dest_path,
+            "audio_filename": audio_filename if os.path.exists(audio_dest_path) else None,
+            "audio_dest_path": audio_dest_path if os.path.exists(audio_dest_path) else None,
             "thumbnail_filename": thumb_filename if thumb_dest_path else None,
             "thumbnail_dest_path": thumb_dest_path,
             "thumbnail_variations": variations_copied,
