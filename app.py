@@ -1927,39 +1927,35 @@ else:
                     is_live=False
                 )
 
-                # 4. Extração de Áudio e Transcrição Unificada
-                if os.path.exists(transcript_file):
-                    st.success("✅ Cache de transcrição encontrado para esta composição! Carregando...")
-                    load_video_saved_artifacts(video_id)
+                # 4. Extração de Áudio e Transcrição Unificada da Composição
+                with st.spinner("Extraindo faixa de áudio unificada da composição..."):
+                    audio_res = extract_audio_from_local_video(v_full_path, audio_path)
+
+                if audio_res.get("error"):
+                    st.error(f"Erro ao extrair áudio: {audio_res['error']}")
                 else:
-                    with st.spinner("Extraindo faixa de áudio unificada da composição..."):
-                        audio_res = extract_audio_from_local_video(v_full_path, audio_path)
+                    with st.spinner(f"Transcrevendo áudio unificado com Whisper ({model_size}) na {device_option.upper()}..."):
+                        transcribe_res = transcribe_audio(
+                            audio_path,
+                            model_size=model_size,
+                            device=device_option
+                        )
 
-                    if audio_res.get("error"):
-                        st.error(f"Erro ao extrair áudio: {audio_res['error']}")
+                    if transcribe_res.get("error"):
+                        st.error(f"Erro na transcrição: {transcribe_res['error']}")
                     else:
-                        with st.spinner(f"Transcrevendo áudio unificado com Whisper ({model_size}) na {device_option.upper()}..."):
-                            transcribe_res = transcribe_audio(
-                                audio_path,
-                                model_size=model_size,
-                                device=device_option
-                            )
+                        st.success("🎉 Transcrição da composição concluída com sucesso! Pronta para cortes e IA.")
+                        st.session_state.transcription_done = True
+                        st.session_state.full_text = transcribe_res["full_text"]
+                        st.session_state.segments = transcribe_res["transcript_segments"]
+                        st.session_state.transcript_source = "Whisper Local (Composição Dupla)"
 
-                        if transcribe_res.get("error"):
-                            st.error(f"Erro na transcrição: {transcribe_res['error']}")
-                        else:
-                            st.success("🎉 Transcrição da composição concluída com sucesso! Pronta para cortes e IA.")
-                            st.session_state.transcription_done = True
-                            st.session_state.full_text = transcribe_res["full_text"]
-                            st.session_state.segments = transcribe_res["transcript_segments"]
-                            st.session_state.transcript_source = "Whisper Local (Composição Dupla)"
-
-                            with open(transcript_file, "w", encoding="utf-8") as f:
-                                json.dump({
-                                    "full_text": st.session_state.full_text,
-                                    "segments": st.session_state.segments,
-                                    "source": st.session_state.transcript_source
-                                }, f, ensure_ascii=False, indent=4)
+                        with open(transcript_file, "w", encoding="utf-8") as f:
+                            json.dump({
+                                "full_text": st.session_state.full_text,
+                                "segments": st.session_state.segments,
+                                "source": st.session_state.transcript_source
+                            }, f, ensure_ascii=False, indent=4)
 
 
 if st.session_state.transcription_done:

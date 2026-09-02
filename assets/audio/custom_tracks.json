@@ -97,5 +97,14 @@
         "description": "Extraído para cortes (Personalizada (Parte 2))",
         "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\cut_dark_knight_afxnsx_1.mp3",
         "is_builtin": false
+    },
+    "cut_dark_knight_afxnsx_2.mp3": {
+        "id": "cut_dark_knight_afxnsx_2.mp3",
+        "filename": "cut_dark_knight_afxnsx_2.mp3",
+        "title": "📁 Cut - Dark Knight - AFXNSX",
+        "category": "Personalizada (Parte 2)",
+        "description": "Extraído para cortes (Personalizada (Parte 2))",
+        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\cut_dark_knight_afxnsx_2.mp3",
+        "is_builtin": false
     }
 }
