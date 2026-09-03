@@ -2142,87 +2142,6 @@ if st.session_state.transcription_done:
                     f"</div>"
                 )
                 st.markdown(line_html, unsafe_allow_html=True)
-
-    # ── FERRAMENTA DE TRADUÇÃO SOB DEMANDA (PT-BR ⇄ EN ⇄ ES) ────────────────
-    with st.expander("🌐 Tradução Inteligente de Transcrição & Legendas (Sob Demanda)", expanded=False):
-        st.markdown(
-            "Traduz a transcrição e sincroniza as legendas via IA local (Ollama). "
-            "Os tempos de início e fim (`start`/`end`) de cada frase são **100% preservados** para queima no vídeo e exportação."
-        )
-
-        has_backup = has_original_backup(v_id_main) if v_id_main else False
-
-        col_tr1, col_tr2, col_tr3 = st.columns([1.5, 1.2, 1.3])
-        with col_tr1:
-            lang_options = [
-                ("pt-BR", "🇧🇷 Português (Brasil)"),
-                ("en", "🇺🇸 Inglês (English)"),
-                ("es", "🇪🇸 Espanhol (Español)")
-            ]
-            target_lang_code = st.selectbox(
-                "Idioma de Destino:",
-                [code for code, _ in lang_options],
-                format_func=lambda c: dict(lang_options).get(c, c),
-                key="sel_trans_target_lang"
-            )
-
-        with col_tr2:
-            trans_model = st.selectbox(
-                "Modelo IA:",
-                _ollama_models,
-                index=_om_idx,
-                key="sel_trans_model"
-            )
-
-        with col_tr3:
-            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-            btn_run_translate = st.button("🌐 Traduzir com IA", type="secondary", use_container_width=True, key="btn_run_trans_ollama")
-
-        if has_backup:
-            st.info("ℹ️ **Nota:** Esta transcrição possui uma versão original salva em backup.")
-            if st.button("⏪ Restaurar Transcrição Original", type="secondary", key="btn_restore_orig_trans"):
-                restored = restore_original_transcript(v_id_main)
-                if restored:
-                    st.session_state.full_text = restored.get("text", "")
-                    st.session_state.segments = restored.get("segments", [])
-                    st.session_state.transcript_source = restored.get("source", "Original Restaurado")
-                    st.success("✅ Transcrição original restaurada com sucesso!")
-                    st.rerun()
-                else:
-                    st.error("Não foi possível restaurar a transcrição original.")
-
-        if btn_run_translate:
-            if not st.session_state.segments:
-                st.warning("Nenhum segmento de transcrição disponível para traduzir.")
-            else:
-                prog_bar = st.progress(0.0)
-                status_txt = st.empty()
-
-                def update_prog(val, msg):
-                    prog_bar.progress(val)
-                    status_txt.caption(f"⏳ {msg}")
-
-                with st.spinner(f"Traduzindo {len(st.session_state.segments)} frases para {LANGUAGE_NAMES.get(target_lang_code, target_lang_code)} com Ollama ({trans_model})..."):
-                    trans_res = translate_transcript_segments(
-                        segments=st.session_state.segments,
-                        target_lang=target_lang_code,
-                        model=trans_model,
-                        batch_size=25,
-                        progress_callback=update_prog
-                    )
-
-                if trans_res.get("error"):
-                    st.error(f"Erro na tradução: {trans_res['error']}")
-                else:
-                    if v_id_main:
-                        save_translated_transcript(v_id_main, trans_res, target_lang_code)
-
-                    st.session_state.full_text = trans_res["full_text"]
-                    st.session_state.segments = trans_res["segments"]
-                    st.session_state.transcript_source = f"IA Tradução ({LANGUAGE_NAMES.get(target_lang_code, target_lang_code)})"
-
-                    st.success(f"🎉 **{trans_res['translated_count']} frases traduzidas com sucesso** para {LANGUAGE_NAMES.get(target_lang_code, target_lang_code)}! Todos os timestamps foram sincronizados.")
-                    st.rerun()
     
     st.header("2. Inteligência Temática (Llama 3)")
     st.markdown("Use a Inteligência Artificial para extrair os tempos exatos para cortes.")
@@ -3708,76 +3627,83 @@ if st.session_state.transcription_done:
 
                 # ── 🌐 TRADUÇÃO DE LEGENDAS ESPECÍFICA DESTE CORTE ──────────
                 st.markdown("---")
-                st.markdown("##### 🌐 Traduzir Legendas Deste Corte com IA (Sob Demanda)")
-                st.caption("Traduz apenas as frases contidas neste trecho específico (ex: Inglês ➔ Português-BR), mantendo 100% da sincronização milimétrica de tempo com a fala.")
+                cut_trans_enabled = st.toggle(
+                    "🌐 Ativar Tradução Inteligente de Legendas (Deste Corte)",
+                    value=st.session_state.get("cut_trans_enabled_tgl", False),
+                    key="cut_trans_enabled_tgl",
+                    help="Ativa a tradução com IA das legendas exclusivamente para o trecho do corte atual (ex: Inglês ➔ Português-BR), mantendo 100% da sincronização milimétrica de tempo com a fala."
+                )
 
-                col_ct1, col_ct2, col_ct3 = st.columns([1.6, 1.2, 1.4])
-                with col_ct1:
-                    _cut_lang_opts = [
-                        ("pt-BR", "🇧🇷 Português (Brasil)"),
-                        ("en", "🇺🇸 Inglês (English)"),
-                        ("es", "🇪🇸 Espanhol (Español)")
-                    ]
-                    sel_cut_lang_code = st.selectbox(
-                        "Traduzir este corte para:",
-                        [c for c, _ in _cut_lang_opts],
-                        format_func=lambda c: dict(_cut_lang_opts).get(c, c),
-                        key="sel_cut_sub_trans_lang"
-                    )
-                with col_ct2:
-                    sel_cut_trans_model = st.selectbox(
-                        "Modelo IA:",
-                        _ollama_models,
-                        index=_om_idx,
-                        key="sel_cut_trans_model"
-                    )
-                with col_ct3:
-                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-                    btn_translate_this_cut = st.button("🌐 Traduzir Legendas", type="secondary", use_container_width=True, key="btn_translate_this_cut")
+                if cut_trans_enabled:
+                    st.caption("Traduz apenas as frases contidas neste trecho específico com IA local (Ollama).")
 
-                if _vid_id_sub and has_original_backup(_vid_id_sub):
-                    col_rev1, col_rev2 = st.columns([3, 1])
-                    with col_rev1:
-                        st.info("ℹ️ Este corte possui legendas com tradução aplicada.")
-                    with col_rev2:
-                        if st.button("⏪ Reverter Original", key="btn_revert_cut_sub_orig", use_container_width=True):
-                            restore_original_transcript(_vid_id_sub)
-                            st.success("✅ Legendas restauradas para a versão original!")
-                            st.rerun()
+                    col_ct1, col_ct2, col_ct3 = st.columns([1.6, 1.2, 1.4])
+                    with col_ct1:
+                        _cut_lang_opts = [
+                            ("pt-BR", "🇧🇷 Português (Brasil)"),
+                            ("en", "🇺🇸 Inglês (English)"),
+                            ("es", "🇪🇸 Espanhol (Español)")
+                        ]
+                        sel_cut_lang_code = st.selectbox(
+                            "Traduzir este corte para:",
+                            [c for c, _ in _cut_lang_opts],
+                            format_func=lambda c: dict(_cut_lang_opts).get(c, c),
+                            key="sel_cut_sub_trans_lang"
+                        )
+                    with col_ct2:
+                        sel_cut_trans_model = st.selectbox(
+                            "Modelo IA:",
+                            _ollama_models,
+                            index=_om_idx,
+                            key="sel_cut_trans_model"
+                        )
+                    with col_ct3:
+                        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                        btn_translate_this_cut = st.button("🌐 Traduzir Agora", type="secondary", use_container_width=True, key="btn_translate_this_cut")
 
-                if btn_translate_this_cut:
-                    if not start_time or not end_time:
-                        st.warning("Preencha o tempo inicial e final do corte antes de traduzir.")
-                    elif not _vid_id_sub:
-                        st.error("Vídeo não identificado.")
-                    else:
-                        with st.spinner(f"Traduzindo legendas do trecho [{start_time} → {end_time}] para {dict(_cut_lang_opts).get(sel_cut_lang_code)} via Ollama ({sel_cut_trans_model})..."):
-                            from core.translator import translate_cut_subtitles
-                            res_cut_tr = translate_cut_subtitles(
-                                video_id=_vid_id_sub,
-                                start_time_str=start_time,
-                                end_time_str=end_time,
-                                target_lang=sel_cut_lang_code,
-                                model=sel_cut_trans_model
-                            )
-                        if res_cut_tr.get("error"):
-                            st.error(f"Erro ao traduzir legendas do corte: {res_cut_tr['error']}")
+                    if _vid_id_sub and has_original_backup(_vid_id_sub):
+                        col_rev1, col_rev2 = st.columns([3, 1])
+                        with col_rev1:
+                            st.info("ℹ️ Este corte possui legendas com tradução aplicada.")
+                        with col_rev2:
+                            if st.button("⏪ Reverter Original", key="btn_revert_cut_sub_orig", use_container_width=True):
+                                restore_original_transcript(_vid_id_sub)
+                                st.success("✅ Legendas restauradas para a versão original!")
+                                st.rerun()
+
+                    if btn_translate_this_cut:
+                        if not start_time or not end_time:
+                            st.warning("Preencha o tempo inicial e final do corte antes de traduzir.")
+                        elif not _vid_id_sub:
+                            st.error("Vídeo não identificado.")
                         else:
-                            st.success(f"🎉 **{res_cut_tr['count']} frase(s) do corte traduzida(s) com sucesso!**")
-                            if res_cut_tr.get("translated_snippet"):
-                                st.caption(f"📝 **Prévia da Legenda Traduzida:** *\"{res_cut_tr['translated_snippet'][:180]}...\"*")
-                            
-                            # Atualiza session_state com o novo transcript
-                            try:
-                                _tr_upd_p = os.path.join("data", res_cut_tr.get("video_id", _vid_id_sub), "transcript.json")
-                                if os.path.exists(_tr_upd_p):
-                                    with open(_tr_upd_p, "r", encoding="utf-8") as _trf:
-                                        _upd_data = json.load(_trf)
-                                        st.session_state.segments = _upd_data.get("segments", st.session_state.get("segments"))
-                                        st.session_state.full_text = _upd_data.get("full_text") or _upd_data.get("text", st.session_state.get("full_text"))
-                            except Exception:
-                                pass
-                            st.rerun()
+                            with st.spinner(f"Traduzindo legendas do trecho [{start_time} → {end_time}] para {dict(_cut_lang_opts).get(sel_cut_lang_code)} via Ollama ({sel_cut_trans_model})..."):
+                                from core.translator import translate_cut_subtitles
+                                res_cut_tr = translate_cut_subtitles(
+                                    video_id=_vid_id_sub,
+                                    start_time_str=start_time,
+                                    end_time_str=end_time,
+                                    target_lang=sel_cut_lang_code,
+                                    model=sel_cut_trans_model
+                                )
+                            if res_cut_tr.get("error"):
+                                st.error(f"Erro ao traduzir legendas do corte: {res_cut_tr['error']}")
+                            else:
+                                st.success(f"🎉 **{res_cut_tr['count']} frase(s) do corte traduzida(s) com sucesso!**")
+                                if res_cut_tr.get("translated_snippet"):
+                                    st.caption(f"📝 **Prévia da Legenda Traduzida:** *\"{res_cut_tr['translated_snippet'][:180]}...\"*")
+                                
+                                # Atualiza session_state com o novo transcript
+                                try:
+                                    _tr_upd_p = os.path.join("data", res_cut_tr.get("video_id", _vid_id_sub), "transcript.json")
+                                    if os.path.exists(_tr_upd_p):
+                                        with open(_tr_upd_p, "r", encoding="utf-8") as _trf:
+                                            _upd_data = json.load(_trf)
+                                            st.session_state.segments = _upd_data.get("segments", st.session_state.get("segments"))
+                                            st.session_state.full_text = _upd_data.get("full_text") or _upd_data.get("text", st.session_state.get("full_text"))
+                                except Exception:
+                                    pass
+                                st.rerun()
 
     # ─────────────────────────────────────────────────────────────────
     # 🏷️ Headline / Título Fixo de Retenção no Topo (Fase 3)
