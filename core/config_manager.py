@@ -11,7 +11,7 @@ SETTINGS_FILE = os.path.join("data", "app_settings.json")
 
 DEFAULT_SETTINGS = {
     # Dispositivo e Modelos
-    "device_option": "cpu",
+    "device_option": "cuda",
     "model_size": "small",
     "ollama_model": "llama3",
     "analysis_strategy": "🎙️ Entrevistas & Sabatinas (Detecção Q&A [INÍCIO -> FIM])",

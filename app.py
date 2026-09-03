@@ -1097,8 +1097,8 @@ else:
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ Configurações")
 
-_devices = ["cpu", "cuda"]
-_dev_idx = _devices.index(_cfg.get("device_option", "cpu")) if _cfg.get("device_option") in _devices else 0
+_devices = ["cuda", "cpu"]
+_dev_idx = _devices.index(_cfg.get("device_option", "cuda")) if _cfg.get("device_option") in _devices else 0
 device_option = st.sidebar.selectbox("Dispositivo de Processamento", _devices, index=_dev_idx)
 
 _model_sizes = ["tiny", "small", "medium", "large-v3"]

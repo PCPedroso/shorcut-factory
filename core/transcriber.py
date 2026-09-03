@@ -28,20 +28,35 @@ def extract_youtube_video_id(url_or_id: str) -> str:
 
 def fetch_youtube_transcript(video_id: str, preferred_languages: list = None) -> dict:
     """
-    Obtém a transcrição oficial do YouTube com prioridade absoluta para Português (pt-BR, pt, pt-PT).
-    Detecta todas as linguagens disponíveis no vídeo e sinaliza suporte a multilinguagem.
+    Obtém a transcrição oficial do YouTube com prioridade absoluta para Português (pt-BR, pt, pt-PT, pt-orig).
+    Utiliza motor duplo:
+      1. YouTubeTranscriptApi (com varredura de legendas manuais e geradas automaticamente)
+      2. Fallback via yt-dlp (extração direta dos streams json3 de automatic_captions/subtitles)
     """
     if preferred_languages is None:
-        preferred_languages = ['pt-BR', 'pt', 'pt-PT', 'pt-br', 'pt-pt', 'en', 'es']
+        preferred_languages = ['pt', 'pt-BR', 'pt-PT', 'pt-orig', 'a.pt', 'en', 'es']
 
+    clean_id = extract_youtube_video_id(video_id)
+    if not clean_id:
+        return {
+            "transcript_segments": None,
+            "full_text": None,
+            "source": None,
+            "available_languages": [],
+            "selected_language": None,
+            "error": "ID do YouTube inválido."
+        }
+
+    available_languages = []
+    selected_lang_name = "Português"
+    last_err = None
+
+    # -- MOTOR 1: YouTubeTranscriptApi --
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
-        clean_id = extract_youtube_video_id(video_id)
         ytt = YouTubeTranscriptApi()
 
-        # 1. Mapeia todas as faixas de legenda disponíveis no vídeo
-        available_languages = []
-        selected_lang_name = "Português"
+        # Mapeia todas as faixas disponíveis
         try:
             t_list = ytt.list(clean_id)
             for t in t_list:
@@ -51,50 +66,128 @@ def fetch_youtube_transcript(video_id: str, preferred_languages: list = None) ->
                     "is_generated": getattr(t, "is_generated", False),
                     "is_translatable": getattr(t, "is_translatable", False)
                 })
+
+            # Busca faixa preferencial (manual ou automática)
+            tr = None
+            try:
+                tr = t_list.find_transcript(preferred_languages)
+            except Exception:
+                try:
+                    tr = t_list.find_generated_transcript(preferred_languages)
+                except Exception:
+                    pass
+
+            if tr is not None:
+                fetched = tr.fetch()
+                selected_lang_name = tr.language
+            else:
+                fetched = ytt.fetch(clean_id, languages=preferred_languages)
         except Exception:
-            pass
+            fetched = ytt.fetch(clean_id, languages=preferred_languages)
 
-        # 2. Busca estritamente com a ordem de preferência (Português prioritário)
-        fetched = ytt.fetch(clean_id, languages=preferred_languages)
+        if fetched:
+            transcript_data = []
+            full_text_list = []
+            for seg in fetched:
+                # Trata objeto ou dict
+                text = getattr(seg, "text", None) or (seg.get("text") if isinstance(seg, dict) else "")
+                start = getattr(seg, "start", None) or (seg.get("start") if isinstance(seg, dict) else 0.0)
+                dur = getattr(seg, "duration", None) or (seg.get("duration") if isinstance(seg, dict) else 0.0)
 
-        # Identifica a linguagem selecionada
-        if available_languages:
-            for pref in preferred_languages:
-                matching = [l for l in available_languages if l["code"].lower() == pref.lower()]
-                if matching:
-                    selected_lang_name = matching[0]["name"]
+                t_clean = str(text).strip().replace('\n', ' ')
+                if not t_clean:
+                    continue
+                transcript_data.append({
+                    "start": round(float(start), 2),
+                    "end": round(float(start) + float(dur), 2),
+                    "text": t_clean
+                })
+                full_text_list.append(t_clean)
+
+            if transcript_data:
+                return {
+                    "transcript_segments": transcript_data,
+                    "full_text": " ".join(full_text_list),
+                    "source": f"YouTube Oficial ({selected_lang_name})",
+                    "available_languages": available_languages,
+                    "selected_language": selected_lang_name,
+                    "error": None
+                }
+    except Exception as e1:
+        last_err = str(e1)
+
+    # -- MOTOR 2: Fallback via yt-dlp Subtitle Stream (json3) --
+    try:
+        import yt_dlp
+        import urllib.request
+        from core.extractor import get_cookie_file
+
+        url = f"https://www.youtube.com/watch?v={clean_id}"
+        ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True}
+        cookie_file = get_cookie_file()
+        if cookie_file:
+            ydl_opts['cookiefile'] = cookie_file
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            auto_captions = info.get('automatic_captions') or {}
+            manual_subtitles = info.get('subtitles') or {}
+
+            # Prioridade de busca
+            target_formats = None
+            found_lang_key = "pt"
+            for lang_k in preferred_languages + ['pt', 'pt-BR', 'pt-PT', 'pt-orig']:
+                if lang_k in manual_subtitles:
+                    target_formats = manual_subtitles[lang_k]
+                    found_lang_key = lang_k
+                    break
+                if lang_k in auto_captions:
+                    target_formats = auto_captions[lang_k]
+                    found_lang_key = lang_k
                     break
 
-        transcript_data = []
-        full_text_list = []
-        for seg in fetched:
-            t = seg.text.strip().replace('\n', ' ')
-            if not t:
-                continue
-            transcript_data.append({
-                "start": round(seg.start, 2),
-                "end": round(seg.start + seg.duration, 2),
-                "text": t
-            })
-            full_text_list.append(t)
+            if target_formats:
+                json_url = next((f['url'] for f in target_formats if f.get('ext') == 'json3'), None)
+                if json_url:
+                    req = urllib.request.Request(json_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        data = json.loads(resp.read().decode('utf-8'))
+                        events = data.get('events', [])
+                        transcript_data = []
+                        full_text_list = []
+                        for ev in events:
+                            if 'segs' in ev and 'tStartMs' in ev:
+                                start = round(float(ev['tStartMs']) / 1000.0, 2)
+                                dur = round(float(ev.get('dDurationMs', 0)) / 1000.0, 2)
+                                txt = ''.join([s.get('utf8', '') for s in ev['segs']]).strip().replace('\n', ' ')
+                                if txt:
+                                    transcript_data.append({
+                                        'start': start,
+                                        'end': round(start + dur, 2),
+                                        'text': txt
+                                    })
+                                    full_text_list.append(txt)
 
-        return {
-            "transcript_segments": transcript_data,
-            "full_text": " ".join(full_text_list),
-            "source": f"YouTube Oficial ({selected_lang_name})",
-            "available_languages": available_languages,
-            "selected_language": selected_lang_name,
-            "error": None
-        }
-    except Exception as e:
-        return {
-            "transcript_segments": None,
-            "full_text": None,
-            "source": None,
-            "available_languages": [],
-            "selected_language": None,
-            "error": str(e)
-        }
+                        if transcript_data:
+                            return {
+                                "transcript_segments": transcript_data,
+                                "full_text": " ".join(full_text_list),
+                                "source": f"YouTube Oficial ({found_lang_key})",
+                                "available_languages": available_languages,
+                                "selected_language": found_lang_key,
+                                "error": None
+                            }
+    except Exception as e2:
+        last_err = f"{last_err} | yt-dlp: {e2}"
+
+    return {
+        "transcript_segments": None,
+        "full_text": None,
+        "source": None,
+        "available_languages": available_languages,
+        "selected_language": None,
+        "error": last_err or "Legendas não encontradas no YouTube."
+    }
 
 
 def transcribe_audio(audio_path: str, model_size: str = "small", device: str = "cuda", language: str = "pt"):
