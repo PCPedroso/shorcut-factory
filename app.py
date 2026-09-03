@@ -81,7 +81,8 @@ from core.audio_processor import (
 )
 from core.translator import (
     translate_transcript_segments, save_translated_transcript,
-    restore_original_transcript, has_original_backup, LANGUAGE_NAMES
+    restore_original_transcript, has_original_backup, translate_cut_subtitles,
+    LANGUAGE_NAMES
 )
 
 # Carrega todas as configurações persistentes salvas
@@ -4470,8 +4471,9 @@ if st.session_state.transcription_done:
                         _target_tr_lang = st.session_state.get("sel_cut_sub_trans_lang", "pt-BR")
                         _target_tr_model = st.session_state.get("sel_cut_trans_model", "llama3")
                         with st.spinner(f"🌐 Traduzindo legendas do corte para {_target_tr_lang} via IA ({_target_tr_model})..."):
-                            from core.translator import translate_cut_subtitles
-                            res_cut_tr = translate_cut_subtitles(
+                            import core.translator
+                            importlib.reload(core.translator)
+                            res_cut_tr = core.translator.translate_cut_subtitles(
                                 video_id=video_id,
                                 start_time_str=start_time,
                                 end_time_str=end_time,
