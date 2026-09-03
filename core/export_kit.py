@@ -10,7 +10,30 @@ import re
 import shutil
 
 
-def build_cut_folder_name(aspect_mode: str, title: str) -> str:
+def format_time_for_filename(t_str: str) -> str:
+    """
+    Converte strings de tempo como '00:01:29.00', '00:36:06', '01:15:30.50' em sufixo limpo para nomes de arquivo/pasta:
+      - '00:01:29.00' -> '01m29s'
+      - '00:36:06'    -> '36m06s'
+      - '01:15:30'    -> '01h15m30s'
+      - '90'          -> '01m30s'
+    """
+    if not t_str:
+        return ""
+    from core.extractor import parse_time_str
+    sec_val = parse_time_str(t_str)
+    if sec_val is None or sec_val < 0:
+        return ""
+    total_sec = int(sec_val)
+    h = total_sec // 3600
+    m = (total_sec % 3600) // 60
+    s = total_sec % 60
+    if h > 0:
+        return f"{h:02d}h{m:02d}m{s:02d}s"
+    return f"{m:02d}m{s:02d}s"
+
+
+def build_cut_folder_name(aspect_mode: str, title: str, start_time_str: str = None, end_time_str: str = None) -> str:
     """
     Gera o nome padronizado da pasta e arquivos conforme a regra de negócio:
     
@@ -24,6 +47,10 @@ def build_cut_folder_name(aspect_mode: str, title: str) -> str:
     Sufixo do Título:
       Primeiras palavras COMPLETAS do título, com no MÁXIMO 25 caracteres.
       Caso a próxima palavra ultrapasse o limite de 25 caracteres, ela é descartada.
+
+    Sufixo de Minutagem (quando fornecido):
+      Diferencia cortes diferentes que usem o mesmo formato e mesmo título base.
+      Ex: VFDBS_corte_selecionado_01m29s_05m25s vs VFDBS_corte_selecionado_36m06s_39m30s
     """
     prefix_map = {
         "9:16_split": "VLDSS",
@@ -50,7 +77,20 @@ def build_cut_folder_name(aspect_mode: str, title: str) -> str:
             break
 
     title_suffix = "_".join(selected_words) if selected_words else "corte"
-    return f"{prefix}_{title_suffix}"
+
+    # Sufixo de minutagem para diferenciar trechos
+    time_parts = []
+    if start_time_str:
+        s_fmt = format_time_for_filename(start_time_str)
+        if s_fmt:
+            time_parts.append(s_fmt)
+    if end_time_str:
+        e_fmt = format_time_for_filename(end_time_str)
+        if e_fmt:
+            time_parts.append(e_fmt)
+
+    time_suffix = f"_{'_'.join(time_parts)}" if time_parts else ""
+    return f"{prefix}_{title_suffix}{time_suffix}"
 
 
 def create_viral_package(
@@ -68,7 +108,7 @@ def create_viral_package(
     end_time_str: str = None,
 ) -> dict:
     """
-    Cria a pasta estruturada do corte dentro de data/<video_id>/<PREFIXO>_<Palavras>/
+    Cria a pasta estruturada do corte dentro de data/<video_id>/<PREFIXO>_<Palavras>_<Minutagem>/
     e gera:
     1. Vídeo renderizado (.mp4) nomeado com o código do corte
     2. Capa / Thumbnail 9:16 (thumbnail.jpg) em alta resolução e variações
@@ -78,7 +118,7 @@ def create_viral_package(
     6. tags.txt (hashtags e tags SEO)
     """
     try:
-        folder_name = build_cut_folder_name(aspect_mode, title)
+        folder_name = build_cut_folder_name(aspect_mode, title, start_time_str=start_time_str, end_time_str=end_time_str)
         package_dir = os.path.join(output_base_dir, folder_name)
         os.makedirs(package_dir, exist_ok=True)
 

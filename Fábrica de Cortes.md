@@ -126,8 +126,23 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 - **Kit de Publicação Viral com IA com Guia Editorial (`core/analyzer.py`, `app.py`)**:
   - Título Magnético, Variações Alternativas, Legenda com CTA e Hashtags/SEO contextuais. Geração individualizada de cada texto sob demanda.
   - **Direção Editorial Personalizada (`user_guidance`)**: Campo dedicado para instruir a IA sobre tom e assunto prioritário.
-- **Exportação Padronizada com Nomenclatura Estrita** (`core/export_kit.py`):
-  - Prefixos de 5 letras (`VLDSS`, `VRIRA`, `VFDBS`, `VCCFT`, `HOFHD`) + limite de 25 caracteres em palavras completas do título.
+- **📦 Pacote de Publicação Viral Estruturado (`core/export_kit.py`, `core/cuts_catalog.py`, `app.py`)**:
+  - Salva cada corte em pasta própria dentro de `data/<video_id>/<PREFIXO>_<Palavras_Do_Titulo>_<Minutagem>/`.
+  - **Diferenciação Completa por Formato e Minutagem**: Anexa a minutagem de início e fim no nome da pasta (ex: `VFDBS_Corte_Selecionado_01m29s_05m25s` vs `VFDBS_Corte_Selecionado_36m06s_39m30s`), permitindo gerar múltiplos cortes do mesmo formato para o mesmo vídeo sem sobreposição ou conflito de arquivos.
+  - **Prefixos Padronizados de 5 Letras**:
+    - `VLDSS`: *Vertical 9:16 (Layout Dividido / Split Screen)*
+    - `VRIRA`: *Vertical 9:16 (Rastreamento Inteligente de Rosto / Auto-Reframing)*
+    - `VFDBS`: *Vertical 9:16 (Fundo Desfocado / Blur)*
+    - `VCCFT`: *Vertical 9:16 (Corte Central 100% Tela)*
+    - `HOFHD`: *Horizontal 16:9 (Original 1080p Full HD)*
+  - **Sufixo do Título**: Primeiras palavras completas do título (até 25 caracteres) + minutagem formatada.
+  - **Arquivos Gerados no Pacote**:
+    1. `<PREFIXO_Titulo_Minutagem>.mp4`: Vídeo renderizado em alta definição.
+    2. `<PREFIXO_Titulo_Minutagem>.mp3`: Faixa de áudio isolada em 192kbps MP3 para reuso sonoro.
+    3. `thumbnail.jpg`, `thumbnail_1.jpg`, `thumbnail_2.jpg`, `thumbnail_3.jpg`: Capas de alta conversão.
+    4. `<PREFIXO_Titulo_Minutagem>.srt` e `legendas.srt`: Legendas SubRip sincronizadas.
+    5. `<PREFIXO_Titulo_Minutagem>.vtt`: Legendas WebVTT.
+    6. `transcricao_corte.txt`, `info_publicacao.txt`, `descricao.txt` e `tags.txt`.
 - **Catálogo & Cache Inteligente por Minutagem e Formato** (`core/cuts_catalog.py`):
   - Rastreamento em `data/<video_id>/cuts_catalog.json` de múltiplas instâncias de enquadramento com abertura instantânea (0s).
 
@@ -201,7 +216,7 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
     - Utiliza o recurso nativo `download_ranges` do `yt-dlp` e FFmpeg para puxar **apenas os fragmentos de rede daquele intervalo**, evitando o download de gigabytes de conteúdo e acelerando a esteira em até **50x**.
     - Sincronização inteligente de transcrição: fatia e re-baseia legendas oficiais do YouTube a partir de `00:00` ou transcreve cirurgicamente o áudio fatiado com Whisper GPU.
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
-- **🧪 Suíte de 89 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 90 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest`.
 
 ---

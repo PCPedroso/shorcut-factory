@@ -27,6 +27,18 @@ class TestExportKit(unittest.TestCase):
         folder_horiz = build_cut_folder_name("16:9", "Original Full HD")
         self.assertTrue(folder_horiz.startswith("HOFHD_"))
 
+    def test_build_cut_folder_name_with_timestamps(self):
+        folder1 = build_cut_folder_name("9:16_blur", "Corte Selecionado", "00:01:29.00", "00:05:25.00")
+        self.assertEqual(folder1, "VFDBS_Corte_Selecionado_01m29s_05m25s")
+
+        folder2 = build_cut_folder_name("9:16_blur", "Corte Selecionado", "00:36:06.00", "00:39:30.00")
+        self.assertEqual(folder2, "VFDBS_Corte_Selecionado_36m06s_39m30s")
+
+        self.assertNotEqual(folder1, folder2)
+
+        folder_hours = build_cut_folder_name("9:16_smart_face", "Entrevista Exclusiva", "01:05:10", "01:08:45")
+        self.assertEqual(folder_hours, "VRIRA_Entrevista_Exclusiva_01h05m10s_01h08m45s")
+
     def test_create_viral_package(self):
         temp_dir = tempfile.mkdtemp()
         try:

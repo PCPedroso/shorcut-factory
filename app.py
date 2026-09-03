@@ -4072,7 +4072,7 @@ if st.session_state.transcription_done:
                         st.rerun()
 
         # Prévia do nome da pasta e do arquivo de vídeo gerados
-        _preview_folder = build_cut_folder_name(selected_aspect, cut_title_val)
+        _preview_folder = build_cut_folder_name(selected_aspect, cut_title_val, start_time_str=start_time, end_time_str=end_time)
         st.caption(f"📁 **Pasta da Instância ({selected_aspect}):** `data/{_vid_id_cat}/{_preview_folder}/`  |  🎬 **Vídeo:** `{_preview_folder}.mp4`")
 
         # Se houver títulos alternativos sugeridos pela IA, exibe botões rápidos de troca
