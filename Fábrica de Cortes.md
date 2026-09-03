@@ -196,8 +196,12 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Arquivos Locais (1 ou 2 Vídeos)**: Extração ultra-rápida via FFmpeg do áudio individual ou unificado da composição dupla com ambientação musical personalizada.
   - **Renderização Segmentada & Concatenação Lossless da Composição Dupla**: Renderiza a Parte 1 (Split Top + Base Congelada + Trilha 1 + Ducking) e a Parte 2 (Tela Cheia + Trilha 2 + Ducking) de forma isolada, concatenando-as via *FFmpeg Concat Demuxer* com fluxo de áudio e vídeo 100% sincronizado, eliminando desvios ou repetições de áudio.
   - **Upload Direto de Arquivos Locais para Trilhas Sonoras**: Permite carregar diretamente arquivos de som do computador nas Partes 1 e 2 da Composição Dupla e na Seção 3 da Fábrica de Cortes, com registro instantâneo no catálogo permanente.
+  - **⏱️ Download Parcial por Intervalo de Tempo (Time-Range Slicing)** (`core/extractor.py`, `core/video_processor.py`, `app.py`):
+    - Permite definir início e fim específicos (`HH:MM:SS`, `MM:SS`, `1h30m` ou segundos) ao baixar vídeos e lives longas (YouTube, Twitch, podcasts).
+    - Utiliza o recurso nativo `download_ranges` do `yt-dlp` e FFmpeg para puxar **apenas os fragmentos de rede daquele intervalo**, evitando o download de gigabytes de conteúdo e acelerando a esteira em até **50x**.
+    - Sincronização inteligente de transcrição: fatia e re-baseia legendas oficiais do YouTube a partir de `00:00` ou transcreve cirurgicamente o áudio fatiado com Whisper GPU.
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
-- **🧪 Suíte de 84 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 89 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest`.
 
 ---

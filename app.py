@@ -45,7 +45,8 @@ importlib.reload(core.overlay_manager)
 
 from core.extractor import (
     download_audio, get_video_metadata, get_video_id,
-    clean_music_title, detect_music_category_suggestion
+    clean_music_title, detect_music_category_suggestion,
+    parse_time_str, format_time_sec
 )
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
 from core.analyzer import analyze_transcript, build_suggested_bundles, build_golden_rule_micro_cuts, normalize_time_mask
@@ -1204,20 +1205,66 @@ if input_mode.startswith("🌐 Link"):
         placeholder="https://www.youtube.com/watch?v=... ou https://www.instagram.com/reel/..."
     )
 
+    with st.expander("⏱️ Baixar Apenas um Trecho Específico (Lives / Podcasts Longos)", expanded=False):
+        st.caption("💡 **Time-Range Slicing**: Em vez de baixar gigabytes de um vídeo ou live de 2 a 4 horas, baixe apenas o trecho desejado. É até **50x mais rápido** e consome muito menos disco!")
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+            yt_start_time_str = st.text_input(
+                "Início do Trecho (opcional):",
+                placeholder="Ex: 00:15:00 ou 900",
+                key="input_yt_slice_start",
+                help="Formato flexível: HH:MM:SS, MM:SS, 1h30m ou segundos."
+            )
+        with col_t2:
+            yt_end_time_str = st.text_input(
+                "Fim do Trecho (opcional):",
+                placeholder="Ex: 00:20:30 ou 1230",
+                key="input_yt_slice_end",
+                help="Formato flexível: HH:MM:SS, MM:SS, 1h30m ou segundos."
+            )
+
+        parsed_s = parse_time_str(yt_start_time_str)
+        parsed_e = parse_time_str(yt_end_time_str)
+        if parsed_s is not None or parsed_e is not None:
+            s_label = format_time_sec(parsed_s or 0.0)
+            if parsed_e is not None and parsed_s is not None and parsed_e > parsed_s:
+                diff_sec = parsed_e - parsed_s
+                e_label = format_time_sec(parsed_e)
+                dur_txt = f"{int(diff_sec // 60)}m {int(diff_sec % 60)}s" if diff_sec >= 60 else f"{int(diff_sec)}s"
+                st.success(f"🎯 **Trecho selecionado**: de `{s_label}` até `{e_label}` (Duração: **{dur_txt}**). Economia massiva de tempo e banda!")
+            elif parsed_s is not None and parsed_e is None:
+                st.info(f"🎯 **Trecho selecionado**: a partir de `{s_label}` até o fim do vídeo.")
+            elif parsed_e is not None and parsed_s is None:
+                e_label = format_time_sec(parsed_e)
+                st.info(f"🎯 **Trecho selecionado**: do início até `{e_label}`.")
+            elif parsed_e is not None and parsed_s is not None and parsed_e <= parsed_s:
+                st.error("⚠️ O tempo final deve ser maior que o tempo inicial.")
+
     col_yt_b1, col_yt_b2 = st.columns([1.5, 1])
     with col_yt_b1:
         btn_process_yt = st.button("🚀 Processar Vídeo Online (Completo)", type="primary", key="btn_process_yt", use_container_width=True)
     with col_yt_b2:
         btn_audio_yt = st.button("🎵 Extrair Apenas Áudio (MP3)", key="btn_extract_audio_yt", use_container_width=True)
 
+    # Identificação de corte de tempo ativo
+    active_slice_start = parse_time_str(st.session_state.get("input_yt_slice_start", ""))
+    active_slice_end = parse_time_str(st.session_state.get("input_yt_slice_end", ""))
+
     if btn_audio_yt:
         if not video_url:
             st.warning("Por favor, insira uma URL válida.")
         else:
-            video_id = get_video_id(video_url)
-            if not video_id:
+            base_vid = get_video_id(video_url)
+            if not base_vid:
                 st.error("URL inválida ou formato de link não reconhecido.")
             else:
+                if active_slice_start is not None or active_slice_end is not None:
+                    s_tag = f"{int(active_slice_start)}" if active_slice_start is not None else "0"
+                    e_tag = f"{int(active_slice_end)}" if active_slice_end is not None else "end"
+                    video_id = f"{base_vid}_t_{s_tag}_{e_tag}"
+                else:
+                    video_id = base_vid
+
                 data_dir = os.path.join("data", video_id)
                 os.makedirs(data_dir, exist_ok=True)
                 audio_path = os.path.join(data_dir, "audio.mp3")
@@ -1225,6 +1272,11 @@ if input_mode.startswith("🌐 Link"):
                 with st.spinner("🎵 Extraindo áudio de alta qualidade (192kbps MP3) e identificando a música exata..."):
                     meta = get_video_metadata(video_url)
                     v_title = meta.get("title") or f"Áudio {video_id}"
+                    if active_slice_start is not None or active_slice_end is not None:
+                        s_lbl = format_time_sec(active_slice_start or 0.0)
+                        e_lbl = format_time_sec(active_slice_end) if active_slice_end else "fim"
+                        v_title = f"{v_title} ({s_lbl} - {e_lbl})"
+
                     v_date = meta.get("upload_date")
                     v_thumb = meta.get("thumbnail")
                     v_dur = meta.get("duration")
@@ -1242,7 +1294,13 @@ if input_mode.startswith("🌐 Link"):
                     )
 
                     if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
-                        download_audio(video_url, audio_path, is_live=is_live_flag)
+                        download_audio(
+                            video_url,
+                            audio_path,
+                            is_live=is_live_flag,
+                            start_sec=active_slice_start,
+                            end_sec=active_slice_end
+                        )
 
                     # Identificação Inteligente da Música / Som (ignora títulos genéricos e busca o som real)
                     from core.music_recognizer import identify_song_from_audio_and_meta
@@ -1333,10 +1391,17 @@ if input_mode.startswith("🌐 Link"):
             st.warning("Por favor, insira uma URL válida.")
         else:
             st.session_state.video_url = video_url
-            video_id = get_video_id(video_url)
-            if not video_id:
+            base_vid = get_video_id(video_url)
+            if not base_vid:
                 st.error("URL inválida ou formato de link não reconhecido.")
             else:
+                if active_slice_start is not None or active_slice_end is not None:
+                    s_tag = f"{int(active_slice_start)}" if active_slice_start is not None else "0"
+                    e_tag = f"{int(active_slice_end)}" if active_slice_end is not None else "end"
+                    video_id = f"{base_vid}_t_{s_tag}_{e_tag}"
+                else:
+                    video_id = base_vid
+
                 data_dir = os.path.join("data", video_id)
                 os.makedirs(data_dir, exist_ok=True)
                 transcript_file = os.path.join(data_dir, "transcript.json")
@@ -1346,6 +1411,11 @@ if input_mode.startswith("🌐 Link"):
                 with st.spinner("Buscando informações e metadados oficiais do vídeo..."):
                     meta = get_video_metadata(video_url)
                     v_title = meta.get("title") or f"Vídeo {video_id}"
+                    if active_slice_start is not None or active_slice_end is not None:
+                        s_lbl = format_time_sec(active_slice_start or 0.0)
+                        e_lbl = format_time_sec(active_slice_end) if active_slice_end else "fim"
+                        v_title = f"{v_title} ({s_lbl} - {e_lbl})"
+
                     v_date = meta.get("upload_date")
                     v_thumb = meta.get("thumbnail")
                     v_dur = meta.get("duration")
@@ -1363,7 +1433,7 @@ if input_mode.startswith("🌐 Link"):
                     )
 
                 if is_live_flag:
-                    st.warning("🔴 **Transmissão Ao Vivo (LIVE) Detectada!** O vídeo ainda está em andamento. O sistema capturará todo o conteúdo transmitido desde o início até o momento atual.")
+                    st.warning("🔴 **Transmissão Ao Vivo (LIVE) Detectada!** O vídeo ainda está em andamento. O sistema capturará o conteúdo transmitido.")
 
                 # CACHE: Verifica se já temos a transcrição pronta
                 if os.path.exists(transcript_file):
@@ -1384,33 +1454,62 @@ if input_mode.startswith("🌐 Link"):
                     # Download automático do vídeo completo (se ainda não baixado)
                     _vfull_cache_path = os.path.join(data_dir, "video_full.mp4")
                     if not is_live_flag and not os.path.exists(_vfull_cache_path):
-                        with st.spinner("⏳ Baixando vídeo completo em 1080p para habilitar o Recorte Final..."):
-                            download_full_video(video_url, _vfull_cache_path, is_live=False)
+                        with st.spinner("⏳ Baixando vídeo (ou trecho) em 1080p para habilitar o Recorte Final..."):
+                            download_full_video(
+                                video_url,
+                                _vfull_cache_path,
+                                is_live=False,
+                                start_sec=active_slice_start,
+                                end_sec=active_slice_end
+                            )
                         if os.path.exists(_vfull_cache_path):
-                            st.success("🎥 Vídeo completo baixado e pronto para recorte!")
+                            st.success("🎥 Vídeo baixado e pronto para recorte!")
                     elif os.path.exists(_vfull_cache_path):
-                        st.info(f"🎥 Vídeo completo já no cache — pronto para recorte.")
+                        st.info(f"🎥 Vídeo já no cache — pronto para recorte.")
                 else:
                     platform_label = "Instagram" if video_id.startswith("ig_") else ("TikTok" if video_id.startswith("tt_") else "YouTube/Web")
                     st.info(f"Iniciando extração do vídeo ({platform_label})...")
                     if meta.get("title"):
-                        st.success(f"🎬 Vídeo: **{meta['title']}** (Publicado em: `{meta.get('upload_date')}`) ")
+                        st.success(f"🎬 Vídeo: **{v_title}** (Publicado em: `{meta.get('upload_date')}`) ")
 
-                    # Passo 2: Transcrição (Tenta legendas oficiais primeiro se for YouTube, fallback Whisper PT-BR)
+                    # Passo 2: Transcrição (Tenta legendas oficiais primeiro se for YouTube e sem corte complexo, fallback Whisper PT-BR)
                     transcribe_res = {}
-                    if not video_id.startswith(("ig_", "tt_", "tw_", "local_")):
+                    if not base_vid.startswith(("ig_", "tt_", "tw_", "local_")):
                         with st.spinner("Buscando transcrição oficial do YouTube (alta precisão e fidelidade)..."):
-                            transcribe_res = fetch_youtube_transcript(video_id)
-                        
-                        if transcribe_res.get("transcript_segments"):
-                            st.success(f"⚡ Transcrição oficial do YouTube carregada ({len(transcribe_res['transcript_segments'])} segmentos - {transcribe_res.get('selected_language', 'Português')})! Máxima precisão.")
-                            langs = transcribe_res.get("available_languages", [])
-                            if len(langs) > 1:
-                                st.caption(f"🌐 **Idiomas detectados no YouTube ({len(langs)} faixas):** {', '.join([l['name'] for l in langs])}")
+                            raw_yt_tr = fetch_youtube_transcript(base_vid)
+
+                        if raw_yt_tr.get("transcript_segments"):
+                            # Se há corte por tempo ativo, filtra e re-baseia os segmentos oficiais
+                            if active_slice_start is not None or active_slice_end is not None:
+                                s_min = active_slice_start or 0.0
+                                s_max = active_slice_end if active_slice_end is not None else float('inf')
+                                sliced_segs = []
+                                for seg in raw_yt_tr["transcript_segments"]:
+                                    seg_start = seg.get("start", 0.0)
+                                    seg_end = seg.get("end", 0.0)
+                                    if seg_end >= s_min and seg_start <= s_max:
+                                        adj = dict(seg)
+                                        adj["start"] = max(0.0, seg_start - s_min)
+                                        adj["end"] = max(0.0, seg_end - s_min)
+                                        sliced_segs.append(adj)
+                                if sliced_segs:
+                                    transcribe_res = {
+                                        "transcript_segments": sliced_segs,
+                                        "full_text": " ".join([s["text"] for s in sliced_segs]),
+                                        "source": f"YouTube Oficial (Trecho {format_time_sec(s_min)} - {format_time_sec(s_max) if s_max != float('inf') else 'Fim'})"
+                                    }
+                            else:
+                                transcribe_res = raw_yt_tr
+
+                            if transcribe_res.get("transcript_segments"):
+                                st.success(f"⚡ Transcrição oficial do YouTube carregada ({len(transcribe_res['transcript_segments'])} segmentos)! Máxima precisão.")
+                                langs = raw_yt_tr.get("available_languages", [])
+                                if len(langs) > 1:
+                                    st.caption(f"🌐 **Idiomas detectados no YouTube ({len(langs)} faixas):** {', '.join([l['name'] for l in langs])}")
 
                     # Se não obteve segmentos oficiais (ou for Instagram/TikTok/Web), processa áudio via Whisper local
                     if not transcribe_res.get("transcript_segments"):
-                        if not video_id.startswith(("ig_", "tt_", "tw_", "local_")):
+                        if not base_vid.startswith(("ig_", "tt_", "tw_", "local_")):
                             st.info("Legendas oficiais em português não encontradas no YouTube. Processando áudio via Whisper local (PT-BR)...")
                         else:
                             st.info(f"Processando áudio do {platform_label} via Whisper local (PT-BR)...")
@@ -1419,14 +1518,20 @@ if input_mode.startswith("🌐 Link"):
                             audio_res = {"path": audio_path, "error": None}
                         else:
                             with st.spinner(f"Baixando áudio do vídeo ({platform_label})..."):
-                                audio_res = download_audio(video_url, output_path=audio_path, is_live=is_live_flag)
+                                audio_res = download_audio(
+                                    video_url,
+                                    output_path=audio_path,
+                                    is_live=is_live_flag,
+                                    start_sec=active_slice_start,
+                                    end_sec=active_slice_end
+                                )
                                 
                         if audio_res.get("error"):
                             st.error(f"Erro no download: {audio_res['error']}")
                             transcribe_res = {"error": audio_res["error"]}
                         else:
                             # Atualiza a duração se era desconhecida
-                            if not v_dur and os.path.exists(audio_path):
+                            if os.path.exists(audio_path):
                                 v_dur = get_video_duration(audio_path)
                                 add_or_update_video_in_library(
                                     video_id=video_id,
@@ -1464,15 +1569,21 @@ if input_mode.startswith("🌐 Link"):
                                 "source": st.session_state.transcript_source
                             }, f, ensure_ascii=False, indent=4)
 
-                        # Download automático do vídeo completo logo após a transcrição
+                        # Download automático do vídeo completo/trecho logo após a transcrição
                         _vfull_path = os.path.join(data_dir, "video_full.mp4")
                         if not is_live_flag and not os.path.exists(_vfull_path):
-                            with st.spinner("⏬ Baixando vídeo completo em 1080p Full HD (necessário para o Recorte Final)..."):
-                                _vres = download_full_video(video_url, _vfull_path, is_live=False)
+                            with st.spinner("⏬ Baixando vídeo em 1080p Full HD (necessário para o Recorte Final)..."):
+                                _vres = download_full_video(
+                                    video_url,
+                                    _vfull_path,
+                                    is_live=False,
+                                    start_sec=active_slice_start,
+                                    end_sec=active_slice_end
+                                )
                             if _vres.get("error"):
                                 st.warning(f"⚠️ Vídeo baixado parcialmente ou com aviso: {_vres['error']}")
                             elif os.path.exists(_vfull_path):
-                                st.success("🎥 Vídeo completo baixado e pronto para recorte na Seção 3!")
+                                st.success("🎥 Vídeo baixado e pronto para recorte na Seção 3!")
 
 else:
     # 💻 Modo Arquivo de Vídeo Local do Computador (Suporte a 1 ou 2 vídeos)

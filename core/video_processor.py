@@ -118,12 +118,18 @@ def extract_thumbnail_from_video(video_path: str, output_path: str = "temp_thumb
         return {"path": None, "error": str(exc)}
 
 
-def download_full_video(url: str, output_path: str = "temp_video.mp4", is_live: bool = False) -> dict:
+def download_full_video(
+    url: str,
+    output_path: str = "temp_video.mp4",
+    is_live: bool = False,
+    start_sec: float = None,
+    end_sec: float = None
+) -> dict:
     """
     Baixa o vídeo na máxima resolução disponível (1080p Full HD / 720p HD).
     Usa o runtime Deno e o solver EJS para decifrar os fluxos 1080p do YouTube,
     mesclando a melhor faixa de vídeo e áudio em MP4 via FFmpeg.
-    Suporta transmissões ao vivo em andamento (live_from_start).
+    Suporta transmissões ao vivo em andamento (live_from_start) e download parcial por intervalo de tempo (Time-Range Slicing).
     """
     try:
         out_dir = os.path.dirname(output_path)
@@ -140,7 +146,7 @@ def download_full_video(url: str, output_path: str = "temp_video.mp4", is_live: 
         elif os.path.exists(r"C:\Program Files\nodejs\node.exe"):
             js_runtimes_cfg['node'] = {'path': r"C:\Program Files\nodejs\node.exe"}
 
-        from core.extractor import get_cookie_file
+        from core.extractor import get_cookie_file, parse_time_str
         cookie_file = get_cookie_file()
 
         base_opts = {
@@ -160,6 +166,19 @@ def download_full_video(url: str, output_path: str = "temp_video.mp4", is_live: 
 
         if cookie_file:
             base_opts['cookiefile'] = cookie_file
+
+        # Se um intervalo de tempo foi especificado, aplica download seletivo de seções
+        s_parsed = parse_time_str(start_sec)
+        e_parsed = parse_time_str(end_sec)
+        if s_parsed is not None or e_parsed is not None:
+            try:
+                from yt_dlp.utils import download_range_func
+                s_val = s_parsed if s_parsed is not None and s_parsed >= 0 else 0.0
+                e_val = e_parsed if e_parsed is not None and e_parsed > s_val else None
+                base_opts['download_ranges'] = download_range_func(None, [(s_val, e_val)])
+                base_opts['force_keyframes_at_cuts'] = True
+            except Exception:
+                pass
 
         attempts = [
             dict(base_opts),

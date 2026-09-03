@@ -240,9 +240,88 @@ def detect_music_category_suggestion(title_text: str) -> tuple:
     return "🎵 Trilha Personalizada", "custom"
 
 
-def download_audio(url: str, output_path: str = "temp_audio.mp3", is_live: bool = False):
+def parse_time_str(time_input) -> float | None:
     """
-    Baixa o áudio de um vídeo do YouTube, Instagram, TikTok ou Web com aceleração multi-thread.
+    Converte strings de tempo em segundos (float).
+    Suporta:
+      - '01:15:30' -> 4530.0
+      - '15:30' -> 930.0
+      - '90' ou '90.5' -> 90.5
+      - '1h30m' ou '1h 30m 10s' -> 5410.0
+      - 120 (número) -> 120.0
+    Retorna None se inválido ou vazio.
+    """
+    if time_input is None:
+        return None
+    if isinstance(time_input, (int, float)):
+        return float(time_input) if time_input >= 0 else None
+    
+    t_str = str(time_input).strip().lower()
+    if not t_str:
+        return None
+    
+    # Formato com sufixos: 1h30m15s, 1h 30m, 45m, 30s
+    if any(unit in t_str for unit in ['h', 'm', 's']):
+        h_match = re.search(r'(\d+(?:\.\d+)?)\s*h', t_str)
+        m_match = re.search(r'(\d+(?:\.\d+)?)\s*m', t_str)
+        s_match = re.search(r'(\d+(?:\.\d+)?)\s*s', t_str)
+        total = 0.0
+        found = False
+        if h_match:
+            total += float(h_match.group(1)) * 3600.0
+            found = True
+        if m_match:
+            total += float(m_match.group(1)) * 60.0
+            found = True
+        if s_match:
+            total += float(s_match.group(1))
+            found = True
+        if found:
+            return total
+
+    # Formato HH:MM:SS ou MM:SS ou SS
+    parts = t_str.split(':')
+    try:
+        if len(parts) == 3:
+            h = float(parts[0])
+            m = float(parts[1])
+            s = float(parts[2])
+            return h * 3600.0 + m * 60.0 + s
+        elif len(parts) == 2:
+            m = float(parts[0])
+            s = float(parts[1])
+            return m * 60.0 + s
+        elif len(parts) == 1:
+            return float(parts[0])
+    except (ValueError, TypeError):
+        pass
+
+    return None
+
+
+def format_time_sec(seconds: float) -> str:
+    """Formata segundos em formato legível HH:MM:SS ou MM:SS."""
+    if seconds is None or seconds < 0:
+        return "00:00"
+    s = int(seconds)
+    h = s // 3600
+    m = (s % 3600) // 60
+    sec = s % 60
+    if h > 0:
+        return f"{h:02d}:{m:02d}:{sec:02d}"
+    return f"{m:02d}:{sec:02d}"
+
+
+def download_audio(
+    url: str,
+    output_path: str = "temp_audio.mp3",
+    is_live: bool = False,
+    start_sec: float = None,
+    end_sec: float = None
+):
+    """
+    Baixa o áudio de um vídeo do YouTube, Instagram, TikTok ou Web com aceleração multi-thread
+    e suporte a download parcial por intervalo de tempo (Time-Range Slicing).
     """
     ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
     cookie_file = get_cookie_file()
@@ -267,6 +346,19 @@ def download_audio(url: str, output_path: str = "temp_audio.mp3", is_live: bool 
 
     if cookie_file:
         base_opts['cookiefile'] = cookie_file
+
+    # Se um intervalo de tempo foi especificado, aplica download seletivo de seções
+    s_parsed = parse_time_str(start_sec)
+    e_parsed = parse_time_str(end_sec)
+    if s_parsed is not None or e_parsed is not None:
+        try:
+            from yt_dlp.utils import download_range_func
+            s_val = s_parsed if s_parsed is not None and s_parsed >= 0 else 0.0
+            e_val = e_parsed if e_parsed is not None and e_parsed > s_val else None
+            base_opts['download_ranges'] = download_range_func(None, [(s_val, e_val)])
+            base_opts['force_keyframes_at_cuts'] = True
+        except Exception:
+            pass
 
     attempts = [
         dict(base_opts),
