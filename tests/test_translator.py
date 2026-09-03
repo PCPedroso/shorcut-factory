@@ -105,6 +105,53 @@ class TestTranslator(unittest.TestCase):
                 shutil.rmtree(os.path.join("data", "test_vid_123"), ignore_errors=True)
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    @patch("core.translator._call_ollama_json")
+    def test_translate_cut_subtitles(self, mock_ollama):
+        mock_ollama.return_value = [
+            {"id": 0, "text": "Eu gostaria de anunciar que temos uma nova proposta."}
+        ]
+
+        vid = "test_vid_cut_99"
+        orig_data_dir = os.path.join("data", vid)
+        os.makedirs(orig_data_dir, exist_ok=True)
+        active_path = os.path.join(orig_data_dir, "transcript.json")
+
+        initial_content = {
+            "text": "Introduction part. I would like to announce that we have a new proposal. Closing part.",
+            "segments": [
+                {"start": 0.0, "end": 10.0, "text": "Introduction part."},
+                {"start": 10.0, "end": 20.0, "text": "I would like to announce that we have a new proposal."},
+                {"start": 20.0, "end": 30.0, "text": "Closing part."}
+            ]
+        }
+        with open(active_path, "w", encoding="utf-8") as f:
+            json.dump(initial_content, f)
+
+        try:
+            from core.translator import translate_cut_subtitles
+            res = translate_cut_subtitles(
+                video_id=vid,
+                start_time_str="00:10",
+                end_time_str="00:20",
+                target_lang="pt-BR"
+            )
+
+            self.assertIsNone(res["error"])
+            self.assertEqual(res["count"], 1)
+            self.assertIn("gostaria de anunciar", res["translated_snippet"])
+
+            with open(active_path, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+
+            # Verifica que o segmento 0 e 2 continuam intactos e apenas o segmento 1 foi traduzido
+            self.assertEqual(saved["segments"][0]["text"], "Introduction part.")
+            self.assertIn("gostaria de anunciar", saved["segments"][1]["text"])
+            self.assertEqual(saved["segments"][2]["text"], "Closing part.")
+
+        finally:
+            if os.path.exists(orig_data_dir):
+                shutil.rmtree(orig_data_dir, ignore_errors=True)
+
 
 if __name__ == '__main__':
     unittest.main()

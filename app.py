@@ -3706,6 +3706,79 @@ if st.session_state.transcription_done:
                     )
                 st.caption("📌 Legendas no terço inferior da tela • Fonte Montserrat Bold • Contorno preto para legibilidade em qualquer fundo")
 
+                # ── 🌐 TRADUÇÃO DE LEGENDAS ESPECÍFICA DESTE CORTE ──────────
+                st.markdown("---")
+                st.markdown("##### 🌐 Traduzir Legendas Deste Corte com IA (Sob Demanda)")
+                st.caption("Traduz apenas as frases contidas neste trecho específico (ex: Inglês ➔ Português-BR), mantendo 100% da sincronização milimétrica de tempo com a fala.")
+
+                col_ct1, col_ct2, col_ct3 = st.columns([1.6, 1.2, 1.4])
+                with col_ct1:
+                    _cut_lang_opts = [
+                        ("pt-BR", "🇧🇷 Português (Brasil)"),
+                        ("en", "🇺🇸 Inglês (English)"),
+                        ("es", "🇪🇸 Espanhol (Español)")
+                    ]
+                    sel_cut_lang_code = st.selectbox(
+                        "Traduzir este corte para:",
+                        [c for c, _ in _cut_lang_opts],
+                        format_func=lambda c: dict(_cut_lang_opts).get(c, c),
+                        key="sel_cut_sub_trans_lang"
+                    )
+                with col_ct2:
+                    sel_cut_trans_model = st.selectbox(
+                        "Modelo IA:",
+                        _ollama_models,
+                        index=_om_idx,
+                        key="sel_cut_trans_model"
+                    )
+                with col_ct3:
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                    btn_translate_this_cut = st.button("🌐 Traduzir Legendas", type="secondary", use_container_width=True, key="btn_translate_this_cut")
+
+                if _vid_id_sub and has_original_backup(_vid_id_sub):
+                    col_rev1, col_rev2 = st.columns([3, 1])
+                    with col_rev1:
+                        st.info("ℹ️ Este corte possui legendas com tradução aplicada.")
+                    with col_rev2:
+                        if st.button("⏪ Reverter Original", key="btn_revert_cut_sub_orig", use_container_width=True):
+                            restore_original_transcript(_vid_id_sub)
+                            st.success("✅ Legendas restauradas para a versão original!")
+                            st.rerun()
+
+                if btn_translate_this_cut:
+                    if not start_time or not end_time:
+                        st.warning("Preencha o tempo inicial e final do corte antes de traduzir.")
+                    elif not _vid_id_sub:
+                        st.error("Vídeo não identificado.")
+                    else:
+                        with st.spinner(f"Traduzindo legendas do trecho [{start_time} → {end_time}] para {dict(_cut_lang_opts).get(sel_cut_lang_code)} via Ollama ({sel_cut_trans_model})..."):
+                            from core.translator import translate_cut_subtitles
+                            res_cut_tr = translate_cut_subtitles(
+                                video_id=_vid_id_sub,
+                                start_time_str=start_time,
+                                end_time_str=end_time,
+                                target_lang=sel_cut_lang_code,
+                                model=sel_cut_trans_model
+                            )
+                        if res_cut_tr.get("error"):
+                            st.error(f"Erro ao traduzir legendas do corte: {res_cut_tr['error']}")
+                        else:
+                            st.success(f"🎉 **{res_cut_tr['count']} frase(s) do corte traduzida(s) com sucesso!**")
+                            if res_cut_tr.get("translated_snippet"):
+                                st.caption(f"📝 **Prévia da Legenda Traduzida:** *\"{res_cut_tr['translated_snippet'][:180]}...\"*")
+                            
+                            # Atualiza session_state com o novo transcript
+                            try:
+                                _tr_upd_p = os.path.join("data", res_cut_tr.get("video_id", _vid_id_sub), "transcript.json")
+                                if os.path.exists(_tr_upd_p):
+                                    with open(_tr_upd_p, "r", encoding="utf-8") as _trf:
+                                        _upd_data = json.load(_trf)
+                                        st.session_state.segments = _upd_data.get("segments", st.session_state.get("segments"))
+                                        st.session_state.full_text = _upd_data.get("full_text") or _upd_data.get("text", st.session_state.get("full_text"))
+                            except Exception:
+                                pass
+                            st.rerun()
+
     # ─────────────────────────────────────────────────────────────────
     # 🏷️ Headline / Título Fixo de Retenção no Topo (Fase 3)
     # ─────────────────────────────────────────────────────────────────

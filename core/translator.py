@@ -246,4 +246,115 @@ def has_original_backup(video_id: str) -> bool:
     """Verifica se existe backup da transcrição original para restauração."""
     if not video_id:
         return False
-    return os.path.exists(os.path.join("data", video_id, "transcript_original.json"))
+    # Verifica em data/<video_id> ou data/<video_id_t_...>
+    v_dir = os.path.join("data", video_id)
+    if os.path.exists(os.path.join(v_dir, "transcript_original.json")):
+        return True
+    if os.path.exists("data"):
+        for d in os.listdir("data"):
+            if d.startswith(video_id) and os.path.exists(os.path.join("data", d, "transcript_original.json")):
+                return True
+    return False
+
+
+def translate_cut_subtitles(
+    video_id: str,
+    start_time_str: str,
+    end_time_str: str,
+    target_lang: str = "pt-BR",
+    model: str = "llama3"
+) -> dict:
+    """
+    Traduz especificamente as frases de um trecho/corte delimitado por start_time e end_time,
+    substituindo o texto no transcript.json e mantendo 100% da sincronia de timestamps.
+    """
+    from core.extractor import parse_time_str
+    
+    # Localiza o arquivo transcript.json correto (mesmo com sufixo _t_...)
+    t_path = os.path.join("data", video_id, "transcript.json")
+    target_vid_dir = os.path.join("data", video_id)
+    if not os.path.exists(t_path):
+        if os.path.exists("data"):
+            for d in os.listdir("data"):
+                if d.startswith(video_id) and os.path.exists(os.path.join("data", d, "transcript.json")):
+                    t_path = os.path.join("data", d, "transcript.json")
+                    target_vid_dir = os.path.join("data", d)
+                    video_id = d
+                    break
+
+    if not os.path.exists(t_path):
+        return {"translated_segments": [], "translated_snippet": "", "count": 0, "error": "Arquivo transcript.json não encontrado."}
+
+    try:
+        with open(t_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        return {"translated_segments": [], "translated_snippet": "", "count": 0, "error": str(e)}
+
+    segments = data.get("segments", [])
+    if not segments:
+        return {"translated_segments": [], "translated_snippet": "", "count": 0, "error": "Nenhum segmento encontrado no transcript.json."}
+
+    s_sec = parse_time_str(start_time_str) or 0.0
+    e_sec = parse_time_str(end_time_str) or float('inf')
+
+    # Identifica os índices dos segmentos dentro do intervalo do corte
+    target_indices = []
+    target_sub_segments = []
+    for idx, seg in enumerate(segments):
+        seg_start = seg.get("start", 0.0)
+        seg_end = seg.get("end", 0.0)
+        # Sobreposição temporal estrita com o corte
+        if seg_end > s_sec and seg_start < e_sec:
+            target_indices.append(idx)
+            target_sub_segments.append(seg)
+
+    if not target_sub_segments:
+        return {"translated_segments": [], "translated_snippet": "", "count": 0, "error": "Nenhuma frase encontrada dentro do intervalo selecionado."}
+
+    # Traduz as frases do corte
+    trans_res = translate_transcript_segments(
+        segments=target_sub_segments,
+        target_lang=target_lang,
+        model=model,
+        batch_size=20
+    )
+
+    if trans_res.get("error"):
+        return {"translated_segments": [], "translated_snippet": "", "count": 0, "error": trans_res["error"]}
+
+    # Backup do original no disco se ainda não existir
+    orig_path = os.path.join(target_vid_dir, "transcript_original.json")
+    if not os.path.exists(orig_path):
+        try:
+            with open(orig_path, "w", encoding="utf-8") as f_out:
+                json.dump(data, f_out, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    # Atualiza os segmentos originais com as frases traduzidas
+    translated_segs = trans_res.get("segments", [])
+    for idx, new_seg in zip(target_indices, translated_segs):
+        segments[idx] = new_seg
+
+    # Salva transcript.json atualizado
+    data["segments"] = segments
+    data["full_text"] = " ".join([s.get("text", "") for s in segments if s.get("text")])
+    data["is_translated"] = True
+    data["language"] = target_lang
+
+    try:
+        with open(t_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return {"translated_segments": [], "translated_snippet": "", "count": 0, "error": str(e)}
+
+    cut_snippet = " ".join([s.get("text", "") for s in translated_segs if s.get("text")])
+
+    return {
+        "translated_segments": translated_segs,
+        "translated_snippet": cut_snippet,
+        "count": len(translated_segs),
+        "video_id": video_id,
+        "error": None
+    }
