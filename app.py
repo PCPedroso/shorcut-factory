@@ -3570,11 +3570,14 @@ if st.session_state.transcription_done:
     subtitle_highlight_color = _cfg.get("subtitle_highlight_color", "#FFFF00")
     subtitle_base_color = _cfg.get("subtitle_base_color", "#FFFFFF")
     subtitle_font_size = _cfg.get("subtitle_font_size", 80)
+    cut_trans_enabled = _cfg.get("cut_trans_enabled", False)
 
     with st.expander("📝 Legendas Dinâmicas (Estilo CapCut / Alex Hormozi)", expanded=subtitle_enabled):
         subtitle_enabled = st.toggle(
             "✨ Ativar Legendas Palavra-a-Palavra",
             value=subtitle_enabled,
+            key="sub_enabled_tgl",
+            on_change=lambda: save_setting("subtitle_enabled", st.session_state.sub_enabled_tgl),
             help="Queima legendas sincronizadas diretamente no vídeo renderizado, com destaque animado na palavra atual."
         )
         if subtitle_enabled:
@@ -3630,8 +3633,9 @@ if st.session_state.transcription_done:
                 st.markdown("---")
                 cut_trans_enabled = st.toggle(
                     "🌐 Ativar Tradução Inteligente de Legendas (Deste Corte)",
-                    value=st.session_state.get("cut_trans_enabled_tgl", False),
+                    value=cut_trans_enabled,
                     key="cut_trans_enabled_tgl",
+                    on_change=lambda: save_setting("cut_trans_enabled", st.session_state.cut_trans_enabled_tgl),
                     help="Ao ativar, a aplicação traduz automaticamente as frases deste corte para o idioma escolhido com IA (Ollama) e queima a legenda traduzida no vídeo ao clicar em Gerar Corte."
                 )
 

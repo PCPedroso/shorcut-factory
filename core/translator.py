@@ -23,21 +23,24 @@ LANGUAGE_NAMES = {
 
 def format_translation_prompt(items: list, target_language_name: str, source_language_name: str = None) -> str:
     """
-    Constrói um prompt estrito para o Ollama traduzir uma lista de legendas mantendo o índice exato.
+    Constrói um prompt estrito para o Ollama traduzir uma lista de legendas mantendo o índice exato
+    e retornando um objeto JSON com chave 'translations'.
     """
     src_clause = f"from {source_language_name} " if source_language_name else ""
-    return f"""You are an expert subtitle translator and localizer.
-Translate the following subtitle lines {src_clause}to {target_language_name}.
+    return f"""You are an expert video subtitle translator and localizer.
+Translate ALL {len(items)} subtitle lines {src_clause}to {target_language_name}.
 
 STRICT RULES:
-1. Maintain colloquial rhythm, tone, slang and punctuation appropriate for video subtitles.
-2. Translate naturally (e.g. into Brazilian Portuguese if target is Portuguese).
-3. Do NOT add extra explanations or change the line count.
-4. You MUST return ONLY a valid JSON array of objects with the exact same keys and number of items:
-[
-  {{"id": 0, "text": "translated text here"}},
-  ...
-]
+1. Maintain colloquial rhythm, tone, slang, emotion, and punctuation appropriate for video subtitles.
+2. Translate naturally into {target_language_name} (e.g. natural Brazilian Portuguese).
+3. Translate EVERY single item from id 0 to id {len(items)-1}. Do NOT omit or merge any items.
+4. You MUST return ONLY a valid JSON object with the "translations" array:
+{{
+  "translations": [
+    {{"id": 0, "text": "translated line 0"}},
+    {{"id": 1, "text": "translated line 1"}}
+  ]
+}}
 
 Input subtitle lines to translate:
 {json.dumps(items, ensure_ascii=False, indent=2)}
@@ -46,7 +49,7 @@ Input subtitle lines to translate:
 
 def _call_ollama_json(prompt: str, model: str = "llama3") -> list | None:
     """
-    Chama o Ollama solicitando saída formatada em JSON com fallback de extração regex.
+    Chama o Ollama solicitando saída formatada em JSON com fallback robusto de extração.
     """
     try:
         payload = {
@@ -55,7 +58,7 @@ def _call_ollama_json(prompt: str, model: str = "llama3") -> list | None:
             "stream": False,
             "format": "json",
             "options": {
-                "temperature": 0.2,
+                "temperature": 0.1,
                 "top_p": 0.9,
             }
         }
@@ -70,9 +73,21 @@ def _call_ollama_json(prompt: str, model: str = "llama3") -> list | None:
                 if isinstance(parsed, list):
                     return parsed
                 elif isinstance(parsed, dict):
-                    for k in ["translations", "subtitles", "items", "lines", "data", "result"]:
+                    for k in ["translations", "subtitles", "items", "lines", "data", "result", "results"]:
                         if k in parsed and isinstance(parsed[k], list):
                             return parsed[k]
+                    # Se for um dicionário de ids {"0": "...", "1": "..."}
+                    items_list = []
+                    for k, v in parsed.items():
+                        if isinstance(v, dict) and "text" in v:
+                            v_copy = dict(v)
+                            if "id" not in v_copy:
+                                v_copy["id"] = k
+                            items_list.append(v_copy)
+                        elif isinstance(v, str):
+                            items_list.append({"id": k, "text": v})
+                    if items_list:
+                        return items_list
             except Exception:
                 pass
 
@@ -96,7 +111,7 @@ def translate_transcript_segments(
     target_lang: str = "pt-BR",
     source_lang: str = None,
     model: str = "llama3",
-    batch_size: int = 20,
+    batch_size: int = 15,
     progress_callback=None
 ) -> dict:
     """
