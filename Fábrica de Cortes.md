@@ -215,8 +215,13 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
     - Permite definir início e fim específicos (`HH:MM:SS`, `MM:SS`, `1h30m` ou segundos) ao baixar vídeos e lives longas (YouTube, Twitch, podcasts).
     - Utiliza o recurso nativo `download_ranges` do `yt-dlp` e FFmpeg para puxar **apenas os fragmentos de rede daquele intervalo**, evitando o download de gigabytes de conteúdo e acelerando a esteira em até **50x**.
     - Sincronização inteligente de transcrição: fatia e re-baseia legendas oficiais do YouTube a partir de `00:00` ou transcreve cirurgicamente o áudio fatiado com Whisper GPU.
+- **🌐 Tradução Inteligente de Transcrições & Legendas Sob Demanda (`core/translator.py`, `app.py`)**:
+  - **Execução 100% Manual / Pós-Processamento**: Nunca executa automaticamente na ingestão; fica disponível em card retrátil para acionamento pontual pelo usuário.
+  - **Tradução Bidirecional & Multilíngue**: Tradução com IA local (Ollama / Llama 3) entre **Português-BR**, **Inglês** e **Espanhol** (ex: traduzir trechos em inglês como no vídeo `2b9djWKShlM` para Português, ou traduzir cortes em Português para Inglês para público internacional).
+  - **Sincronia Temporal Milimétrica**: Preserva estritamente os timestamps `start` e `end` de cada frase, garantindo sincronia labial perfeita na queima de legendas e nos arquivos `.srt`/`.vtt`.
+  - **Backup & Reversibilidade Imediata**: Salva backup em `data/<video_id>/transcript_original.json` e oferece botão de restauração instantânea `⏪ Restaurar Transcrição Original`.
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
-- **🧪 Suíte de 90 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 93 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest`.
 
 ---

@@ -79,6 +79,10 @@ from core.overlay_manager import apply_overlay_to_video, generate_overlay_previe
 from core.audio_processor import (
     AUDIO_EQUALIZER_PRESETS, equalize_video_audio, generate_audio_preview_sample
 )
+from core.translator import (
+    translate_transcript_segments, save_translated_transcript,
+    restore_original_transcript, has_original_backup, LANGUAGE_NAMES
+)
 
 # Carrega todas as configurações persistentes salvas
 _cfg = load_settings()
@@ -2138,6 +2142,87 @@ if st.session_state.transcription_done:
                     f"</div>"
                 )
                 st.markdown(line_html, unsafe_allow_html=True)
+
+    # ── FERRAMENTA DE TRADUÇÃO SOB DEMANDA (PT-BR ⇄ EN ⇄ ES) ────────────────
+    with st.expander("🌐 Tradução Inteligente de Transcrição & Legendas (Sob Demanda)", expanded=False):
+        st.markdown(
+            "Traduz a transcrição e sincroniza as legendas via IA local (Ollama). "
+            "Os tempos de início e fim (`start`/`end`) de cada frase são **100% preservados** para queima no vídeo e exportação."
+        )
+
+        has_backup = has_original_backup(v_id_main) if v_id_main else False
+
+        col_tr1, col_tr2, col_tr3 = st.columns([1.5, 1.2, 1.3])
+        with col_tr1:
+            lang_options = [
+                ("pt-BR", "🇧🇷 Português (Brasil)"),
+                ("en", "🇺🇸 Inglês (English)"),
+                ("es", "🇪🇸 Espanhol (Español)")
+            ]
+            target_lang_code = st.selectbox(
+                "Idioma de Destino:",
+                [code for code, _ in lang_options],
+                format_func=lambda c: dict(lang_options).get(c, c),
+                key="sel_trans_target_lang"
+            )
+
+        with col_tr2:
+            trans_model = st.selectbox(
+                "Modelo IA:",
+                _ollama_models,
+                index=_om_idx,
+                key="sel_trans_model"
+            )
+
+        with col_tr3:
+            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            btn_run_translate = st.button("🌐 Traduzir com IA", type="secondary", use_container_width=True, key="btn_run_trans_ollama")
+
+        if has_backup:
+            st.info("ℹ️ **Nota:** Esta transcrição possui uma versão original salva em backup.")
+            if st.button("⏪ Restaurar Transcrição Original", type="secondary", key="btn_restore_orig_trans"):
+                restored = restore_original_transcript(v_id_main)
+                if restored:
+                    st.session_state.full_text = restored.get("text", "")
+                    st.session_state.segments = restored.get("segments", [])
+                    st.session_state.transcript_source = restored.get("source", "Original Restaurado")
+                    st.success("✅ Transcrição original restaurada com sucesso!")
+                    st.rerun()
+                else:
+                    st.error("Não foi possível restaurar a transcrição original.")
+
+        if btn_run_translate:
+            if not st.session_state.segments:
+                st.warning("Nenhum segmento de transcrição disponível para traduzir.")
+            else:
+                prog_bar = st.progress(0.0)
+                status_txt = st.empty()
+
+                def update_prog(val, msg):
+                    prog_bar.progress(val)
+                    status_txt.caption(f"⏳ {msg}")
+
+                with st.spinner(f"Traduzindo {len(st.session_state.segments)} frases para {LANGUAGE_NAMES.get(target_lang_code, target_lang_code)} com Ollama ({trans_model})..."):
+                    trans_res = translate_transcript_segments(
+                        segments=st.session_state.segments,
+                        target_lang=target_lang_code,
+                        model=trans_model,
+                        batch_size=25,
+                        progress_callback=update_prog
+                    )
+
+                if trans_res.get("error"):
+                    st.error(f"Erro na tradução: {trans_res['error']}")
+                else:
+                    if v_id_main:
+                        save_translated_transcript(v_id_main, trans_res, target_lang_code)
+
+                    st.session_state.full_text = trans_res["full_text"]
+                    st.session_state.segments = trans_res["segments"]
+                    st.session_state.transcript_source = f"IA Tradução ({LANGUAGE_NAMES.get(target_lang_code, target_lang_code)})"
+
+                    st.success(f"🎉 **{trans_res['translated_count']} frases traduzidas com sucesso** para {LANGUAGE_NAMES.get(target_lang_code, target_lang_code)}! Todos os timestamps foram sincronizados.")
+                    st.rerun()
     
     st.header("2. Inteligência Temática (Llama 3)")
     st.markdown("Use a Inteligência Artificial para extrair os tempos exatos para cortes.")
