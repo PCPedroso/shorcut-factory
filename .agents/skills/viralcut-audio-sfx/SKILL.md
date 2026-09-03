@@ -21,10 +21,16 @@ Este guia documenta o módulo `core/audio_mixer.py` e a implementação do motor
   - `dynamic_pulse`: Batida moderna e acelerada para dicas rápidas e vendas.
   - `tension_suspense`: Clima de mistério, curiosidade e revelações.
   - `inspirational_epic`: Harmonia expansiva para discursos motivacionais suaves.
-- **Filtro FFmpeg Sidechain Ducking**:
-  - Utiliza o compressor de áudio lateral do FFmpeg (`sidechaincompress` / `acompressor`):
+- **Reconhecimento Musical & Catálogo Personalizado (`core/music_recognizer.py`)**:
+  - Extração inteligente do artista e título da música (filtrando títulos genéricos de posts de redes sociais) através de metadados, descrição e IA (Whisper + Ollama).
+  - Persistência permanente em `assets/audio/custom_tracks.json` através de `register_custom_audio_track()`.
+- **Upload Direto de Arquivos Locais**:
+  - Uploaders dedicados na Composição Dupla (Parte 1 e Parte 2) e na Fábrica de Cortes, com seleção imediata e pré-escuta no player.
+- **Filtro FFmpeg Sidechain Ducking & Composição Segmentada**:
+  - Utiliza o compressor de áudio lateral do FFmpeg (`sidechaincompress`):
   - Quando a voz do orador ultrapassa o limiar (threshold), o volume da música de fundo é atenuado de forma imperceptível (ducking de 15% a 30%).
   - Nas pausas de fala, a música sobe suavemente mantendo a energia do corte.
+  - Na Composição Dupla, a renderização segmentada garante transição perfeita entre os áudios e trilhas dos dois vídeos sem cruzamento de pacotes ou loops indesejados.
 
 ---
 
