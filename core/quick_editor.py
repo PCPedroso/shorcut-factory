@@ -11,13 +11,28 @@ import imageio_ffmpeg
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
 
+_DUR_CACHE = {}
+_FRAME_CACHE = {}
+
+
 def get_video_duration(video_path: str) -> float:
     """
-    Retorna a duração exata do vídeo em segundos via OpenCV / FFprobe.
+    Retorna a duração exata do vídeo em segundos via OpenCV / FFprobe com cache em memória.
     """
     if not video_path or not os.path.exists(video_path):
         return 0.0
 
+    mtime = 0
+    try:
+        mtime = os.path.getmtime(video_path)
+        if video_path in _DUR_CACHE:
+            cached_mtime, cached_dur = _DUR_CACHE[video_path]
+            if cached_mtime == mtime:
+                return cached_dur
+    except Exception:
+        pass
+
+    dur = 0.0
     try:
         cap = cv2.VideoCapture(video_path)
         if cap.isOpened():
@@ -25,51 +40,67 @@ def get_video_duration(video_path: str) -> float:
             frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
             cap.release()
             if fps > 0 and frame_count > 0:
-                return float(frame_count / fps)
+                dur = float(frame_count / fps)
     except Exception:
         pass
 
     # Fallback via ffprobe se OpenCV falhar
-    try:
-        cmd = [
-            FFMPEG_EXE, "-i", video_path
-        ]
-        res = subprocess.run(cmd, capture_output=True, text=True)
-        import re
-        m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.?\d*)", res.stderr)
-        if m:
-            hours, mins, secs = m.groups()
-            return int(hours) * 3600 + int(mins) * 60 + float(secs)
-    except Exception:
-        pass
+    if dur <= 0.0:
+        try:
+            cmd = [
+                FFMPEG_EXE, "-i", video_path
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            import re
+            m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.?\d*)", res.stderr)
+            if m:
+                hours, mins, secs = m.groups()
+                dur = int(hours) * 3600 + int(mins) * 60 + float(secs)
+        except Exception:
+            pass
 
-    return 0.0
+    if dur > 0:
+        _DUR_CACHE[video_path] = (mtime, dur)
+    return dur
 
 
 def extract_frame_at_timestamp(video_path: str, timestamp_s: float) -> np.ndarray:
     """
-    Extrai um frame RGB no segundo exato para prévia visual na interface.
+    Extrai um frame RGB no segundo exato para prévia visual na interface com cache em memória.
     """
     if not video_path or not os.path.exists(video_path):
         return None
 
+    norm_ts = round(float(timestamp_s), 2)
+    cache_key = None
     try:
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            return None
-
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        target_frame = int(max(0.0, timestamp_s) * fps) if fps > 0 else 0
-        cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
-        ret, frame_bgr = cap.read()
-        cap.release()
-
-        if ret and frame_bgr is not None:
-            return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        mtime = os.path.getmtime(video_path)
+        cache_key = (video_path, mtime, norm_ts)
+        if cache_key in _FRAME_CACHE:
+            return _FRAME_CACHE[cache_key]
     except Exception:
         pass
 
-    return None
+    frame_rgb = None
+    try:
+        cap = cv2.VideoCapture(video_path)
+        if cap.isOpened():
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            target_frame = int(max(0.0, norm_ts) * fps) if fps > 0 else 0
+            cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+            ret, frame_bgr = cap.read()
+            cap.release()
+            if ret and frame_bgr is not None:
+                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    except Exception:
+        pass
+
+    if frame_rgb is not None and cache_key is not None:
+        if len(_FRAME_CACHE) > 60:
+            _FRAME_CACHE.clear()
+        _FRAME_CACHE[cache_key] = frame_rgb
+
+    return frame_rgb
 
 
 def trim_video(video_path: str, start_s: float, end_s: float, output_path: str = None) -> dict:
