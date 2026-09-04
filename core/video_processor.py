@@ -150,11 +150,10 @@ def download_full_video(
         cookie_file = get_cookie_file()
 
         base_opts = {
-            'format': 'bestvideo[height<=1080][ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<=1080][vcodec^=avc1]+bestaudio/bestvideo[height<=1080][protocol=https]+bestaudio[protocol=https]/bestvideo[height<=1080]+bestaudio/best',
+            'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080][vcodec^=avc1]+bestaudio/bestvideo[height<=1080]+bestaudio/bestvideo+bestaudio/best',
             'outtmpl': output_path,
             'merge_output_format': 'mp4',
             'ffmpeg_location': os.path.dirname(FFMPEG_EXE) if FFMPEG_EXE else None,
-            'extractor_args': {'youtube': {'player_client': ['web', 'android']}},
             'concurrent_fragment_downloads': 16,
             'http_chunk_size': 10485760,  # 10MB chunk size to avoid YouTube throttling
             'buffersize': 1048576,        # 1MB RAM buffer

@@ -1385,6 +1385,11 @@ if input_mode.startswith("🌐 Link"):
                     v_date = meta.get("upload_date")
                     v_thumb = meta.get("thumbnail")
                     v_dur = meta.get("duration")
+                    if active_slice_start is not None or active_slice_end is not None:
+                        _s_val = active_slice_start or 0.0
+                        _e_val = active_slice_end if active_slice_end is not None else (v_dur or 0.0)
+                        if _e_val and _e_val > _s_val:
+                            v_dur = _e_val - _s_val
                     is_live_flag = meta.get("is_live", False)
 
                     add_or_update_video_in_library(
@@ -1526,6 +1531,11 @@ if input_mode.startswith("🌐 Link"):
                     v_date = meta.get("upload_date")
                     v_thumb = meta.get("thumbnail")
                     v_dur = meta.get("duration")
+                    if active_slice_start is not None or active_slice_end is not None:
+                        _s_val = active_slice_start or 0.0
+                        _e_val = active_slice_end if active_slice_end is not None else (v_dur or 0.0)
+                        if _e_val and _e_val > _s_val:
+                            v_dur = _e_val - _s_val
                     is_live_flag = meta.get("is_live", False)
 
                     add_or_update_video_in_library(
@@ -4565,7 +4575,26 @@ if st.session_state.transcription_done:
                                     _is_live_corte = bool(json.load(_mf).get("is_live"))
                             except Exception:
                                 pass
-                        video_res = download_full_video(active_url, video_full_path, is_live=_is_live_corte)
+
+                        # Extrai intervalo de slice caso o vídeo seja fatiado (_t_start_end)
+                        _slice_s = None
+                        _slice_e = None
+                        _m_slice = re.search(r'_t_(\d+)_(\d+|end)$', video_id)
+                        if _m_slice:
+                            _slice_s = float(_m_slice.group(1))
+                            if _m_slice.group(2) != 'end':
+                                _slice_e = float(_m_slice.group(2))
+                        else:
+                            _slice_s = parse_time_str(st.session_state.get("input_yt_slice_start", ""))
+                            _slice_e = parse_time_str(st.session_state.get("input_yt_slice_end", ""))
+
+                        video_res = download_full_video(
+                            active_url,
+                            video_full_path,
+                            is_live=_is_live_corte,
+                            start_sec=_slice_s,
+                            end_sec=_slice_e
+                        )
                 else:
                     current_res = get_video_resolution(video_full_path)
                     st.success(f"Vídeo em alta qualidade encontrado no cache ({current_res})!")
