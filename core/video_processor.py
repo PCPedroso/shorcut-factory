@@ -150,10 +150,11 @@ def download_full_video(
         cookie_file = get_cookie_file()
 
         base_opts = {
-            'format': 'bestvideo[height<=1080][protocol=https]+bestaudio[protocol=https]/bestvideo[height<=1080]+bestaudio/bestvideo+bestaudio/best',
+            'format': 'bestvideo[height<=1080][ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<=1080][vcodec^=avc1]+bestaudio/bestvideo[height<=1080][protocol=https]+bestaudio[protocol=https]/bestvideo[height<=1080]+bestaudio/best',
             'outtmpl': output_path,
             'merge_output_format': 'mp4',
-            'ffmpeg_location': FFMPEG_EXE,
+            'ffmpeg_location': os.path.dirname(FFMPEG_EXE) if FFMPEG_EXE else None,
+            'extractor_args': {'youtube': {'player_client': ['web', 'android']}},
             'concurrent_fragment_downloads': 16,
             'http_chunk_size': 10485760,  # 10MB chunk size to avoid YouTube throttling
             'buffersize': 1048576,        # 1MB RAM buffer
@@ -167,7 +168,7 @@ def download_full_video(
         if cookie_file:
             base_opts['cookiefile'] = cookie_file
 
-        # Se um intervalo de tempo foi especificado, aplica download seletivo de seções
+        # Se um intervalo de tempo foi especificado, aplica download seletivo de seções ultra-rápido
         s_parsed = parse_time_str(start_sec)
         e_parsed = parse_time_str(end_sec)
         if s_parsed is not None or e_parsed is not None:
@@ -176,7 +177,7 @@ def download_full_video(
                 s_val = s_parsed if s_parsed is not None and s_parsed >= 0 else 0.0
                 e_val = e_parsed if e_parsed is not None and e_parsed > s_val else None
                 base_opts['download_ranges'] = download_range_func(None, [(s_val, e_val)])
-                base_opts['force_keyframes_at_cuts'] = True
+                base_opts['force_keyframes_at_cuts'] = False
             except Exception:
                 pass
 

@@ -52,7 +52,7 @@ def test_download_audio_with_range_options(mock_getsize, mock_exists, mock_ydl_c
     assert mock_ydl_cls.called
     called_opts = mock_ydl_cls.call_args[0][0]
     assert "download_ranges" in called_opts
-    assert called_opts.get("force_keyframes_at_cuts") is True
+    assert called_opts.get("force_keyframes_at_cuts") is False
 
 
 @patch("os.remove")
@@ -74,7 +74,7 @@ def test_download_full_video_with_range_options(mock_getsize, mock_exists, mock_
     assert mock_ydl_cls.called
     called_opts = mock_ydl_cls.call_args[0][0]
     assert "download_ranges" in called_opts
-    assert called_opts.get("force_keyframes_at_cuts") is True
+    assert called_opts.get("force_keyframes_at_cuts") is False
 
 
 def test_get_current_active_video_id():

@@ -329,7 +329,8 @@ def download_audio(
     base_opts = {
         'format': 'bestaudio[ext=m4a]/bestaudio[protocol=https]/bestaudio/best',
         'outtmpl': output_path.replace('.mp3', '.%(ext)s'),
-        'ffmpeg_location': ffmpeg_path,
+        'ffmpeg_location': os.path.dirname(ffmpeg_path) if ffmpeg_path else None,
+        'extractor_args': {'youtube': {'player_client': ['web', 'android']}},
         'concurrent_fragment_downloads': 16,
         'http_chunk_size': 10485760,  # 10MB chunk size
         'buffersize': 1048576,        # 1MB buffer
@@ -356,7 +357,7 @@ def download_audio(
             s_val = s_parsed if s_parsed is not None and s_parsed >= 0 else 0.0
             e_val = e_parsed if e_parsed is not None and e_parsed > s_val else None
             base_opts['download_ranges'] = download_range_func(None, [(s_val, e_val)])
-            base_opts['force_keyframes_at_cuts'] = True
+            base_opts['force_keyframes_at_cuts'] = False
         except Exception:
             pass
 
