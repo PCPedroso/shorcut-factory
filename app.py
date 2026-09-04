@@ -2991,6 +2991,11 @@ if st.session_state.transcription_done:
     if 'cut_ready_banner' in st.session_state and st.session_state.cut_ready_banner:
         st.success(st.session_state.cut_ready_banner)
     
+    if "_pending_start_time" in st.session_state:
+        st.session_state.final_start_time = st.session_state.pop("_pending_start_time")
+    if "_pending_end_time" in st.session_state:
+        st.session_state.final_end_time = st.session_state.pop("_pending_end_time")
+
     if 'final_start_time' not in st.session_state:
         st.session_state.final_start_time = ""
     if 'final_end_time' not in st.session_state:
@@ -4889,8 +4894,8 @@ if st.session_state.transcription_done:
                     col_tr1, col_tr2 = st.columns([0.28, 0.72])
                     with col_tr1:
                         if st.button(f"⏱️ [{cut_item.get('start_time')} → {cut_item.get('end_time')}]", key=f"btn_load_trecho_gal_{c_idx}", help="Clique para carregar este intervalo na Fábrica (Seção 3) e rolar a página até os campos de tempo."):
-                            st.session_state.final_start_time = cut_item.get('start_time')
-                            st.session_state.final_end_time = cut_item.get('end_time')
+                            st.session_state["_pending_start_time"] = cut_item.get('start_time')
+                            st.session_state["_pending_end_time"] = cut_item.get('end_time')
                             st.session_state.final_corte_title = cut_item.get('title', '')
                             st.session_state["meta_generated"] = False
                             st.session_state["_pending_cut_title"] = cut_item.get('title', '')
