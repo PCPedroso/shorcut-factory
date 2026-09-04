@@ -2919,7 +2919,11 @@ if st.session_state.transcription_done:
     if 'final_end_time' not in st.session_state:
         st.session_state.final_end_time = ""
 
-    # ── Botões de atalho de tempo ──────────────────────────────────────
+    # ── Botões de atalho de tempo e carregamento rápido ────────────────
+    _active_url_s3 = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+    _vid_id_s3 = get_video_id(_active_url_s3) if _active_url_s3 else ""
+    _saved_cuts_catalog_s3 = load_cuts_catalog(_vid_id_s3) if _vid_id_s3 else {}
+
     _btn_col_full, _btn_col_clear, _btn_col_spacer = st.columns([1.4, 1, 3])
     with _btn_col_full:
         if st.button("📺 Vídeo Inteiro", key="btn_use_full_video", use_container_width=True,
@@ -2945,6 +2949,38 @@ if st.session_state.transcription_done:
             st.session_state.final_end_time = ""
             st.session_state.cut_ready_banner = ""
             st.rerun()
+
+    if _saved_cuts_catalog_s3:
+        _cut_opts = ["-- 📋 Selecione um corte salvo para preencher tempos com 1 clique --"]
+        _cut_map = {}
+        for _k_c, _c_item in _saved_cuts_catalog_s3.items():
+            _lbl = f"📌 {_c_item.get('title', 'Corte')} [{_c_item.get('start_time')} → {_c_item.get('end_time')}]"
+            _cut_opts.append(_lbl)
+            _cut_map[_lbl] = _c_item
+
+        def _on_select_saved_cut():
+            _chosen = st.session_state.get("sel_quick_saved_cut")
+            if _chosen and _chosen in _cut_map:
+                _c = _cut_map[_chosen]
+                st.session_state.final_start_time = _c.get('start_time', '')
+                st.session_state.final_end_time = _c.get('end_time', '')
+                st.session_state.final_corte_title = _c.get('title', '')
+                st.session_state["meta_generated"] = False
+                st.session_state["_pending_cut_title"] = _c.get('title', '')
+                st.session_state["_pending_cut_headline"] = _c.get('headline', '')
+                st.session_state["_pending_cut_desc"] = _c.get('description', '')
+                st.session_state["_pending_cut_hashtags"] = " ".join(_c.get('hashtags', [])) if isinstance(_c.get('hashtags'), list) else _c.get('hashtags', '')
+                st.session_state["_pending_cut_tags_seo"] = _c.get('tags_seo', '')
+                st.session_state.cut_ready_banner = f"✂️ Corte carregado com 1 clique: **{_c.get('title', 'Corte')}** `[{_c.get('start_time')} → {_c.get('end_time')}]`"
+                st.session_state["sel_quick_saved_cut"] = _cut_opts[0]
+
+        st.selectbox(
+            "📥 Carregar Corte Salvo / Histórico:",
+            options=_cut_opts,
+            key="sel_quick_saved_cut",
+            on_change=_on_select_saved_cut,
+            help="Selecione qualquer corte existente no catálogo para carregar instantaneamente o tempo inicial e final nos campos abaixo com apenas 1 clique."
+        )
 
     def _on_start_time_change():
         val = st.session_state.get("final_start_time", "")
@@ -4771,9 +4807,25 @@ if st.session_state.transcription_done:
             st.caption(f"📁 Total de **{len(catalog_gal)}** minutagens e instâncias registradas no catálogo.")
             for c_idx, (t_key, cut_item) in enumerate(catalog_gal.items()):
                 with st.container():
-                    # Cabeçalho do corte
-                    st.subheader(f"📌 {cut_item.get('title', 'Corte sem título')}")
-                    st.markdown(f"⏱️ Trecho: `[{cut_item.get('start_time')} → {cut_item.get('end_time')}]` • Atualizado em: `{cut_item.get('updated_at', 'N/D')}`")
+                    # Cabeçalho do corte com botão de carregar na Fábrica
+                    _head_c1, _head_c2 = st.columns([3.5, 1.5])
+                    with _head_c1:
+                        st.subheader(f"📌 {cut_item.get('title', 'Corte sem título')}")
+                        st.markdown(f"⏱️ Trecho: `[{cut_item.get('start_time')} → {cut_item.get('end_time')}]` • Atualizado em: `{cut_item.get('updated_at', 'N/D')}`")
+                    with _head_c2:
+                        st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+                        if st.button("✂️ Carregar na Fábrica", key=f"btn_load_cut_factory_{c_idx}", use_container_width=True, help="Carrega os tempos deste corte e metadados diretamente na Seção 3 para refazer ou ajustar com 1 clique."):
+                            st.session_state.final_start_time = cut_item.get('start_time')
+                            st.session_state.final_end_time = cut_item.get('end_time')
+                            st.session_state.final_corte_title = cut_item.get('title', '')
+                            st.session_state["meta_generated"] = False
+                            st.session_state["_pending_cut_title"] = cut_item.get('title', '')
+                            st.session_state["_pending_cut_headline"] = cut_item.get('headline', '')
+                            st.session_state["_pending_cut_desc"] = cut_item.get('description', '')
+                            st.session_state["_pending_cut_hashtags"] = " ".join(cut_item.get('hashtags', [])) if isinstance(cut_item.get('hashtags'), list) else cut_item.get('hashtags', '')
+                            st.session_state["_pending_cut_tags_seo"] = cut_item.get('tags_seo', '')
+                            st.session_state.cut_ready_banner = f"✂️ Trecho carregado na Fábrica: **{cut_item.get('title', 'Corte')}** `[{cut_item.get('start_time')} → {cut_item.get('end_time')}]`"
+                            st.rerun()
                     
                     # Instâncias de formatos renderizadas para esta minutagem
                     formats_dict = cut_item.get("formats", {})
