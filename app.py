@@ -348,16 +348,32 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     key=f"trim_end_{unique_key}"
                 )
 
+            # Botão sem texto para aplicar ajustes na pré-visualização
+            col_tprev_hdr, col_tprev_btn = st.columns([4.2, 0.8])
+            with col_tprev_hdr:
+                st.markdown("###### 👁️ Pré-visualização dos Frames:")
+            with col_tprev_btn:
+                btn_trig_trim = st.button("🔄", key=f"btn_refresh_trim_prev_{unique_key}", help="Aplicar ajustes na pré-visualização dos frames")
+
+            if btn_trig_trim or f"trim_prev_fstart_{unique_key}" not in st.session_state:
+                st.session_state[f"trim_prev_start_val_{unique_key}"] = start_trim
+                st.session_state[f"trim_prev_end_val_{unique_key}"] = end_trim
+                st.session_state[f"trim_prev_fstart_{unique_key}"] = extract_frame_at_timestamp(video_path, start_trim)
+                st.session_state[f"trim_prev_fend_{unique_key}"] = extract_frame_at_timestamp(video_path, max(0.0, end_trim - 0.1))
+
+            f_start = st.session_state.get(f"trim_prev_fstart_{unique_key}")
+            f_end = st.session_state.get(f"trim_prev_fend_{unique_key}")
+            p_start_val = st.session_state.get(f"trim_prev_start_val_{unique_key}", start_trim)
+            p_end_val = st.session_state.get(f"trim_prev_end_val_{unique_key}", end_trim)
+
             # Prévia visual dos frames de entrada e saída
             col_pf1, col_pf2 = st.columns(2)
             with col_pf1:
-                st.caption(f"📍 Frame de Início ({start_trim:.1f}s):")
-                f_start = extract_frame_at_timestamp(video_path, start_trim)
+                st.caption(f"📍 Frame de Início ({p_start_val:.1f}s):")
                 if f_start is not None:
                     safe_display_image(f_start, use_container_width=True)
             with col_pf2:
-                st.caption(f"🏁 Frame Final ({end_trim:.1f}s):")
-                f_end = extract_frame_at_timestamp(video_path, max(0.0, end_trim - 0.1))
+                st.caption(f"🏁 Frame Final ({p_end_val:.1f}s):")
                 if f_end is not None:
                     safe_display_image(f_end, use_container_width=True)
 
@@ -412,15 +428,31 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     key=f"snip_end_{unique_key}"
                 )
 
+            # Botão sem texto para aplicar ajustes na pré-visualização
+            col_sprev_hdr, col_sprev_btn = st.columns([4.2, 0.8])
+            with col_sprev_hdr:
+                st.markdown("###### 👁️ Pré-visualização dos Frames a Deletar:")
+            with col_sprev_btn:
+                btn_trig_snip = st.button("🔄", key=f"btn_refresh_snip_prev_{unique_key}", help="Aplicar ajustes na pré-visualização")
+
+            if btn_trig_snip or f"snip_prev_fstart_{unique_key}" not in st.session_state:
+                st.session_state[f"snip_prev_start_val_{unique_key}"] = snip_start
+                st.session_state[f"snip_prev_end_val_{unique_key}"] = snip_end
+                st.session_state[f"snip_prev_fstart_{unique_key}"] = extract_frame_at_timestamp(video_path, snip_start)
+                st.session_state[f"snip_prev_fend_{unique_key}"] = extract_frame_at_timestamp(video_path, snip_end)
+
+            f_sstart = st.session_state.get(f"snip_prev_fstart_{unique_key}")
+            f_send = st.session_state.get(f"snip_prev_fend_{unique_key}")
+            p_sstart_val = st.session_state.get(f"snip_prev_start_val_{unique_key}", snip_start)
+            p_send_val = st.session_state.get(f"snip_prev_end_val_{unique_key}", snip_end)
+
             col_ps1, col_ps2 = st.columns(2)
             with col_ps1:
-                st.caption(f"❌ Início do corte a deletar ({snip_start:.1f}s):")
-                f_sstart = extract_frame_at_timestamp(video_path, snip_start)
+                st.caption(f"❌ Início do corte a deletar ({p_sstart_val:.1f}s):")
                 if f_sstart is not None:
                     safe_display_image(f_sstart, use_container_width=True)
             with col_ps2:
-                st.caption(f"❌ Fim do corte a deletar ({snip_end:.1f}s):")
-                f_send = extract_frame_at_timestamp(video_path, snip_end)
+                st.caption(f"❌ Fim do corte a deletar ({p_send_val:.1f}s):")
                 if f_send is not None:
                     safe_display_image(f_send, use_container_width=True)
 
@@ -595,20 +627,31 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 "logo_scale": logo_scale
             }
 
-            # 3. Prévia Visual Instantânea
+            # 3. Prévia Visual Instantânea (Com acionamento por botão)
             if selected_banner_path and os.path.exists(selected_banner_path):
                 st.markdown("---")
-                st.markdown("##### 👁️ Prévia em Tempo Real:")
+                col_ov_prev_hdr, col_ov_prev_btn = st.columns([4.2, 0.8])
+                with col_ov_prev_hdr:
+                    st.markdown("##### 👁️ Prévia do Banner:")
+                with col_ov_prev_btn:
+                    btn_trig_ov = st.button("🔄", key=f"btn_refresh_ov_prev_{unique_key}", help="Aplicar ajustes na pré-visualização do Banner")
+
                 ov_preview_sec = st.slider("Segundo do vídeo para prévia:", min_value=0.0, max_value=float(dur), value=min(2.0, float(dur/2)), step=0.5, key=f"ov_prev_sec_{unique_key}")
-                prev_frame = generate_overlay_preview(
-                    video_path=video_path,
-                    banner_path_or_array=selected_banner_path,
-                    config=current_ov_cfg,
-                    timestamp_s=ov_preview_sec,
-                    logo_path_or_array=selected_logo_path
-                )
+
+                if btn_trig_ov or f"cached_ov_prev_{unique_key}" not in st.session_state:
+                    st.session_state[f"cached_ov_prev_{unique_key}"] = generate_overlay_preview(
+                        video_path=video_path,
+                        banner_path_or_array=selected_banner_path,
+                        config=current_ov_cfg,
+                        timestamp_s=ov_preview_sec,
+                        logo_path_or_array=selected_logo_path
+                    )
+                    st.session_state[f"cached_ov_prev_sec_{unique_key}"] = ov_preview_sec
+
+                prev_frame = st.session_state.get(f"cached_ov_prev_{unique_key}")
+                prev_sec_shown = st.session_state.get(f"cached_ov_prev_sec_{unique_key}", ov_preview_sec)
                 if prev_frame is not None:
-                    safe_display_image(prev_frame, caption=f"Prévia do Banner aplicado em {ov_preview_sec:.1f}s", use_container_width=True)
+                    safe_display_image(prev_frame, caption=f"Prévia do Banner aplicado em {prev_sec_shown:.1f}s", use_container_width=True)
 
             # 4. Botão de Aplicação / Renderização
             st.markdown("")
@@ -782,22 +825,33 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 "stroke_width": 2 if sel_hl_mode == "outline_only" else 0
             }
 
-            # 4. Prévia Visual Instantânea do Frame em Tempo Real
+            # 4. Prévia Visual Instantânea do Frame (Com acionamento por botão)
             st.markdown("---")
-            st.markdown("##### 👁️ Prévia da Headline em Tempo Real:")
+            col_hl_prev_hdr, col_hl_prev_btn = st.columns([4.2, 0.8])
+            with col_hl_prev_hdr:
+                st.markdown("##### 👁️ Prévia da Headline:")
+            with col_hl_prev_btn:
+                btn_trig_hl = st.button("🔄", key=f"btn_refresh_hl_prev_{unique_key}", help="Aplicar ajustes na pré-visualização da Headline")
+
             col_hl_prev_ctrl, col_hl_prev_view = st.columns([1.5, 2.5])
             with col_hl_prev_ctrl:
                 hl_preview_sec = st.slider("Segundo para visualização:", 0.0, float(dur), min(1.5, float(dur/2)), 0.5, key=f"hl_post_prev_sec_{unique_key}")
-                st.caption("Ajuste qualquer parâmetro acima e a prévia será atualizada instantaneamente!")
-            with col_hl_prev_view:
-                prev_hl_frame = generate_headline_preview(
+                st.caption("Faça os ajustes desejados e clique no botão 🔄 para atualizar a prévia.")
+
+            if btn_trig_hl or f"cached_hl_prev_{unique_key}" not in st.session_state:
+                st.session_state[f"cached_hl_prev_{unique_key}"] = generate_headline_preview(
                     video_path=video_path,
                     text=hl_text_input,
                     config=current_hl_cfg,
                     timestamp_s=hl_preview_sec
                 )
+                st.session_state[f"cached_hl_prev_sec_{unique_key}"] = hl_preview_sec
+
+            prev_hl_frame = st.session_state.get(f"cached_hl_prev_{unique_key}")
+            prev_hl_sec_shown = st.session_state.get(f"cached_hl_prev_sec_{unique_key}", hl_preview_sec)
+            with col_hl_prev_view:
                 if prev_hl_frame is not None:
-                    safe_display_image(prev_hl_frame, caption=f"Prévia com Headline aos {hl_preview_sec:.1f}s", use_container_width=True)
+                    safe_display_image(prev_hl_frame, caption=f"Prévia com Headline aos {prev_hl_sec_shown:.1f}s", use_container_width=True)
 
             # 5. Botão de Aplicação no Vídeo
             st.markdown("")
@@ -2908,6 +2962,19 @@ if st.session_state.transcription_done:
             st.code(st.session_state.ai_raw)
 
     st.markdown("---")
+    st.markdown('<div id="secao-fabrica-de-cortes"></div>', unsafe_allow_html=True)
+    if st.session_state.pop("scroll_to_section3", False):
+        st.components.v1.html("""
+            <script>
+                setTimeout(() => {
+                    const el = window.parent.document.getElementById("secao-fabrica-de-cortes");
+                    if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                }, 120);
+            </script>
+        """, height=0)
+
     st.header("3. Fábrica de Cortes (Recorte Final)")
     st.markdown("Baixe o vídeo real usando o trecho selecionado.")
     
@@ -4807,14 +4874,11 @@ if st.session_state.transcription_done:
             st.caption(f"📁 Total de **{len(catalog_gal)}** minutagens e instâncias registradas no catálogo.")
             for c_idx, (t_key, cut_item) in enumerate(catalog_gal.items()):
                 with st.container():
-                    # Cabeçalho do corte com botão de carregar na Fábrica
-                    _head_c1, _head_c2 = st.columns([3.5, 1.5])
-                    with _head_c1:
-                        st.subheader(f"📌 {cut_item.get('title', 'Corte sem título')}")
-                        st.markdown(f"⏱️ Trecho: `[{cut_item.get('start_time')} → {cut_item.get('end_time')}]` • Atualizado em: `{cut_item.get('updated_at', 'N/D')}`")
-                    with _head_c2:
-                        st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
-                        if st.button("✂️ Carregar na Fábrica", key=f"btn_load_cut_factory_{c_idx}", use_container_width=True, help="Carrega os tempos deste corte e metadados diretamente na Seção 3 para refazer ou ajustar com 1 clique."):
+                    # Cabeçalho do corte com controle de trecho na própria linha
+                    st.subheader(f"📌 {cut_item.get('title', 'Corte sem título')}")
+                    col_tr1, col_tr2 = st.columns([0.48, 0.52])
+                    with col_tr1:
+                        if st.button(f"⏱️ Trecho: [{cut_item.get('start_time')} → {cut_item.get('end_time')}]", key=f"btn_load_trecho_gal_{c_idx}", help="Clique para carregar este intervalo na Fábrica de Cortes (Seção 3) e rolar a página até os campos de tempo com 1 clique.", use_container_width=True):
                             st.session_state.final_start_time = cut_item.get('start_time')
                             st.session_state.final_end_time = cut_item.get('end_time')
                             st.session_state.final_corte_title = cut_item.get('title', '')
@@ -4825,7 +4889,10 @@ if st.session_state.transcription_done:
                             st.session_state["_pending_cut_hashtags"] = " ".join(cut_item.get('hashtags', [])) if isinstance(cut_item.get('hashtags'), list) else cut_item.get('hashtags', '')
                             st.session_state["_pending_cut_tags_seo"] = cut_item.get('tags_seo', '')
                             st.session_state.cut_ready_banner = f"✂️ Trecho carregado na Fábrica: **{cut_item.get('title', 'Corte')}** `[{cut_item.get('start_time')} → {cut_item.get('end_time')}]`"
+                            st.session_state["scroll_to_section3"] = True
                             st.rerun()
+                    with col_tr2:
+                        st.markdown(f"<div style='padding-top: 6px; font-size: 0.9rem; color: #a0a0a0;'>• Atualizado em: <code>{cut_item.get('updated_at', 'N/D')}</code></div>", unsafe_allow_html=True)
                     
                     # Instâncias de formatos renderizadas para esta minutagem
                     formats_dict = cut_item.get("formats", {})
