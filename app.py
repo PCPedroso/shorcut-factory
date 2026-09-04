@@ -252,6 +252,41 @@ def open_in_file_explorer(target_path: str) -> bool:
     except Exception:
         return False
 
+def get_current_active_video_id(url: str = None) -> str:
+    """
+    Retorna o video_id efetivo levando em consideração fatiamento de tempo (Time-Range Slicing),
+    arquivos locais ou ID ativo armazenado na sessão.
+    """
+    act_id = st.session_state.get("active_video_id")
+    if act_id and os.path.exists(os.path.join("data", act_id)):
+        return act_id
+
+    target_url = url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+    base_vid = get_video_id(target_url) if target_url else ""
+    if not base_vid:
+        return act_id or ""
+
+    s_slice = parse_time_str(st.session_state.get("input_yt_slice_start", ""))
+    e_slice = parse_time_str(st.session_state.get("input_yt_slice_end", ""))
+    if s_slice is not None or e_slice is not None:
+        s_tag = f"{int(s_slice)}" if s_slice is not None else "0"
+        e_tag = f"{int(e_slice)}" if e_slice is not None else "end"
+        sliced_id = f"{base_vid}_t_{s_tag}_{e_tag}"
+        if os.path.exists(os.path.join("data", sliced_id)):
+            return sliced_id
+        return sliced_id
+
+    if not os.path.exists(os.path.join("data", base_vid)) and os.path.exists("data"):
+        try:
+            candidates = [d for d in os.listdir("data") if d.startswith(f"{base_vid}_t_") and os.path.exists(os.path.join("data", d, "video_full.mp4"))]
+            if candidates:
+                candidates.sort(key=lambda d: os.path.getmtime(os.path.join("data", d)), reverse=True)
+                return candidates[0]
+        except Exception:
+            pass
+
+    return base_vid
+
 def render_quick_editor_component(video_path: str, unique_key: str):
     """
     Componente interativo de edição rápida / ajuste fino para cortar pequenos trechos do vídeo.
@@ -1052,6 +1087,7 @@ def load_video_saved_artifacts(video_id: str):
     """Carrega todas as ações e análises salvas individualmente para o vídeo."""
     if not video_id:
         return
+    st.session_state["active_video_id"] = video_id
     v_dir = os.path.join("data", video_id)
     
     # 1. Transcrição
@@ -1470,6 +1506,8 @@ if input_mode.startswith("🌐 Link"):
                     video_id = f"{base_vid}_t_{s_tag}_{e_tag}"
                 else:
                     video_id = base_vid
+
+                st.session_state["active_video_id"] = video_id
 
                 data_dir = os.path.join("data", video_id)
                 os.makedirs(data_dir, exist_ok=True)
@@ -3007,7 +3045,7 @@ if st.session_state.transcription_done:
         if st.button("📺 Vídeo Inteiro", key="btn_use_full_video", use_container_width=True,
                      help="Preenche automaticamente o tempo inicial (00:00:00) e o tempo final com a duração total do vídeo"):
             _active_url_full = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-            _vid_id_full = get_video_id(_active_url_full)
+            _vid_id_full = get_current_active_video_id(_active_url_full)
             _vid_path_full = os.path.join("data", _vid_id_full, "video_full.mp4") if _vid_id_full else None
             if _vid_path_full and os.path.exists(_vid_path_full):
                 _total_dur = get_video_duration(_vid_path_full)
@@ -3439,7 +3477,7 @@ if st.session_state.transcription_done:
                 if start_time:
                     if st.button("👁️ Visualizar Prévia do Enquadramento", key="btn_preview_face"):
                         _active_preview_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-                        video_id = get_video_id(_active_preview_url)
+                        video_id = get_current_active_video_id(_active_preview_url)
                         v_full = os.path.join("data", video_id, "video_full.mp4") if video_id else ""
                         if os.path.exists(v_full):
                             from core.face_tracker import generate_face_preview_image
@@ -3527,7 +3565,7 @@ if st.session_state.transcription_done:
 
                 # Calcula automaticamente o Zoom e Pan
                 _active_blur_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-                video_id = get_video_id(_active_blur_url)
+                video_id = get_current_active_video_id(_active_blur_url)
                 v_full = os.path.join("data", video_id, "video_full.mp4") if video_id else ""
                 if os.path.exists(v_full) and start_time:
                     from core.face_tracker import calculate_auto_blur_params, generate_blur_preview_image
@@ -3632,7 +3670,7 @@ if st.session_state.transcription_done:
             if start_time:
                 if st.button("👁️ Visualizar Prévia com Aproximação 16:9", key="btn_prev_169"):
                     _active_preview_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-                    video_id = get_video_id(_active_preview_url)
+                    video_id = get_current_active_video_id(_active_preview_url)
                     v_full = os.path.join("data", video_id, "video_full.mp4") if video_id else ""
                     if os.path.exists(v_full):
                         from core.face_tracker import generate_169_preview_image
@@ -3664,7 +3702,7 @@ if st.session_state.transcription_done:
         )
         if subtitle_enabled:
             # Verifica se a transcrição está disponível com timestamps
-            _vid_id_sub = get_video_id(video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or "")
+            _vid_id_sub = get_current_active_video_id(video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or "")
             _transcript_path_sub = os.path.join("data", _vid_id_sub, "transcript.json") if _vid_id_sub else ""
             _has_transcript = os.path.exists(_transcript_path_sub)
 
@@ -4491,7 +4529,7 @@ if st.session_state.transcription_done:
             from core.video_processor import download_full_video, cut_video, get_video_resolution
             
             active_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-            video_id = get_video_id(active_url)
+            video_id = get_current_active_video_id(active_url)
             
             if not video_id:
                 st.error("URL do vídeo do YouTube não identificada. Por favor, confirme a URL na Seção 1.")
@@ -4839,7 +4877,7 @@ if st.session_state.transcription_done:
     # SEÇÃO 4: GALERIA DE CORTES PRODUZIDOS
     # ─────────────────────────────────────────────────────────────────
     _active_u_gal = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-    _vid_id_gal = get_video_id(_active_u_gal) or ""
+    _vid_id_gal = get_current_active_video_id(_active_u_gal) or ""
 
     if _vid_id_gal:
         st.markdown("---")

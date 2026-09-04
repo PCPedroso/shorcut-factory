@@ -75,3 +75,24 @@ def test_download_full_video_with_range_options(mock_getsize, mock_exists, mock_
     called_opts = mock_ydl_cls.call_args[0][0]
     assert "download_ranges" in called_opts
     assert called_opts.get("force_keyframes_at_cuts") is True
+
+
+def test_get_current_active_video_id():
+    from app import get_current_active_video_id
+    import streamlit as st
+
+    # 1. Base URL sem slice
+    st.session_state.clear()
+    assert get_current_active_video_id("https://www.youtube.com/watch?v=mock_unit_vid_999") == "mock_unit_vid_999"
+
+    # 2. Com slice configurado
+    st.session_state["input_yt_slice_start"] = "01:29:04"
+    st.session_state["input_yt_slice_end"] = "01:32:14"
+    assert get_current_active_video_id("https://www.youtube.com/watch?v=mock_unit_vid_999") == "mock_unit_vid_999_t_5344_5534"
+
+    # 3. Com active_video_id explícito na sessão
+    st.session_state["active_video_id"] = "custom_slice_123"
+    with patch("os.path.exists", return_value=True):
+        assert get_current_active_video_id("https://www.youtube.com/watch?v=mock_unit_vid_999") == "custom_slice_123"
+
+
