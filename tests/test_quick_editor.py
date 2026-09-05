@@ -6,7 +6,8 @@ from core.quick_editor import (
     get_video_duration,
     extract_frame_at_timestamp,
     trim_video,
-    remove_snippet_and_merge
+    remove_snippet_and_merge,
+    change_video_speed
 )
 
 
@@ -91,6 +92,15 @@ class TestQuickEditor(unittest.TestCase):
         self.assertGreaterEqual(len(history), 2)
         self.assertEqual(history[0]["action"], "🏷️ Headline de Topo")
         self.assertEqual(history[1]["action"], "✂️ Aparar (Trim)")
+
+    def test_change_video_speed(self):
+        out_speed = os.path.join(self.test_dir, "sped_up.mp4")
+        # Aumenta velocidade para 1.25x em vídeo de ~6.0s -> nova duração ~4.8s
+        res = change_video_speed(self.sample_video, speed=1.25, output_path=out_speed)
+        self.assertIsNone(res.get("error"))
+        self.assertTrue(os.path.exists(out_speed))
+        dur = get_video_duration(out_speed)
+        self.assertAlmostEqual(dur, 4.8, delta=0.8)
 
 
 if __name__ == '__main__':

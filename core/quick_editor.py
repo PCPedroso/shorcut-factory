@@ -291,6 +291,97 @@ def remove_snippet_and_merge(
         return {"path": None, "error": err_msg}
 
 
+def change_video_speed(
+    video_path: str,
+    speed: float = 1.0,
+    output_path: str = None
+) -> dict:
+    """
+    Altera a velocidade de reprodução do vídeo e do áudio de forma proporcional e sincronizada.
+    - speed: multiplicador de velocidade (ex: 1.00x a 1.50x, em incrementos de 0.05x).
+    - Utiliza o filtro setpts=(1/speed)*PTS para o vídeo e atempo=speed para o áudio (preserva o pitch/tom da voz).
+    """
+    if not video_path or not os.path.exists(video_path):
+        return {"path": None, "error": "Arquivo de vídeo de origem não encontrado."}
+
+    try:
+        speed = float(speed)
+    except (ValueError, TypeError):
+        speed = 1.0
+
+    if speed <= 0.05:
+        return {"path": None, "error": "A velocidade deve ser maior que 0.05x."}
+
+    total_dur = get_video_duration(video_path)
+    if total_dur <= 0.1:
+        return {"path": None, "error": "Vídeo inválido ou duração nula."}
+
+    target_out = output_path if output_path else video_path
+    is_in_place = not bool(output_path)
+
+    tmp_out = target_out + ".speed_tmp.mp4"
+    if os.path.exists(tmp_out):
+        try:
+            os.remove(tmp_out)
+        except Exception:
+            pass
+
+    has_audio = has_audio_stream(video_path)
+    pts_factor = 1.0 / speed
+
+    if has_audio:
+        filter_complex = f"[0:v]setpts={pts_factor:.6f}*PTS[v];[0:a]atempo={speed:.4f}[a]"
+        cmd = [
+            FFMPEG_EXE, "-y",
+            "-i", video_path,
+            "-filter_complex", filter_complex,
+            "-map", "[v]",
+            "-map", "[a]",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "20",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            tmp_out
+        ]
+    else:
+        filter_complex = f"[0:v]setpts={pts_factor:.6f}*PTS[v]"
+        cmd = [
+            FFMPEG_EXE, "-y",
+            "-i", video_path,
+            "-filter_complex", filter_complex,
+            "-map", "[v]",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "20",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            tmp_out
+        ]
+
+    res = subprocess.run(cmd, capture_output=True, text=True)
+
+    if res.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
+        if is_in_place and os.path.exists(target_out):
+            try:
+                os.remove(target_out)
+            except Exception:
+                pass
+        os.replace(tmp_out, target_out)
+        new_dur = get_video_duration(target_out)
+        return {"path": target_out, "error": None, "new_duration": new_dur, "speed": speed}
+    else:
+        if os.path.exists(tmp_out):
+            try:
+                os.remove(tmp_out)
+            except Exception:
+                pass
+        err_msg = res.stderr[-1000:] if res.stderr else "Erro desconhecido no FFmpeg ao alterar velocidade do vídeo."
+        return {"path": None, "error": err_msg}
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Histórico de Ajustes e Sinalização de Conclusão da Edição Rápida
 # ──────────────────────────────────────────────────────────────────────────────

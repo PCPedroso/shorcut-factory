@@ -73,7 +73,7 @@ from core.integrations import (
 )
 from core.quick_editor import (
     get_video_duration, extract_frame_at_timestamp, trim_video, remove_snippet_and_merge,
-    load_edit_history, record_quick_edit
+    change_video_speed, load_edit_history, record_quick_edit
 )
 from core.overlay_manager import apply_overlay_to_video, generate_overlay_preview, OVERLAY_PRESETS
 from core.audio_processor import (
@@ -353,9 +353,10 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 if not custom_suffix.startswith("_"):
                     custom_suffix = f"_{custom_suffix}"
 
-        tab_trim, tab_snip, tab_overlay, tab_headline, tab_audio = st.tabs([
+        tab_trim, tab_snip, tab_speed, tab_overlay, tab_headline, tab_audio = st.tabs([
             "✂️ Aparar (Trim)", 
             "🗑️ Remover Trecho",
+            "⚡ Velocidade",
             "🎨 Banner (Overlay)",
             "🏷️ Headline de Topo",
             "🎙️ Equalizador & Áudio"
@@ -517,6 +518,85 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                             video_path=video_path,
                             action_name="🗑️ Remover Trecho (Snip & Merge)",
                             details=f"Trecho Removido: {snip_start:.1f}s a {snip_end:.1f}s ({snip_end - snip_start:.1f}s) | Nova Duração: {snip_res.get('new_duration', dur_after_snip):.1f}s",
+                            output_path=out_target
+                        )
+                        st.session_state[f"last_edit_status_{unique_key}"] = entry
+                        st.session_state[f"just_edited_{unique_key}"] = True
+                        if out_target:
+                            st.session_state[f"last_edited_video_{unique_key}"] = out_target
+                        st.rerun()
+
+        with tab_speed:
+            st.markdown("##### ⚡ Acelerar Vídeo (Speed Up)")
+            st.caption("Aumente a velocidade de reprodução do vídeo para acelerar o ritmo e dinamismo sem distorcer o tom da voz.")
+
+            col_sp1, col_sp2 = st.columns([2.5, 1.5])
+            with col_sp1:
+                sel_speed = st.slider(
+                    "Velocidade de Reprodução:",
+                    min_value=1.00,
+                    max_value=1.50,
+                    value=1.10,
+                    step=0.05,
+                    format="%.2fx",
+                    key=f"speed_val_{unique_key}",
+                    help="Selecione um multiplicador de velocidade de 1.00x até 1.50x em incrementos de 0.05x."
+                )
+            with col_sp2:
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                speed_preset_choice = st.selectbox(
+                    "Presets Rápidos:",
+                    [
+                        "Personalizado",
+                        "Normal (1.00x)",
+                        "Leve (+10% / 1.10x)",
+                        "Dinâmico (+20% / 1.20x)",
+                        "Acelerado (+30% / 1.30x)",
+                        "Ultra (+50% / 1.50x)"
+                    ],
+                    index=2,
+                    key=f"speed_preset_choice_{unique_key}"
+                )
+                preset_map = {
+                    "Normal (1.00x)": 1.00,
+                    "Leve (+10% / 1.10x)": 1.10,
+                    "Dinâmico (+20% / 1.20x)": 1.20,
+                    "Acelerado (+30% / 1.30x)": 1.30,
+                    "Ultra (+50% / 1.50x)": 1.50
+                }
+                if speed_preset_choice in preset_map and preset_map[speed_preset_choice] != sel_speed:
+                    sel_speed = preset_map[speed_preset_choice]
+
+            dur_after_speed = (dur / sel_speed) if sel_speed > 0 else dur
+            time_saved = dur - dur_after_speed
+            pct_faster = (sel_speed - 1.0) * 100.0
+
+            if sel_speed > 1.00:
+                st.info(
+                    f"⏱️ **Duração Atual:** `{dur:.1f}s` ➔ **Nova Duração:** **`{dur_after_speed:.1f}s`** (Economia de **{time_saved:.1f}s** | **{pct_faster:.0f}% mais rápido**).\n\n"
+                    f"🔊 **Preservação de Áudio**: O tom e pitch da voz original são mantidos 100% naturais (sem efeito 'voz de esquilo')."
+                )
+            else:
+                st.info(f"⏱️ **Velocidade Normal (1.00x):** Duração mantida em `{dur:.1f}s`.")
+
+            btn_label_speed = "⚡ Salvar como Novo Vídeo Acelerado" if "Salvar como um novo vídeo" in save_mode else "⚡ Aplicar Aceleração no Vídeo Atual"
+            if st.button(btn_label_speed, key=f"btn_apply_speed_{unique_key}", type="primary", use_container_width=True):
+                with st.spinner(f"Acelerando vídeo para {sel_speed:.2f}x com FFmpeg..."):
+                    out_target = None
+                    if "Salvar como um novo vídeo" in save_mode:
+                        v_dir = os.path.dirname(video_path)
+                        b_name, ext = os.path.splitext(os.path.basename(video_path))
+                        suf = custom_suffix if custom_suffix else f"_speed_{sel_speed:.2f}x"
+                        out_target = os.path.join(v_dir, f"{b_name}{suf}{ext}")
+
+                    speed_res = change_video_speed(video_path, speed=sel_speed, output_path=out_target)
+                    if speed_res.get("error"):
+                        st.error(f"Erro ao acelerar vídeo: {speed_res['error']}")
+                    else:
+                        entry = record_quick_edit(
+                            video_path=video_path,
+                            action_name="⚡ Aceleração de Velocidade",
+                            details=f"Velocidade: {sel_speed:.2f}x (+{pct_faster:.0f}%) | Duração: {dur:.1f}s ➔ {speed_res.get('new_duration', dur_after_speed):.1f}s (Economia: {time_saved:.1f}s)",
                             output_path=out_target
                         )
                         st.session_state[f"last_edit_status_{unique_key}"] = entry
