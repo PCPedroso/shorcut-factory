@@ -564,49 +564,66 @@ def render_quick_editor_component(video_path: str, unique_key: str):
             st.markdown("##### ⚡ Acelerar Vídeo (Speed Up)")
             st.caption("Aumente a velocidade de reprodução do vídeo para acelerar o ritmo e dinamismo sem distorcer o tom da voz.")
 
-            if f"speed_val_{unique_key}" not in st.session_state:
-                st.session_state[f"speed_val_{unique_key}"] = 1.10
+            slider_key = f"speed_val_slider_{unique_key}"
+            if slider_key not in st.session_state:
+                st.session_state[slider_key] = 1.10
+
+            def _set_quick_speed_cb(k, val):
+                st.session_state[k] = float(val)
 
             sel_speed = st.slider(
                 "Velocidade de Reprodução:",
                 min_value=1.00,
                 max_value=1.50,
-                value=float(st.session_state[f"speed_val_{unique_key}"]),
                 step=0.05,
                 format="%.2fx",
-                key=f"speed_val_slider_{unique_key}",
+                key=slider_key,
                 help="Selecione um multiplicador de velocidade de 1.00x até 1.50x em incrementos de 0.05x."
             )
-            st.session_state[f"speed_val_{unique_key}"] = sel_speed
 
             # Botões rápidos de preset que atualizam o slider diretamente
             st.caption("⚡ **Atalhos Rápidos de Velocidade:**")
             col_btn1, col_btn2, col_btn3, col_btn4, col_btn5 = st.columns(5)
             with col_btn1:
-                if st.button("1.00x (Normal)", key=f"btn_spd_100_{unique_key}", use_container_width=True):
-                    st.session_state[f"speed_val_{unique_key}"] = 1.00
-                    st.session_state[f"speed_val_slider_{unique_key}"] = 1.00
-                    st.rerun()
+                st.button(
+                    "1.00x (Normal)",
+                    key=f"btn_spd_100_{unique_key}",
+                    on_click=_set_quick_speed_cb,
+                    args=(slider_key, 1.00),
+                    use_container_width=True
+                )
             with col_btn2:
-                if st.button("1.10x (+10%)", key=f"btn_spd_110_{unique_key}", use_container_width=True):
-                    st.session_state[f"speed_val_{unique_key}"] = 1.10
-                    st.session_state[f"speed_val_slider_{unique_key}"] = 1.10
-                    st.rerun()
+                st.button(
+                    "1.10x (+10%)",
+                    key=f"btn_spd_110_{unique_key}",
+                    on_click=_set_quick_speed_cb,
+                    args=(slider_key, 1.10),
+                    use_container_width=True
+                )
             with col_btn3:
-                if st.button("1.20x (+20%)", key=f"btn_spd_120_{unique_key}", use_container_width=True):
-                    st.session_state[f"speed_val_{unique_key}"] = 1.20
-                    st.session_state[f"speed_val_slider_{unique_key}"] = 1.20
-                    st.rerun()
+                st.button(
+                    "1.20x (+20%)",
+                    key=f"btn_spd_120_{unique_key}",
+                    on_click=_set_quick_speed_cb,
+                    args=(slider_key, 1.20),
+                    use_container_width=True
+                )
             with col_btn4:
-                if st.button("1.30x (+30%)", key=f"btn_spd_130_{unique_key}", use_container_width=True):
-                    st.session_state[f"speed_val_{unique_key}"] = 1.30
-                    st.session_state[f"speed_val_slider_{unique_key}"] = 1.30
-                    st.rerun()
+                st.button(
+                    "1.30x (+30%)",
+                    key=f"btn_spd_130_{unique_key}",
+                    on_click=_set_quick_speed_cb,
+                    args=(slider_key, 1.30),
+                    use_container_width=True
+                )
             with col_btn5:
-                if st.button("1.50x (+50%)", key=f"btn_spd_150_{unique_key}", use_container_width=True):
-                    st.session_state[f"speed_val_{unique_key}"] = 1.50
-                    st.session_state[f"speed_val_slider_{unique_key}"] = 1.50
-                    st.rerun()
+                st.button(
+                    "1.50x (+50%)",
+                    key=f"btn_spd_150_{unique_key}",
+                    on_click=_set_quick_speed_cb,
+                    args=(slider_key, 1.50),
+                    use_container_width=True
+                )
 
             dur_after_speed = (dur / sel_speed) if sel_speed > 0 else dur
             time_saved = dur - dur_after_speed
