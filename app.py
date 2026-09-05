@@ -73,7 +73,8 @@ from core.integrations import (
 )
 from core.quick_editor import (
     get_video_duration, extract_frame_at_timestamp, trim_video, remove_snippet_and_merge,
-    change_video_speed, load_edit_history, record_quick_edit
+    change_video_speed, list_edited_video_versions, delete_edited_video_version,
+    cleanup_all_edited_versions, load_edit_history, record_quick_edit
 )
 from core.overlay_manager import apply_overlay_to_video, generate_overlay_preview, OVERLAY_PRESETS
 from core.audio_processor import (
@@ -333,6 +334,28 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     if idx_h < len(edit_history) - 1:
                         st.markdown("---")
 
+        # ── GERENCIAMENTO DE VERSÕES EDITADAS NA PASTA DO CORTE ──────────────
+        all_versions = list_edited_video_versions(video_path)
+        secondary_versions = [v for v in all_versions if not v.get("is_main")]
+        if secondary_versions:
+            with st.expander(f"🗂️ Gerenciar Versões Editadas Desta Pasta ({len(secondary_versions)} arquivo{'s' if len(secondary_versions) > 1 else ''})", expanded=False):
+                st.caption("Exclua arquivos de edições secundárias para não deixar vestígios nem causar confusão na galeria:")
+                for v_item in secondary_versions:
+                    col_vi1, col_vi2 = st.columns([3.5, 1.0])
+                    with col_vi1:
+                        st.markdown(f"📄 **`{v_item['filename']}`** — `{v_item['size_mb']:.1f} MB` | `{v_item['duration']:.1f}s` | *{v_item['timestamp']}*")
+                    with col_vi2:
+                        if st.button("🗑️ Excluir", key=f"btn_del_ver_{unique_key}_{v_item['filename']}", use_container_width=True):
+                            del_r = delete_edited_video_version(v_item["path"])
+                            if del_r.get("success"):
+                                st.toast(f"🗑️ Versão '{v_item['filename']}' excluída sem deixar vestígios!")
+                                st.rerun()
+                st.markdown("---")
+                if st.button("🧹 Excluir Todas as Versões Secundárias e Manter Apenas Vídeo Base", key=f"btn_del_all_sec_{unique_key}", use_container_width=True):
+                    clean_r = cleanup_all_edited_versions(video_path, keep_path=video_path)
+                    st.toast(f"🧹 {clean_r.get('deleted_count', 0)} versão(ões) editada(s) removida(s)!")
+                    st.rerun()
+
         col_mode, col_suf = st.columns([1.5, 1.0])
         with col_mode:
             save_mode = st.radio(
@@ -344,6 +367,7 @@ def render_quick_editor_component(video_path: str, unique_key: str):
             )
         with col_suf:
             custom_suffix = ""
+            clean_previous = False
             if "Salvar como um novo vídeo" in save_mode:
                 custom_suffix = st.text_input(
                     "Sufixo da nova versão:",
@@ -352,6 +376,12 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 ).strip()
                 if not custom_suffix.startswith("_"):
                     custom_suffix = f"_{custom_suffix}"
+                clean_previous = st.checkbox(
+                    "🗑️ Deletar versões editadas antigas",
+                    value=True,
+                    key=f"clean_prev_tgl_{unique_key}",
+                    help="Remove automaticamente versões editadas anteriores desta pasta ao salvar a nova versão para não deixar vestígios."
+                )
 
         tab_trim, tab_snip, tab_speed, tab_overlay, tab_headline, tab_audio = st.tabs([
             "✂️ Aparar (Trim)", 
@@ -432,6 +462,8 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     if trim_res.get("error"):
                         st.error(f"Erro ao aparar vídeo: {trim_res['error']}")
                     else:
+                        if "Salvar como um novo vídeo" in save_mode and clean_previous and out_target:
+                            cleanup_all_edited_versions(video_path, keep_path=out_target)
                         entry = record_quick_edit(
                             video_path=video_path,
                             action_name="✂️ Aparar (Trim)",
@@ -514,6 +546,8 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     if snip_res.get("error"):
                         st.error(f"Erro ao remover trecho: {snip_res['error']}")
                     else:
+                        if "Salvar como um novo vídeo" in save_mode and clean_previous and out_target:
+                            cleanup_all_edited_versions(video_path, keep_path=out_target)
                         entry = record_quick_edit(
                             video_path=video_path,
                             action_name="🗑️ Remover Trecho (Snip & Merge)",
@@ -593,6 +627,8 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     if speed_res.get("error"):
                         st.error(f"Erro ao acelerar vídeo: {speed_res['error']}")
                     else:
+                        if "Salvar como um novo vídeo" in save_mode and clean_previous and out_target:
+                            cleanup_all_edited_versions(video_path, keep_path=out_target)
                         entry = record_quick_edit(
                             video_path=video_path,
                             action_name="⚡ Aceleração de Velocidade",
@@ -799,6 +835,8 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     if ov_res.get("error"):
                         st.error(f"Erro ao aplicar banner: {ov_res['error']}")
                     else:
+                        if "Salvar como um novo vídeo" in save_mode and clean_previous and out_target:
+                            cleanup_all_edited_versions(video_path, keep_path=out_target)
                         entry = record_quick_edit(
                             video_path=video_path,
                             action_name="🎨 Banner / Tarja (Overlay)",
@@ -1000,6 +1038,8 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     if hl_res.get("error"):
                         st.error(f"Erro ao aplicar headline: {hl_res['error']}")
                     else:
+                        if "Salvar como um novo vídeo" in save_mode and clean_previous and out_target_hl:
+                            cleanup_all_edited_versions(video_path, keep_path=out_target_hl)
                         entry = record_quick_edit(
                             video_path=video_path,
                             action_name="🏷️ Headline de Topo",
@@ -1134,6 +1174,8 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     if eq_res.get("error"):
                         st.error(f"Erro ao equalizar áudio: {eq_res['error']}")
                     else:
+                        if "Salvar como um novo vídeo" in save_mode and clean_previous and out_target_eq:
+                            cleanup_all_edited_versions(video_path, keep_path=out_target_eq)
                         entry = record_quick_edit(
                             video_path=video_path,
                             action_name="🎙️ Equalizador & Tratamento de Áudio",

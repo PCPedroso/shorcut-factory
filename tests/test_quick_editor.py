@@ -102,6 +102,51 @@ class TestQuickEditor(unittest.TestCase):
         dur = get_video_duration(out_speed)
         self.assertAlmostEqual(dur, 4.8, delta=0.8)
 
+    def test_version_listing_and_deletion(self):
+        from core.quick_editor import (
+            list_edited_video_versions,
+            delete_edited_video_version,
+            cleanup_all_edited_versions,
+            record_quick_edit,
+            load_edit_history
+        )
+
+        # 1. Cria uma versão secundária editada
+        ver_path = os.path.join(self.test_dir, "sample_test_speed_1.20x.mp4")
+        res = change_video_speed(self.sample_video, speed=1.20, output_path=ver_path)
+        self.assertTrue(os.path.exists(ver_path))
+
+        record_quick_edit(
+            video_path=self.sample_video,
+            action_name="⚡ Aceleração",
+            details="1.20x",
+            output_path=ver_path
+        )
+
+        # 2. Lista versões
+        versions = list_edited_video_versions(self.sample_video)
+        filenames = [v["filename"] for v in versions]
+        self.assertIn("sample_test_speed_1.20x.mp4", filenames)
+
+        # 3. Deleta versão secundária individual
+        del_res = delete_edited_video_version(ver_path)
+        self.assertTrue(del_res["success"])
+        self.assertFalse(os.path.exists(ver_path))
+
+        # 4. Cria múltiplas versões secundárias e testa cleanup_all
+        v2 = os.path.join(self.test_dir, "sample_test_editado.mp4")
+        v3 = os.path.join(self.test_dir, "sample_test_com_banner.mp4")
+        trim_video(self.sample_video, 1.0, 3.0, output_path=v2)
+        trim_video(self.sample_video, 1.0, 3.0, output_path=v3)
+        self.assertTrue(os.path.exists(v2))
+        self.assertTrue(os.path.exists(v3))
+
+        clean_res = cleanup_all_edited_versions(self.sample_video, keep_path=self.sample_video)
+        self.assertTrue(clean_res["success"])
+        self.assertFalse(os.path.exists(v2))
+        self.assertFalse(os.path.exists(v3))
+        self.assertTrue(os.path.exists(self.sample_video))
+
 
 if __name__ == '__main__':
     unittest.main()

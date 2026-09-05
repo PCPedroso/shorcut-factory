@@ -463,3 +463,137 @@ def record_quick_edit(
         pass
 
     return entry
+
+
+def list_edited_video_versions(video_path: str) -> list:
+    """
+    Lista todos os arquivos de vídeo (.mp4) no diretório do corte,
+    diferenciando o arquivo principal de versões editadas secundárias.
+    """
+    if not video_path:
+        return []
+
+    v_dir = os.path.dirname(video_path)
+    if not v_dir or not os.path.exists(v_dir):
+        return []
+
+    base_name = os.path.basename(video_path)
+    # Tenta identificar o nome do vídeo principal (sem sufixos de edição rápida)
+    main_name = base_name
+    for suf in ["_speed_", "_editado", "_com_banner", "_com_headline", "_audio_equalizado", "_trimmed", "_snipped"]:
+        if suf in main_name:
+            # Encontra o prefixo antes do sufixo
+            prefix = main_name.split(suf)[0]
+            if prefix:
+                possible_main = f"{prefix}.mp4"
+                if os.path.exists(os.path.join(v_dir, possible_main)):
+                    main_name = possible_main
+                    break
+
+    versions = []
+    try:
+        import datetime
+        for f in os.listdir(v_dir):
+            if f.lower().endswith(".mp4") and not f.endswith("_tmp.mp4") and not f.startswith("temp"):
+                f_path = os.path.join(v_dir, f)
+                if os.path.isfile(f_path):
+                    sz_mb = round(os.path.getsize(f_path) / (1024 * 1024), 2)
+                    dur = get_video_duration(f_path)
+                    mtime = os.path.getmtime(f_path)
+                    mtime_str = datetime.datetime.fromtimestamp(mtime).strftime("%d/%m/%Y %H:%M:%S")
+                    is_main = (f == main_name) or (f == "corte_1080p.mp4") or (f == base_name and not any(s in f for s in ["_speed_", "_editado", "_com_banner", "_com_headline", "_audio_equalizado"]))
+                    versions.append({
+                        "filename": f,
+                        "path": f_path,
+                        "size_mb": sz_mb,
+                        "duration": dur,
+                        "is_main": is_main,
+                        "timestamp": mtime_str
+                    })
+    except Exception:
+        pass
+
+    return versions
+
+
+def delete_edited_video_version(file_path: str, base_video_path: str = None) -> dict:
+    """
+    Deleta com segurança um arquivo de vídeo editado do disco e limpa
+    suas referências no histórico de edições (historico_edicoes.json).
+    """
+    if not file_path:
+        return {"success": False, "error": "Caminho do arquivo não fornecido."}
+
+    v_path = os.path.abspath(file_path)
+    ref_dir = os.path.dirname(v_path)
+    filename = os.path.basename(v_path)
+
+    # 1. Remove arquivo do disco
+    if os.path.exists(v_path):
+        try:
+            os.remove(v_path)
+        except Exception as e:
+            return {"success": False, "error": f"Não foi possível remover o arquivo: {str(e)}"}
+    else:
+        return {"success": False, "error": "Arquivo não encontrado no disco."}
+
+    # 2. Limpa caches em memória
+    if file_path in _DUR_CACHE:
+        _DUR_CACHE.pop(file_path, None)
+    if v_path in _DUR_CACHE:
+        _DUR_CACHE.pop(v_path, None)
+
+    # 3. Limpa do historico_edicoes.json
+    log_p = os.path.join(ref_dir, EDIT_LOG_FILENAME)
+    if os.path.exists(log_p):
+        try:
+            with open(log_p, "r", encoding="utf-8") as f:
+                history = json.load(f)
+            if isinstance(history, list):
+                # Remove entradas referentes a este arquivo
+                filtered_h = [h for h in history if h.get("output_file") != filename and h.get("output_path") != file_path and h.get("output_path") != v_path]
+                if len(filtered_h) != len(history):
+                    with open(log_p, "w", encoding="utf-8") as f:
+                        json.dump(filtered_h, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+    return {"success": True, "error": None, "deleted_file": filename}
+
+
+def cleanup_all_edited_versions(video_path: str, keep_path: str = None) -> dict:
+    """
+    Remove todas as versões editadas secundárias de uma pasta, mantendo apenas
+    o arquivo em `keep_path` ou o vídeo principal original.
+    """
+    if not video_path:
+        return {"success": False, "error": "Caminho não fornecido.", "deleted_count": 0}
+
+    v_dir = os.path.dirname(video_path)
+    if not v_dir or not os.path.exists(v_dir):
+        return {"success": False, "error": "Diretório não encontrado.", "deleted_count": 0}
+
+    keep_abs = os.path.abspath(keep_path) if keep_path else None
+    versions = list_edited_video_versions(video_path)
+    deleted_files = []
+
+    for v in versions:
+        f_abs = os.path.abspath(v["path"])
+        # Se for o arquivo a manter ou o vídeo principal canônico (quando não há keep_path), não deleta
+        if keep_abs and f_abs == keep_abs:
+            continue
+        if not keep_abs and v.get("is_main"):
+            continue
+        if v.get("is_main") and keep_abs and f_abs != keep_abs:
+            # Não deleta o principal a menos que seja explicitamente solicitado
+            continue
+
+        res = delete_edited_video_version(f_abs)
+        if res.get("success"):
+            deleted_files.append(v["filename"])
+
+    return {
+        "success": True,
+        "deleted_count": len(deleted_files),
+        "deleted_files": deleted_files
+    }
