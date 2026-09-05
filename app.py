@@ -46,7 +46,7 @@ importlib.reload(core.overlay_manager)
 from core.extractor import (
     download_audio, get_video_metadata, get_video_id,
     clean_music_title, detect_music_category_suggestion,
-    parse_time_str, format_time_sec
+    parse_time_str, format_time_sec, format_elapsed_time
 )
 from core.transcriber import transcribe_audio, fetch_youtube_transcript
 from core.analyzer import analyze_transcript, build_suggested_bundles, build_golden_rule_micro_cuts, normalize_time_mask
@@ -1403,6 +1403,11 @@ if input_mode.startswith("🌐 Link"):
                         is_live=is_live_flag
                     )
 
+                    _t_audio_start = time.time() if 'time' in locals() or 'time' in globals() else None
+                    if _t_audio_start is None:
+                        import time
+                        _t_audio_start = time.time()
+
                     if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
                         download_audio(
                             video_url,
@@ -1411,6 +1416,7 @@ if input_mode.startswith("🌐 Link"):
                             start_sec=active_slice_start,
                             end_sec=active_slice_end
                         )
+                    _t_audio_elapsed = time.time() - _t_audio_start
 
                     # Identificação Inteligente da Música / Som (ignora títulos genéricos e busca o som real)
                     from core.music_recognizer import identify_song_from_audio_and_meta
@@ -1425,6 +1431,8 @@ if input_mode.startswith("🌐 Link"):
                     v_rec_source = rec_res.get("source", "Identificação Automática")
 
                 if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+                    _sz_aud_mb = os.path.getsize(audio_path) / (1024 * 1024)
+                    st.toast(f"⏱️ Áudio extraído em {format_elapsed_time(_t_audio_elapsed)} ({_sz_aud_mb:.1f} MB)!")
                     st.session_state["extracted_music_card"] = {
                         "path": audio_path,
                         "clean_title": v_clean_music,
@@ -1571,6 +1579,8 @@ if input_mode.startswith("🌐 Link"):
                     # Download automático do vídeo completo (se ainda não baixado)
                     _vfull_cache_path = os.path.join(data_dir, "video_full.mp4")
                     if not is_live_flag and not os.path.exists(_vfull_cache_path):
+                        import time
+                        _t_vcache_start = time.time()
                         with st.spinner("⏳ Baixando vídeo (ou trecho) em 1080p para habilitar o Recorte Final..."):
                             download_full_video(
                                 video_url,
@@ -1579,10 +1589,15 @@ if input_mode.startswith("🌐 Link"):
                                 start_sec=active_slice_start,
                                 end_sec=active_slice_end
                             )
+                        _t_vcache_elapsed = time.time() - _t_vcache_start
                         if os.path.exists(_vfull_cache_path):
-                            st.success("🎥 Vídeo baixado e pronto para recorte!")
+                            _sz_mb = os.path.getsize(_vfull_cache_path) / (1024 * 1024)
+                            _res = get_video_resolution(_vfull_cache_path)
+                            st.success(f"🎥 Vídeo baixado em ⏱️ **{format_elapsed_time(_t_vcache_elapsed)}** ({_sz_mb:.1f} MB, {_res}) — pronto para recorte!")
                     elif os.path.exists(_vfull_cache_path):
-                        st.info(f"🎥 Vídeo já no cache — pronto para recorte.")
+                        _sz_mb = os.path.getsize(_vfull_cache_path) / (1024 * 1024)
+                        _res = get_video_resolution(_vfull_cache_path)
+                        st.info(f"🎥 Vídeo já no cache ({_sz_mb:.1f} MB, {_res}) — pronto para recorte.")
                 else:
                     platform_label = "Instagram" if video_id.startswith("ig_") else ("TikTok" if video_id.startswith("tt_") else "YouTube/Web")
                     st.info(f"Iniciando extração do vídeo ({platform_label})...")
@@ -1689,6 +1704,8 @@ if input_mode.startswith("🌐 Link"):
                         # Download automático do vídeo completo/trecho logo após a transcrição
                         _vfull_path = os.path.join(data_dir, "video_full.mp4")
                         if not is_live_flag and not os.path.exists(_vfull_path):
+                            import time
+                            _t_vpost_start = time.time()
                             with st.spinner("⏬ Baixando vídeo em 1080p Full HD (necessário para o Recorte Final)..."):
                                 _vres = download_full_video(
                                     video_url,
@@ -1697,10 +1714,13 @@ if input_mode.startswith("🌐 Link"):
                                     start_sec=active_slice_start,
                                     end_sec=active_slice_end
                                 )
+                            _t_vpost_elapsed = time.time() - _t_vpost_start
                             if _vres.get("error"):
-                                st.warning(f"⚠️ Vídeo baixado parcialmente ou com aviso: {_vres['error']}")
+                                st.warning(f"⚠️ Vídeo baixado parcialmente ou com aviso em ⏱️ {format_elapsed_time(_t_vpost_elapsed)}: {_vres['error']}")
                             elif os.path.exists(_vfull_path):
-                                st.success("🎥 Vídeo baixado e pronto para recorte na Seção 3!")
+                                _sz_mb = os.path.getsize(_vfull_path) / (1024 * 1024)
+                                _res = get_video_resolution(_vfull_path)
+                                st.success(f"🎥 Vídeo baixado em ⏱️ **{format_elapsed_time(_t_vpost_elapsed)}** ({_sz_mb:.1f} MB, {_res}) — pronto para recorte na Seção 3!")
 
 else:
     # 💻 Modo Arquivo de Vídeo Local do Computador (Suporte a 1 ou 2 vídeos)
@@ -4566,6 +4586,8 @@ if st.session_state.transcription_done:
                         pass
 
                 if need_download:
+                    import time
+                    _t_vsec3_start = time.time()
                     with st.spinner("Baixando vídeo original na máxima resolução disponível (1080p Full HD)..."):
                         _meta_local = os.path.join(data_dir, "metadata.json")
                         _is_live_corte = False
@@ -4595,6 +4617,10 @@ if st.session_state.transcription_done:
                             start_sec=_slice_s,
                             end_sec=_slice_e
                         )
+                    _t_vsec3_elapsed = time.time() - _t_vsec3_start
+                    if os.path.exists(video_full_path):
+                        _sz_mb = os.path.getsize(video_full_path) / (1024 * 1024)
+                        st.info(f"⏱️ Download concluído em **{format_elapsed_time(_t_vsec3_elapsed)}** ({_sz_mb:.1f} MB)")
                 else:
                     current_res = get_video_resolution(video_full_path)
                     st.success(f"Vídeo em alta qualidade encontrado no cache ({current_res})!")

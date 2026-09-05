@@ -312,6 +312,17 @@ def format_time_sec(seconds: float) -> str:
     return f"{m:02d}:{sec:02d}"
 
 
+def format_elapsed_time(seconds: float) -> str:
+    """Formata tempo decorrido com precisão amigável (ex: '4.2s', '1m 23s', '13m 16s')."""
+    if seconds is None or seconds < 0:
+        return "0.0s"
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    m = int(seconds // 60)
+    s = int(seconds % 60)
+    return f"{m}m {s:02d}s"
+
+
 def download_audio(
     url: str,
     output_path: str = "temp_audio.mp3",
