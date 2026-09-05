@@ -211,18 +211,23 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Arquivos Locais (1 ou 2 Vídeos)**: Extração ultra-rápida via FFmpeg do áudio individual ou unificado da composição dupla com ambientação musical personalizada.
   - **Renderização Segmentada & Concatenação Lossless da Composição Dupla**: Renderiza a Parte 1 (Split Top + Base Congelada + Trilha 1 + Ducking) e a Parte 2 (Tela Cheia + Trilha 2 + Ducking) de forma isolada, concatenando-as via *FFmpeg Concat Demuxer* com fluxo de áudio e vídeo 100% sincronizado, eliminando desvios ou repetições de áudio.
   - **Upload Direto de Arquivos Locais para Trilhas Sonoras**: Permite carregar diretamente arquivos de som do computador nas Partes 1 e 2 da Composição Dupla e na Seção 3 da Fábrica de Cortes, com registro instantâneo no catálogo permanente.
-  - **⏱️ Download Parcial por Intervalo de Tempo (Time-Range Slicing)** (`core/extractor.py`, `core/video_processor.py`, `app.py`):
+  - **⏱️ Download Parcial por Intervalo de Tempo Otimizado (Time-Range Slicing & Fast Stream Copy)** (`core/extractor.py`, `core/video_processor.py`, `app.py`, `tests/test_partial_download.py`):
     - Permite definir início e fim específicos (`HH:MM:SS`, `MM:SS`, `1h30m` ou segundos) ao baixar vídeos e lives longas (YouTube, Twitch, podcasts).
-    - Utiliza o recurso nativo `download_ranges` do `yt-dlp` e FFmpeg para puxar **apenas os fragmentos de rede daquele intervalo**, evitando o download de gigabytes de conteúdo e acelerando a esteira em até **50x**.
+    - Utiliza o recurso nativo `download_ranges` do `yt-dlp` e FFmpeg com cópia direta de pacotes (`-c copy` / `force_keyframes_at_cuts: False`), evitando o download de gigabytes desnecessários e acelerando o processo em até **50x**.
+    - Identificador Unificado de Vídeo Ativo (`get_current_active_video_id`): Detecta automaticamente diretórios de vídeos fatiados (`<video_id>_t_<start>_<end>`), integrando de forma transparente a Seção 3 (Fábrica de Cortes), prévias de enquadramento (Smart Face, Blur, 16:9), legendas e catálogo.
     - Sincronização inteligente de transcrição: fatia e re-baseia legendas oficiais do YouTube a partir de `00:00` ou transcreve cirurgicamente o áudio fatiado com Whisper GPU.
+    - Registro preciso na biblioteca (`library.json`) com a duração exata do trecho fatiado.
+- **⏱️ Timer em Tempo Real & Monitoramento de Performance (`core/extractor.py`, `app.py`)**:
+  - Medição em milissegundos e exibição de tempo decorrido (`format_elapsed_time`) em todas as etapas da esteira (Download de Áudio, Ingestão de Vídeo, Re-download na Seção 3 e Renderização Final).
+  - Feedback visual detalhado com tamanho em megabytes (MB) e resolução do arquivo baixado (ex: `🎥 Vídeo baixado em ⏱️ 4.2s (38.1 MB, 1920x1080)`).
 - **🌐 Tradução Inteligente de Transcrições & Legendas Sob Demanda (`core/translator.py`, `app.py`)**:
   - **Execução 100% Manual / Pós-Processamento**: Nunca executa automaticamente na ingestão; fica disponível em card retrátil para acionamento pontual pelo usuário.
-  - **Tradução Bidirecional & Multilíngue**: Tradução com IA local (Ollama / Llama 3) entre **Português-BR**, **Inglês** e **Espanhol** (ex: traduzir trechos em inglês como no vídeo `2b9djWKShlM` para Português, ou traduzir cortes em Português para Inglês para público internacional).
+  - **Tradução Bidirecional & Multilíngue**: Tradução com IA local (Ollama / Llama 3) entre **Português-BR**, **Inglês** e **Espanhol** (ex: traduzir trechos em inglês para Português, ou traduzir cortes em Português para Inglês para público internacional).
   - **Sincronia Temporal Milimétrica**: Preserva estritamente os timestamps `start` e `end` de cada frase, garantindo sincronia labial perfeita na queima de legendas e nos arquivos `.srt`/`.vtt`.
   - **Backup & Reversibilidade Imediata**: Salva backup em `data/<video_id>/transcript_original.json` e oferece botão de restauração instantânea `⏪ Restaurar Transcrição Original`.
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
-- **🧪 Suíte de 93 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest`.
+- **🧪 Suíte de 97 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (incluindo testes de partial download, audio mixer, translator, face tracker e export kit).
 
 ---
 
