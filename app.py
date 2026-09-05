@@ -564,42 +564,49 @@ def render_quick_editor_component(video_path: str, unique_key: str):
             st.markdown("##### ⚡ Acelerar Vídeo (Speed Up)")
             st.caption("Aumente a velocidade de reprodução do vídeo para acelerar o ritmo e dinamismo sem distorcer o tom da voz.")
 
-            col_sp1, col_sp2 = st.columns([2.5, 1.5])
-            with col_sp1:
-                sel_speed = st.slider(
-                    "Velocidade de Reprodução:",
-                    min_value=1.00,
-                    max_value=1.50,
-                    value=1.10,
-                    step=0.05,
-                    format="%.2fx",
-                    key=f"speed_val_{unique_key}",
-                    help="Selecione um multiplicador de velocidade de 1.00x até 1.50x em incrementos de 0.05x."
-                )
-            with col_sp2:
-                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-                speed_preset_choice = st.selectbox(
-                    "Presets Rápidos:",
-                    [
-                        "Personalizado",
-                        "Normal (1.00x)",
-                        "Leve (+10% / 1.10x)",
-                        "Dinâmico (+20% / 1.20x)",
-                        "Acelerado (+30% / 1.30x)",
-                        "Ultra (+50% / 1.50x)"
-                    ],
-                    index=2,
-                    key=f"speed_preset_choice_{unique_key}"
-                )
-                preset_map = {
-                    "Normal (1.00x)": 1.00,
-                    "Leve (+10% / 1.10x)": 1.10,
-                    "Dinâmico (+20% / 1.20x)": 1.20,
-                    "Acelerado (+30% / 1.30x)": 1.30,
-                    "Ultra (+50% / 1.50x)": 1.50
-                }
-                if speed_preset_choice in preset_map and preset_map[speed_preset_choice] != sel_speed:
-                    sel_speed = preset_map[speed_preset_choice]
+            if f"speed_val_{unique_key}" not in st.session_state:
+                st.session_state[f"speed_val_{unique_key}"] = 1.10
+
+            sel_speed = st.slider(
+                "Velocidade de Reprodução:",
+                min_value=1.00,
+                max_value=1.50,
+                value=float(st.session_state[f"speed_val_{unique_key}"]),
+                step=0.05,
+                format="%.2fx",
+                key=f"speed_val_slider_{unique_key}",
+                help="Selecione um multiplicador de velocidade de 1.00x até 1.50x em incrementos de 0.05x."
+            )
+            st.session_state[f"speed_val_{unique_key}"] = sel_speed
+
+            # Botões rápidos de preset que atualizam o slider diretamente
+            st.caption("⚡ **Atalhos Rápidos de Velocidade:**")
+            col_btn1, col_btn2, col_btn3, col_btn4, col_btn5 = st.columns(5)
+            with col_btn1:
+                if st.button("1.00x (Normal)", key=f"btn_spd_100_{unique_key}", use_container_width=True):
+                    st.session_state[f"speed_val_{unique_key}"] = 1.00
+                    st.session_state[f"speed_val_slider_{unique_key}"] = 1.00
+                    st.rerun()
+            with col_btn2:
+                if st.button("1.10x (+10%)", key=f"btn_spd_110_{unique_key}", use_container_width=True):
+                    st.session_state[f"speed_val_{unique_key}"] = 1.10
+                    st.session_state[f"speed_val_slider_{unique_key}"] = 1.10
+                    st.rerun()
+            with col_btn3:
+                if st.button("1.20x (+20%)", key=f"btn_spd_120_{unique_key}", use_container_width=True):
+                    st.session_state[f"speed_val_{unique_key}"] = 1.20
+                    st.session_state[f"speed_val_slider_{unique_key}"] = 1.20
+                    st.rerun()
+            with col_btn4:
+                if st.button("1.30x (+30%)", key=f"btn_spd_130_{unique_key}", use_container_width=True):
+                    st.session_state[f"speed_val_{unique_key}"] = 1.30
+                    st.session_state[f"speed_val_slider_{unique_key}"] = 1.30
+                    st.rerun()
+            with col_btn5:
+                if st.button("1.50x (+50%)", key=f"btn_spd_150_{unique_key}", use_container_width=True):
+                    st.session_state[f"speed_val_{unique_key}"] = 1.50
+                    st.session_state[f"speed_val_slider_{unique_key}"] = 1.50
+                    st.rerun()
 
             dur_after_speed = (dur / sel_speed) if sel_speed > 0 else dur
             time_saved = dur - dur_after_speed
@@ -607,13 +614,14 @@ def render_quick_editor_component(video_path: str, unique_key: str):
 
             if sel_speed > 1.00:
                 st.info(
-                    f"⏱️ **Duração Atual:** `{dur:.1f}s` ➔ **Nova Duração:** **`{dur_after_speed:.1f}s`** (Economia de **{time_saved:.1f}s** | **{pct_faster:.0f}% mais rápido**).\n\n"
+                    f"⏱️ **Velocidade Selecionada:** **`{sel_speed:.2f}x`** (+{pct_faster:.0f}% mais rápido)\n\n"
+                    f"• **Duração Atual:** `{dur:.1f}s` ➔ **Nova Duração Estimada:** **`{dur_after_speed:.1f}s`** (Economia de **{time_saved:.1f}s**).\n\n"
                     f"🔊 **Preservação de Áudio**: O tom e pitch da voz original são mantidos 100% naturais (sem efeito 'voz de esquilo')."
                 )
             else:
                 st.info(f"⏱️ **Velocidade Normal (1.00x):** Duração mantida em `{dur:.1f}s`.")
 
-            btn_label_speed = "⚡ Salvar como Novo Vídeo Acelerado" if "Salvar como um novo vídeo" in save_mode else "⚡ Aplicar Aceleração no Vídeo Atual"
+            btn_label_speed = f"⚡ Salvar como Novo Vídeo ({sel_speed:.2f}x)" if "Salvar como um novo vídeo" in save_mode else f"⚡ Aplicar Velocidade {sel_speed:.2f}x no Vídeo Atual"
             if st.button(btn_label_speed, key=f"btn_apply_speed_{unique_key}", type="primary", use_container_width=True):
                 with st.spinner(f"Acelerando vídeo para {sel_speed:.2f}x com FFmpeg..."):
                     out_target = None
