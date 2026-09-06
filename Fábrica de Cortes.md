@@ -37,6 +37,7 @@ shorcut-factory/
 │   ├── test_headline_drawer.py   # Testes de headlines, quebras, presets ASS e overlay visual
 │   ├── test_audio_processor.py   # Testes de equalização, anti-estouro e nivelamento dinâmico
 │   ├── test_split_secondary_media.py # Testes de Split Screen com mídias secundárias e margens de blur
+│   ├── test_quick_editor.py      # Testes de Trim, Snip, Aceleração de velocidade e Limpeza de versões
 │   ├── test_export_kit.py        # Testes de pastas, prefixos e kit viral
 │   ├── test_cuts_catalog.py      # Testes de catálogo, instâncias e exclusão
 │   ├── test_audio_mixer.py       # Testes de trilhas e áudio ducking
@@ -45,7 +46,7 @@ shorcut-factory/
 │   ├── test_integrations.py      # Testes de webhooks e payloads
 │   └── test_analyzer_utils.py    # Testes de conversão de tempo e textos
 ├── core/
-│   ├── quick_editor.py        # Edição rápida / ajuste fino: Trim (início/fim) e Snip & Merge de trechos
+│   ├── quick_editor.py        # Edição rápida / ajuste fino: Trim, Snip & Merge, Speed Up (1.0x-1.5x) e Limpeza de Versões
 │   ├── audio_processor.py     # Equalização, anti-estouro (de-clipping/limiter), nivelador dinâmico de voz/torcida
 │   ├── overlay_manager.py     # Motor de sobreposição de banners, tarjas (GC), logos com modos fill/fit/cover
 │   ├── headline_drawer.py     # Estilização de Headlines magnéticas de topo (Live Preview, box por linha, card e outline)
@@ -158,7 +159,16 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 - **✂️ Ferramenta Integrada de Edição Rápida, Ajuste Fino & Histórico Persistente (`core/quick_editor.py`, `app.py`)**:
   - **Sinalização Persistente de Conclusão**: Card verde com carimbo de data/hora, ação realizada, detalhes dos parâmetros e arquivo gerado.
   - **Histórico Completo de Edições (`historico_edicoes.json`)**: Histórico JSON de todos os ajustes aplicados cronologicamente.
-  - **5 Abas de Pós-Corte**: *Trim*, *Snip & Merge*, *Banner*, *Headline de Topo* e *Equalizador & Áudio*.
+  - **6 Abas de Pós-Corte**:
+    1. *✂️ Cortar Início/Fim (Trim)*: Ajuste cirúrgico das pontas sem reprocessamento completo.
+    2. *🗑️ Remover Trecho (Snip & Merge)*: Eliminação de silêncios, gagues ou trechos indesejados no meio do vídeo.
+    3. *⚡ Acelerar Vídeo (Speed Up)*: Aumento de velocidade de reprodução de **1.00x até 1.50x em passos de 0.05x** (com presets rápidos `1.00x`, `1.10x`, `1.20x`, `1.30x`, `1.50x`), utilizando filtros `setpts` e `atempo` do FFmpeg para manter o tom da voz 100% natural sem distorção ("sem voz de esquilo").
+    4. *🖼️ Adicionar Banner / Tarja*: Inserção de tarjas gráficas e logos com alinhamento instantâneo.
+    5. *🏷️ Headline de Topo*: Título magnético estilizado em alta conversão.
+    6. *🎙️ Equalizador & Áudio*: Limiter, De-clipper e nivelador dinâmico de volume.
+  - **🧹 Gerenciamento & Limpeza Automática de Versões Editadas Sem Deixar Vestígios**:
+    - Opção automática *"Deletar versões anteriores deste corte editado ao salvar novo vídeo"* (`cleanup_all_edited_versions` e `delete_edited_video_version`), excluindo versões intermediárias residuais sem poluir o diretório ou causar confusão no catálogo.
+    - Exclusão seletiva e segura com retenção estrita do vídeo original e da versão recém-gerada.
 - **🏷️ Headline / Título de Topo Magnético Pós-Corte (`core/headline_drawer.py`, `app.py`)**:
   - Modos: *Caixa por Linha (TikTok/Reels)*, *Card Único* e *Sem Caixa (Contorno)* com live preview e aceleração GPU (NVENC).
   - **Paleta Padrão Viral**: Texto em Preto Absoluto (`#000000`) sobre Fundo Amarelo Ouro Viral (`#FFDA29`) com sincronização automática entre Edição Rápida e pipeline principal.
@@ -226,8 +236,8 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Sincronia Temporal Milimétrica**: Preserva estritamente os timestamps `start` e `end` de cada frase, garantindo sincronia labial perfeita na queima de legendas e nos arquivos `.srt`/`.vtt`.
   - **Backup & Reversibilidade Imediata**: Salva backup em `data/<video_id>/transcript_original.json` e oferece botão de restauração instantânea `⏪ Restaurar Transcrição Original`.
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
-- **🧪 Suíte de 97 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (incluindo testes de partial download, audio mixer, translator, face tracker e export kit).
+- **🧪 Suíte de 99 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (incluindo testes de quick editor, partial download, audio mixer, translator, face tracker e export kit).
 
 ---
 

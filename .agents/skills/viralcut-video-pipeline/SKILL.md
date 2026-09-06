@@ -59,3 +59,16 @@ ffmpeg -y -ss {start} -to {end} -i "{input_mp4}" \
    - **Regra de Dual Shot**: Quando 2 oradores são detectados lado a lado, o sistema fixa `zoom = 1.0` e `pan = 0.0`, exibindo o vídeo 16:9 completo centralizado sobre o fundo desfocado.
 3. **Split Screen (9:16)**:
    - Duas metades (topo e base) com foco horizontal independente e divisor customizável, acompanhado de *Auto-Switch* para transição inteligente quando houver plano individual.
+
+---
+
+## 5. Aceleração de Velocidade com Preservação Natural de Voz (`core/quick_editor.py`)
+
+- **Fórmula de Filtros FFmpeg**:
+  - Vídeo: `setpts=(1/SPEED)*PTS` (aceleração da cadência visual).
+  - Áudio: `atempo=SPEED` (aceleração do áudio sem alterar o pitch/tom da voz).
+  - Flags de Renderização: `-c:v h264_nvenc -preset p4 -c:a aac -b:a 192k -movflags +faststart`.
+- **Limpeza de Versões Intermediárias**:
+  - `cleanup_all_edited_versions(video_path, keep_path=...)`: Exclui versões anteriores editadas (`_trimmed`, `_snipped`, `_speed_...`, `_banner`, `_headline`, etc.), garantindo diretórios limpos e eliminando confusão no catálogo.
+
+
