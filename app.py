@@ -288,9 +288,11 @@ def get_current_active_video_id(url: str = None) -> str:
 
     return base_vid
 
+@st.fragment
 def render_quick_editor_component(video_path: str, unique_key: str):
     """
     Componente interativo de edição rápida / ajuste fino para cortar pequenos trechos do vídeo.
+    Isolado com @st.fragment para garantir resposta instantânea sem reexecutar o app inteiro.
     """
     if not video_path or not os.path.exists(video_path):
         return
@@ -349,12 +351,12 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                             del_r = delete_edited_video_version(v_item["path"])
                             if del_r.get("success"):
                                 st.toast(f"🗑️ Versão '{v_item['filename']}' excluída sem deixar vestígios!")
-                                st.rerun()
+                                st.rerun(scope="app")
                 st.markdown("---")
                 if st.button("🧹 Excluir Todas as Versões Secundárias e Manter Apenas Vídeo Base", key=f"btn_del_all_sec_{unique_key}", use_container_width=True):
                     clean_r = cleanup_all_edited_versions(video_path, keep_path=video_path)
                     st.toast(f"🧹 {clean_r.get('deleted_count', 0)} versão(ões) editada(s) removida(s)!")
-                    st.rerun()
+                    st.rerun(scope="app")
 
         col_mode, col_suf = st.columns([1.5, 1.0])
         with col_mode:
@@ -474,7 +476,7 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         st.session_state[f"just_edited_{unique_key}"] = True
                         if out_target:
                             st.session_state[f"last_edited_video_{unique_key}"] = out_target
-                        st.rerun()
+                        st.rerun(scope="app")
 
         with tab_snip:
             st.markdown("##### 🗑️ Remover Trecho do Meio")
@@ -558,7 +560,7 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         st.session_state[f"just_edited_{unique_key}"] = True
                         if out_target:
                             st.session_state[f"last_edited_video_{unique_key}"] = out_target
-                        st.rerun()
+                        st.rerun(scope="app")
 
         with tab_speed:
             st.markdown("##### ⚡ Acelerar Vídeo (Speed Up)")
@@ -664,7 +666,7 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         st.session_state[f"just_edited_{unique_key}"] = True
                         if out_target:
                             st.session_state[f"last_edited_video_{unique_key}"] = out_target
-                        st.rerun()
+                        st.rerun(scope="app")
 
         with tab_overlay:
             st.markdown("##### 🎨 Sobreposição de Banner, Tarja (GC) e Marca d'Água")
@@ -872,7 +874,7 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         st.session_state[f"just_edited_{unique_key}"] = True
                         if out_target:
                             st.session_state[f"last_edited_video_{unique_key}"] = out_target
-                        st.rerun()
+                        st.rerun(scope="app")
 
         # ── TAB 4: HEADLINE / TÍTULO DE TOPO (PÓS-CORTE) ──────────────────────
         with tab_headline:
@@ -1075,7 +1077,7 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         st.session_state[f"just_edited_{unique_key}"] = True
                         if out_target_hl:
                             st.session_state[f"last_edited_video_{unique_key}"] = out_target_hl
-                        st.rerun()
+                        st.rerun(scope="app")
 
         # ── TAB 5: EQUALIZADOR & TRATAMENTO DE ÁUDIO (PÓS-CORTE) ──────────────
         with tab_audio:
@@ -1211,7 +1213,7 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         st.session_state[f"just_edited_{unique_key}"] = True
                         if out_target_eq:
                             st.session_state[f"last_edited_video_{unique_key}"] = out_target_eq
-                        st.rerun()
+                        st.rerun(scope="app")
 
         # Se uma nova versão foi gerada recentemente para este componente, exibe player e download
         last_new_v = st.session_state.get(f"last_edited_video_{unique_key}")

@@ -13,6 +13,7 @@ FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
 _DUR_CACHE = {}
 _FRAME_CACHE = {}
+_VERSIONS_CACHE = {}
 
 
 def get_video_duration(video_path: str) -> float:
@@ -462,6 +463,7 @@ def record_quick_edit(
     except Exception:
         pass
 
+    _VERSIONS_CACHE.clear()
     return entry
 
 
@@ -476,6 +478,16 @@ def list_edited_video_versions(video_path: str) -> list:
     v_dir = os.path.dirname(video_path)
     if not v_dir or not os.path.exists(v_dir):
         return []
+
+    dir_mtime = 0
+    cache_key = None
+    try:
+        dir_mtime = os.path.getmtime(v_dir)
+        cache_key = (os.path.abspath(v_dir), os.path.basename(video_path), dir_mtime)
+        if cache_key in _VERSIONS_CACHE:
+            return _VERSIONS_CACHE[cache_key]
+    except Exception:
+        pass
 
     base_name = os.path.basename(video_path)
     # Tenta identificar o nome do vídeo principal (sem sufixos de edição rápida)
@@ -513,6 +525,11 @@ def list_edited_video_versions(video_path: str) -> list:
     except Exception:
         pass
 
+    if cache_key is not None:
+        if len(_VERSIONS_CACHE) > 100:
+            _VERSIONS_CACHE.clear()
+        _VERSIONS_CACHE[cache_key] = versions
+
     return versions
 
 
@@ -542,6 +559,7 @@ def delete_edited_video_version(file_path: str, base_video_path: str = None) -> 
         _DUR_CACHE.pop(file_path, None)
     if v_path in _DUR_CACHE:
         _DUR_CACHE.pop(v_path, None)
+    _VERSIONS_CACHE.clear()
 
     # 3. Limpa do historico_edicoes.json
     log_p = os.path.join(ref_dir, EDIT_LOG_FILENAME)
