@@ -118,6 +118,175 @@ def extract_thumbnail_from_video(video_path: str, output_path: str = "temp_thumb
         return {"path": None, "error": str(exc)}
 
 
+def download_live_video_snapshot(
+    url: str,
+    output_path: str = "temp_video.mp4",
+    start_sec: float = None,
+    end_sec: float = None
+) -> dict:
+    """
+    Baixa vídeo ou trecho cirúrgico de transmissão ao vivo (live stream) em andamento em alta velocidade.
+    Se start_sec e/ou end_sec forem fornecidos (ex: recorte da Seção 3), baixa diretamente da master manifest HLS 
+    usando '-c copy' do FFmpeg, concluindo em poucos segundos sem re-encoding e sem esperar a live continuar transmitindo.
+    Para o vídeo completo da live até o instante atual, captura o snapshot M3U8 com '#EXT-X-ENDLIST'
+    e converte para MP4 sem risco de loops infinitos.
+    """
+    import urllib.request
+    import subprocess
+    import tempfile
+    from core.extractor import get_cookie_file, parse_time_str
+
+    cookie_file = get_cookie_file()
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'noplaylist': True,
+        'playlist_items': '1',
+    }
+    if cookie_file:
+        ydl_opts['cookiefile'] = cookie_file
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if not info:
+                return {"path": None, "error": "Falha ao extrair metadados da transmissão ao vivo"}
+
+            if info.get('_type') == 'playlist' or 'entries' in info:
+                entries = [e for e in info.get('entries', []) if e]
+                if entries:
+                    info = entries[0]
+
+            formats = info.get('formats', [])
+            
+            # 1. Procura a master playlist com áudio e vídeo combinados (manifest_url / hls_variant)
+            master_manifest_url = None
+            for f in formats:
+                if f.get('manifest_url') and 'hls_variant' in f.get('manifest_url'):
+                    master_manifest_url = f.get('manifest_url')
+                    break
+            if not master_manifest_url and info.get('manifest_url'):
+                master_manifest_url = info.get('manifest_url')
+
+            # 2. Se não achou master manifest, procura melhor formato de vídeo HLS 1080p/720p
+            best_stream_url = None
+            v_1080 = [f for f in formats if f.get('height') == 1080 and f.get('protocol') in ('m3u8_native', 'm3u8')]
+            if v_1080:
+                best_stream_url = v_1080[0].get('url')
+            elif formats:
+                hls_v = [f for f in formats if f.get('protocol') in ('m3u8_native', 'm3u8') and f.get('vcodec') != 'none']
+                if hls_v:
+                    best_stream_url = hls_v[-1].get('url')
+
+            target_url = master_manifest_url or best_stream_url
+            if not target_url and formats:
+                target_url = formats[-1].get('url')
+
+            if not target_url:
+                return {"path": None, "error": "Nenhum stream de vídeo HLS ao vivo encontrado"}
+
+            out_dir = os.path.dirname(os.path.abspath(output_path))
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except Exception:
+                    pass
+
+            s_parsed = parse_time_str(start_sec)
+            e_parsed = parse_time_str(end_sec)
+
+            # Caso 1: Trecho específico fatiado (Time-Range Slicing) -> FFmpeg direto com -ss e -t
+            if s_parsed is not None or e_parsed is not None:
+                cmd = [
+                    FFMPEG_EXE, '-y',
+                    '-protocol_whitelist', 'file,http,https,tcp,tls',
+                ]
+                if s_parsed is not None and s_parsed > 0:
+                    cmd.extend(['-ss', str(s_parsed)])
+
+                cmd.extend(['-i', target_url])
+
+                if e_parsed is not None:
+                    dur = (e_parsed - (s_parsed or 0.0)) if (s_parsed and e_parsed > s_parsed) else e_parsed
+                    if dur > 0:
+                        cmd.extend(['-t', str(dur)])
+
+                # Tenta primeiro com stream copy ultra-rápido (-c copy)
+                cmd_copy = list(cmd) + ['-c', 'copy', output_path]
+                proc = subprocess.run(cmd_copy, capture_output=True, text=True, timeout=300)
+                if os.path.exists(output_path) and os.path.getsize(output_path) > 102400:
+                    return {"path": output_path, "error": None}
+
+                # Fallback: re-encoding leve caso stream copy não seja suportado pela stream
+                cmd_enc = list(cmd) + ['-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', output_path]
+                proc = subprocess.run(cmd_enc, capture_output=True, text=True, timeout=300)
+                if os.path.exists(output_path) and os.path.getsize(output_path) > 102400:
+                    return {"path": output_path, "error": None}
+                else:
+                    return {"path": None, "error": proc.stderr[-400:] if proc.stderr else "Falha ao recortar vídeo da live"}
+
+            # Caso 2: Vídeo completo da live até o momento atual -> Injeta #EXT-X-ENDLIST
+            m3u8_text = None
+            try:
+                req = urllib.request.Request(
+                    target_url,
+                    headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                )
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    m3u8_text = resp.read().decode('utf-8', errors='ignore')
+            except Exception:
+                m3u8_text = None
+
+            temp_m3u8_path = None
+            input_source = target_url
+
+            if m3u8_text and ('#EXTM3U' in m3u8_text or '#EXTINF' in m3u8_text):
+                if '#EXT-X-ENDLIST' not in m3u8_text:
+                    m3u8_text = m3u8_text.strip() + '\n#EXT-X-ENDLIST\n'
+
+                temp_fd, temp_m3u8_path = tempfile.mkstemp(suffix='_live_video_snap.m3u8', dir=out_dir)
+                with os.fdopen(temp_fd, 'w', encoding='utf-8') as f_snap:
+                    f_snap.write(m3u8_text)
+                input_source = temp_m3u8_path
+
+            cmd = [
+                FFMPEG_EXE, '-y',
+                '-protocol_whitelist', 'file,http,https,tcp,tls',
+                '-i', input_source,
+                '-c', 'copy',
+                output_path
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+
+            if temp_m3u8_path and os.path.exists(temp_m3u8_path):
+                try:
+                    os.remove(temp_m3u8_path)
+                except Exception:
+                    pass
+
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 102400:
+                return {"path": output_path, "error": None}
+            else:
+                # Fallback: re-encoding se copy falhar
+                cmd_reenc = [
+                    FFMPEG_EXE, '-y',
+                    '-protocol_whitelist', 'file,http,https,tcp,tls',
+                    '-i', input_source,
+                    '-c:v', 'libx264', '-preset', 'ultrafast',
+                    '-c:a', 'aac',
+                    output_path
+                ]
+                proc = subprocess.run(cmd_reenc, capture_output=True, text=True, timeout=600)
+                if os.path.exists(output_path) and os.path.getsize(output_path) > 102400:
+                    return {"path": output_path, "error": None}
+                return {"path": None, "error": proc.stderr[-400:] if proc.stderr else "Falha ao converter snapshot de vídeo da live"}
+
+    except Exception as e:
+        return {"path": None, "error": str(e)}
+
+
 def download_full_video(
     url: str,
     output_path: str = "temp_video.mp4",
@@ -129,12 +298,24 @@ def download_full_video(
     Baixa o vídeo na máxima resolução disponível (1080p Full HD / 720p HD).
     Usa o runtime Deno e o solver EJS para decifrar os fluxos 1080p do YouTube,
     mesclando a melhor faixa de vídeo e áudio em MP4 via FFmpeg.
-    Suporta transmissões ao vivo em andamento (live_from_start) e download parcial por intervalo de tempo (Time-Range Slicing).
+    Para transmissões ao vivo em andamento (is_live=True), aciona o motor de Live Video Snapshot
+    para download ultra-rápido via streams HLS nativas, eliminando esperas desnecessárias.
     """
     try:
         out_dir = os.path.dirname(output_path)
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
+
+        # 🔴 Se for live ao vivo, aciona o snapshot HLS de alta velocidade
+        if is_live:
+            snap_res = download_live_video_snapshot(
+                url=url,
+                output_path=output_path,
+                start_sec=start_sec,
+                end_sec=end_sec
+            )
+            if snap_res.get("path") and os.path.exists(snap_res["path"]):
+                return snap_res
 
         if os.path.exists(output_path):
             os.remove(output_path)

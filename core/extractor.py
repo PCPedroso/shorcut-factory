@@ -342,6 +342,143 @@ def format_elapsed_time(seconds: float) -> str:
     return f"{m}m {s:02d}s"
 
 
+def download_live_audio_snapshot(
+    url: str,
+    output_path: str = "temp_audio.mp3",
+    start_sec: float = None,
+    end_sec: float = None
+) -> dict:
+    """
+    Baixa snapshot do áudio de uma transmissão ao vivo (live stream) em andamento em alta velocidade.
+    Em vez de travar o downloader aguardando novos fragmentos em tempo real indefinidamente,
+    captura a playlist HLS até o instante atual, injeta a terminação '#EXT-X-ENDLIST' e 
+    converte diretamente via FFmpeg multithread para MP3 192kbps com suporte a Time-Range Slicing.
+    """
+    import urllib.request
+    import subprocess
+    import tempfile
+
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    cookie_file = get_cookie_file()
+
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'noplaylist': True,
+        'playlist_items': '1',
+    }
+    if cookie_file:
+        ydl_opts['cookiefile'] = cookie_file
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if not info:
+                return {"path": None, "error": "Falha ao extrair metadados da transmissão ao vivo"}
+
+            if info.get('_type') == 'playlist' or 'entries' in info:
+                entries = [e for e in info.get('entries', []) if e]
+                if entries:
+                    info = entries[0]
+
+            formats = info.get('formats', [])
+            aud_formats = [
+                f for f in formats
+                if f.get('vcodec') == 'none' and f.get('protocol') in ('m3u8_native', 'm3u8', 'http_dash_segments_generator')
+            ]
+
+            target_stream_url = None
+            if aud_formats:
+                target_stream_url = aud_formats[-1].get('url')
+
+            if not target_stream_url:
+                for f in formats:
+                    if f.get('protocol') in ('m3u8_native', 'm3u8') and f.get('url'):
+                        target_stream_url = f.get('url')
+                        break
+
+            if not target_stream_url and info.get('manifest_url'):
+                target_stream_url = info.get('manifest_url')
+
+            if not target_stream_url:
+                return {"path": None, "error": "Nenhum stream HLS ao vivo encontrado para extração de snapshot"}
+
+            m3u8_text = None
+            try:
+                req = urllib.request.Request(
+                    target_stream_url,
+                    headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                )
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    m3u8_text = resp.read().decode('utf-8', errors='ignore')
+            except Exception:
+                m3u8_text = None
+
+            temp_m3u8_path = None
+            input_source = target_stream_url
+
+            if m3u8_text and ('#EXTM3U' in m3u8_text or '#EXTINF' in m3u8_text):
+                if '#EXT-X-ENDLIST' not in m3u8_text:
+                    m3u8_text = m3u8_text.strip() + '\n#EXT-X-ENDLIST\n'
+
+                out_dir = os.path.dirname(output_path) or '.'
+                os.makedirs(out_dir, exist_ok=True)
+                temp_fd, temp_m3u8_path = tempfile.mkstemp(suffix='_live_snap.m3u8', dir=out_dir)
+                with os.fdopen(temp_fd, 'w', encoding='utf-8') as f_snap:
+                    f_snap.write(m3u8_text)
+                input_source = temp_m3u8_path
+
+            out_dir = os.path.dirname(os.path.abspath(output_path))
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except Exception:
+                    pass
+
+            s_parsed = parse_time_str(start_sec)
+            e_parsed = parse_time_str(end_sec)
+
+            cmd = [
+                ffmpeg_exe, '-y',
+                '-protocol_whitelist', 'file,http,https,tcp,tls',
+            ]
+            if s_parsed is not None and s_parsed > 0:
+                cmd.extend(['-ss', str(s_parsed)])
+
+            cmd.extend(['-i', input_source])
+
+            if e_parsed is not None:
+                dur = (e_parsed - (s_parsed or 0.0)) if (s_parsed and e_parsed > s_parsed) else e_parsed
+                if dur > 0:
+                    cmd.extend(['-t', str(dur)])
+
+            cmd.extend([
+                '-vn',
+                '-c:a', 'libmp3lame',
+                '-b:a', '192k',
+                output_path
+            ])
+
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+            if temp_m3u8_path and os.path.exists(temp_m3u8_path):
+                try:
+                    os.remove(temp_m3u8_path)
+                except Exception:
+                    pass
+
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
+                return {"path": output_path, "error": None}
+            else:
+                err_msg = proc.stderr[-400:] if proc.stderr else "Erro ao converter áudio da live via FFmpeg"
+                return {"path": None, "error": err_msg}
+
+    except Exception as e:
+        return {"path": None, "error": str(e)}
+
+
 def download_audio(
     url: str,
     output_path: str = "temp_audio.mp3",
@@ -352,15 +489,31 @@ def download_audio(
     """
     Baixa o áudio de um vídeo do YouTube, Instagram, TikTok ou Web com aceleração multi-thread
     e suporte a download parcial por intervalo de tempo (Time-Range Slicing).
+    Para transmissões ao vivo (is_live=True), aciona o motor de Live Snapshot M3U8 para captura
+    ultra-rápida sem ficar preso em loops de streaming contínuo.
     """
+    # 🔴 Para transmissões ao vivo, aciona o snapshot M3U8 de alta velocidade
+    if is_live:
+        snap_res = download_live_audio_snapshot(
+            url=url,
+            output_path=output_path,
+            start_sec=start_sec,
+            end_sec=end_sec
+        )
+        if snap_res.get("path") and os.path.exists(snap_res["path"]):
+            return snap_res
+
     ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
     cookie_file = get_cookie_file()
+
+    # Sanitização de extractor_args: nunca usar cliente android em lives
+    ext_args = {'youtube': {'player_client': ['web']}} if is_live else {'youtube': {'player_client': ['web', 'android']}}
 
     base_opts = {
         'format': 'bestaudio[ext=m4a]/bestaudio[protocol=https]/bestaudio/best',
         'outtmpl': output_path.replace('.mp3', '.%(ext)s'),
         'ffmpeg_location': os.path.dirname(ffmpeg_path) if ffmpeg_path else None,
-        'extractor_args': {'youtube': {'player_client': ['web', 'android']}},
+        'extractor_args': ext_args,
         'concurrent_fragment_downloads': 16,
         'http_chunk_size': 10485760,  # 10MB chunk size
         'buffersize': 1048576,        # 1MB buffer

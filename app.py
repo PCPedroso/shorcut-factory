@@ -1850,9 +1850,23 @@ if show_sec1:
                             channel=meta.get("channel"),
                             is_live=is_live_flag
                         )
+
+                        try:
+                            with open(os.path.join(data_dir, "metadata.json"), "w", encoding="utf-8") as _mf_save:
+                                json.dump({
+                                    "video_id": video_id,
+                                    "title": v_title,
+                                    "url": video_url,
+                                    "is_live": is_live_flag,
+                                    "duration": v_dur,
+                                    "upload_date": v_date,
+                                    "channel": meta.get("channel")
+                                }, _mf_save, ensure_ascii=False, indent=2)
+                        except Exception:
+                            pass
     
                     if is_live_flag:
-                        st.warning("🔴 **Transmissão Ao Vivo (LIVE) Detectada!** O vídeo ainda está em andamento. O sistema capturará o conteúdo transmitido.")
+                        st.info("🔴 **Transmissão Ao Vivo (LIVE) Detectada!** O ViralCut capturará um **Live Snapshot acelerado** com o conteúdo transmitido até o momento atual.")
     
                     # CACHE: Verifica se já temos a transcrição pronta
                     if os.path.exists(transcript_file):
@@ -1943,7 +1957,8 @@ if show_sec1:
                             if os.path.exists(audio_path):
                                 audio_res = {"path": audio_path, "error": None}
                             else:
-                                with st.spinner(f"Baixando áudio do vídeo ({platform_label})..."):
+                                _sp_msg = "🔴 Capturando Live Snapshot de áudio da transmissão ao vivo..." if is_live_flag else f"Baixando áudio do vídeo ({platform_label})..."
+                                with st.spinner(_sp_msg):
                                     audio_res = download_audio(
                                         video_url,
                                         output_path=audio_path,
@@ -4937,15 +4952,20 @@ if st.session_state.transcription_done:
                     if need_download:
                         import time
                         _t_vsec3_start = time.time()
-                        with st.spinner("Baixando vídeo original na máxima resolução disponível (1080p Full HD)..."):
-                            _meta_local = os.path.join(data_dir, "metadata.json")
-                            _is_live_corte = False
-                            if os.path.exists(_meta_local):
-                                try:
-                                    with open(_meta_local, "r", encoding="utf-8") as _mf:
-                                        _is_live_corte = bool(json.load(_mf).get("is_live"))
-                                except Exception:
-                                    pass
+                        _meta_local = os.path.join(data_dir, "metadata.json")
+                        _is_live_corte = False
+                        if os.path.exists(_meta_local):
+                            try:
+                                with open(_meta_local, "r", encoding="utf-8") as _mf:
+                                    _is_live_corte = bool(json.load(_mf).get("is_live"))
+                            except Exception:
+                                pass
+                        if not _is_live_corte:
+                            _lib_entry = get_library().get(video_id, {})
+                            _is_live_corte = bool(_lib_entry.get("is_live"))
+
+                        _sp_v3_msg = "🔴 Capturando vídeo da live em alta velocidade..." if _is_live_corte else "Baixando vídeo original na máxima resolução disponível (1080p Full HD)..."
+                        with st.spinner(_sp_v3_msg):
     
                             # Extrai intervalo de slice caso o vídeo seja fatiado (_t_start_end)
                             _slice_s = None

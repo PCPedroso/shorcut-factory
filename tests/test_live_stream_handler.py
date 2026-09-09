@@ -55,6 +55,105 @@ class TestLiveStreamHandler(unittest.TestCase):
         )
         self.assertTrue(entry.get('is_live'))
 
+    @patch('core.extractor.download_live_audio_snapshot')
+    def test_download_audio_routes_to_live_snapshot(self, mock_snap):
+        from core.extractor import download_audio
+        mock_snap.return_value = {"path": "test.mp3", "error": None}
+        with patch('os.path.exists', return_value=True):
+            res = download_audio("https://youtu.be/live123", output_path="test.mp3", is_live=True)
+            mock_snap.assert_called_once()
+            self.assertEqual(res["path"], "test.mp3")
+
+    @patch('core.video_processor.download_live_video_snapshot')
+    def test_download_full_video_routes_to_live_snapshot(self, mock_snap):
+        from core.video_processor import download_full_video
+        mock_snap.return_value = {"path": "test.mp4", "error": None}
+        with patch('os.path.exists', return_value=True):
+            res = download_full_video("https://youtu.be/live123", output_path="test.mp4", is_live=True)
+            mock_snap.assert_called_once()
+            self.assertEqual(res["path"], "test.mp4")
+
+    @patch('yt_dlp.YoutubeDL')
+    @patch('urllib.request.urlopen')
+    @patch('subprocess.run')
+    def test_download_live_audio_snapshot_injects_endlist(self, mock_subproc, mock_urlopen, mock_ydl_cls):
+        from core.extractor import download_live_audio_snapshot
+        import os
+
+        mock_ydl = MagicMock()
+        mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
+        mock_ydl.extract_info.return_value = {
+            'formats': [{
+                'format_id': '234',
+                'vcodec': 'none',
+                'protocol': 'm3u8_native',
+                'url': 'https://manifest.example.com/playlist.m3u8'
+            }]
+        }
+
+        # Mock urllib para retornar um m3u8 sem #EXT-X-ENDLIST
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b"#EXTM3U\n#EXTINF:5.0,\nseg1.ts\n#EXTINF:5.0,\nseg2.ts"
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        # Mock subprocess
+        mock_proc = MagicMock()
+        mock_proc.return_value.returncode = 0
+        mock_subproc.return_value = mock_proc
+
+        out_path = "scratch/test_live_mock.mp3"
+        with patch('os.path.exists', side_effect=lambda p: True if p == out_path else False), \
+             patch('os.path.getsize', return_value=50000):
+            res = download_live_audio_snapshot("https://youtu.be/live123", output_path=out_path)
+            self.assertEqual(res["path"], out_path)
+            mock_subproc.assert_called_once()
+            # Verifica argumentos do FFmpeg
+            call_args = mock_subproc.call_args[0][0]
+            self.assertIn('-protocol_whitelist', call_args)
+            self.assertIn('-vn', call_args)
+            self.assertIn('libmp3lame', call_args)
+
+    @patch('yt_dlp.YoutubeDL')
+    @patch('subprocess.run')
+    def test_download_live_video_snapshot_with_time_slice(self, mock_subproc, mock_ydl_cls):
+        from core.video_processor import download_live_video_snapshot
+
+        mock_ydl = MagicMock()
+        mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
+        mock_ydl.extract_info.return_value = {
+            'formats': [{
+                'format_id': '270',
+                'height': 1080,
+                'protocol': 'm3u8_native',
+                'manifest_url': 'https://manifest.example.com/hls_variant.m3u8',
+                'url': 'https://manifest.example.com/stream270.m3u8'
+            }]
+        }
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_subproc.return_value = mock_proc
+
+        out_path = "scratch/test_live_video_mock.mp4"
+        with patch('os.path.exists', side_effect=lambda p: True if p == out_path else False), \
+             patch('os.path.getsize', return_value=500000):
+            res = download_live_video_snapshot(
+                "https://youtu.be/live123",
+                output_path=out_path,
+                start_sec=60.0,
+                end_sec=90.0
+            )
+            self.assertEqual(res["path"], out_path)
+            mock_subproc.assert_called_once()
+            call_args = mock_subproc.call_args[0][0]
+            self.assertIn('-ss', call_args)
+            self.assertIn('60.0', call_args)
+            self.assertIn('-t', call_args)
+            self.assertIn('30.0', call_args)
+            self.assertIn('copy', call_args)
+
 
 if __name__ == '__main__':
     unittest.main()
+
