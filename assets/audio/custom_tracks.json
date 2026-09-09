@@ -26,24 +26,6 @@
         "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\acamvi_modoboaw.mp3",
         "is_builtin": false
     },
-    "meu_phonk_pico_teste.mp3": {
-        "id": "meu_phonk_pico_teste.mp3",
-        "filename": "meu_phonk_pico_teste.mp3",
-        "title": "Meu Phonk Épico Teste",
-        "category": "⚡ Phonk / Superação & Força",
-        "description": "Trilha de teste",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\meu_phonk_pico_teste.mp3",
-        "is_builtin": false
-    },
-    "acamvi_modoboaw_1.mp3": {
-        "id": "acamvi_modoboaw_1.mp3",
-        "filename": "acamvi_modoboaw_1.mp3",
-        "title": "📁 Acamvi - Modoboaw",
-        "category": "Personalizada (Parte 1)",
-        "description": "Extraído para cortes (Personalizada (Parte 1))",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\acamvi_modoboaw_1.mp3",
-        "is_builtin": false
-    },
     "cut_dark_knight_afxnsx.mp3": {
         "id": "cut_dark_knight_afxnsx.mp3",
         "filename": "cut_dark_knight_afxnsx.mp3",
@@ -53,24 +35,6 @@
         "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\cut_dark_knight_afxnsx.mp3",
         "is_builtin": false
     },
-    "meu_phonk_pico_teste_1.mp3": {
-        "id": "meu_phonk_pico_teste_1.mp3",
-        "filename": "meu_phonk_pico_teste_1.mp3",
-        "title": "Meu Phonk Épico Teste",
-        "category": "⚡ Phonk / Superação & Força",
-        "description": "Trilha de teste",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\meu_phonk_pico_teste_1.mp3",
-        "is_builtin": false
-    },
-    "meu_phonk_pico_teste_2.mp3": {
-        "id": "meu_phonk_pico_teste_2.mp3",
-        "filename": "meu_phonk_pico_teste_2.mp3",
-        "title": "Meu Phonk Épico Teste",
-        "category": "⚡ Phonk / Superação & Força",
-        "description": "Trilha de teste",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\meu_phonk_pico_teste_2.mp3",
-        "is_builtin": false
-    },
     "dark_knight_afxnsx.mp3": {
         "id": "dark_knight_afxnsx.mp3",
         "filename": "dark_knight_afxnsx.mp3",
@@ -78,114 +42,6 @@
         "category": "Personalizada (Parte 2)",
         "description": "Extraído para cortes (Personalizada (Parte 2))",
         "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\dark_knight_afxnsx.mp3",
-        "is_builtin": false
-    },
-    "acamvi_modoboaw_2.mp3": {
-        "id": "acamvi_modoboaw_2.mp3",
-        "filename": "acamvi_modoboaw_2.mp3",
-        "title": "📁 Acamvi - Modoboaw",
-        "category": "Personalizada (Parte 1)",
-        "description": "Extraído para cortes (Personalizada (Parte 1))",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\acamvi_modoboaw_2.mp3",
-        "is_builtin": false
-    },
-    "cut_dark_knight_afxnsx_1.mp3": {
-        "id": "cut_dark_knight_afxnsx_1.mp3",
-        "filename": "cut_dark_knight_afxnsx_1.mp3",
-        "title": "📁 Cut - Dark Knight - AFXNSX",
-        "category": "Personalizada (Parte 2)",
-        "description": "Extraído para cortes (Personalizada (Parte 2))",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\cut_dark_knight_afxnsx_1.mp3",
-        "is_builtin": false
-    },
-    "cut_dark_knight_afxnsx_2.mp3": {
-        "id": "cut_dark_knight_afxnsx_2.mp3",
-        "filename": "cut_dark_knight_afxnsx_2.mp3",
-        "title": "📁 Cut - Dark Knight - AFXNSX",
-        "category": "Personalizada (Parte 2)",
-        "description": "Extraído para cortes (Personalizada (Parte 2))",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\cut_dark_knight_afxnsx_2.mp3",
-        "is_builtin": false
-    },
-    "meu_phonk_pico_teste_3.mp3": {
-        "id": "meu_phonk_pico_teste_3.mp3",
-        "filename": "meu_phonk_pico_teste_3.mp3",
-        "title": "Meu Phonk Épico Teste",
-        "category": "⚡ Phonk / Superação & Força",
-        "description": "Trilha de teste",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\meu_phonk_pico_teste_3.mp3",
-        "is_builtin": false
-    },
-    "meu_phonk_pico_teste_4.mp3": {
-        "id": "meu_phonk_pico_teste_4.mp3",
-        "filename": "meu_phonk_pico_teste_4.mp3",
-        "title": "Meu Phonk Épico Teste",
-        "category": "⚡ Phonk / Superação & Força",
-        "description": "Trilha de teste",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\meu_phonk_pico_teste_4.mp3",
-        "is_builtin": false
-    },
-    "meu_phonk_pico_teste_5.mp3": {
-        "id": "meu_phonk_pico_teste_5.mp3",
-        "filename": "meu_phonk_pico_teste_5.mp3",
-        "title": "Meu Phonk Épico Teste",
-        "category": "⚡ Phonk / Superação & Força",
-        "description": "Trilha de teste",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\meu_phonk_pico_teste_5.mp3",
-        "is_builtin": false
-    },
-    "meu_phonk_pico_teste_6.mp3": {
-        "id": "meu_phonk_pico_teste_6.mp3",
-        "filename": "meu_phonk_pico_teste_6.mp3",
-        "title": "Meu Phonk Épico Teste",
-        "category": "⚡ Phonk / Superação & Força",
-        "description": "Trilha de teste",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\meu_phonk_pico_teste_6.mp3",
-        "is_builtin": false
-    },
-    "meu_phonk_pico_teste_7.mp3": {
-        "id": "meu_phonk_pico_teste_7.mp3",
-        "filename": "meu_phonk_pico_teste_7.mp3",
-        "title": "Meu Phonk Épico Teste",
-        "category": "⚡ Phonk / Superação & Força",
-        "description": "Trilha de teste",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\meu_phonk_pico_teste_7.mp3",
-        "is_builtin": false
-    },
-    "meu_phonk_pico_teste_8.mp3": {
-        "id": "meu_phonk_pico_teste_8.mp3",
-        "filename": "meu_phonk_pico_teste_8.mp3",
-        "title": "Meu Phonk Épico Teste",
-        "category": "⚡ Phonk / Superação & Força",
-        "description": "Trilha de teste",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\meu_phonk_pico_teste_8.mp3",
-        "is_builtin": false
-    },
-    "meu_phonk_pico_teste_9.mp3": {
-        "id": "meu_phonk_pico_teste_9.mp3",
-        "filename": "meu_phonk_pico_teste_9.mp3",
-        "title": "Meu Phonk Épico Teste",
-        "category": "⚡ Phonk / Superação & Força",
-        "description": "Trilha de teste",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\meu_phonk_pico_teste_9.mp3",
-        "is_builtin": false
-    },
-    "meu_phonk_pico_teste_10.mp3": {
-        "id": "meu_phonk_pico_teste_10.mp3",
-        "filename": "meu_phonk_pico_teste_10.mp3",
-        "title": "Meu Phonk Épico Teste",
-        "category": "⚡ Phonk / Superação & Força",
-        "description": "Trilha de teste",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\meu_phonk_pico_teste_10.mp3",
-        "is_builtin": false
-    },
-    "meu_phonk_pico_teste_11.mp3": {
-        "id": "meu_phonk_pico_teste_11.mp3",
-        "filename": "meu_phonk_pico_teste_11.mp3",
-        "title": "Meu Phonk Épico Teste",
-        "category": "⚡ Phonk / Superação & Força",
-        "description": "Trilha de teste",
-        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\meu_phonk_pico_teste_11.mp3",
         "is_builtin": false
     }
 }

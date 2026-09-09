@@ -1,8 +1,18 @@
 [server]
 enableCORS = false
 enableXsrfProtection = false
-enableWebsocketCompression = false
-maxUploadSize = 1024
+enableWebsocketCompression = true
+maxUploadSize = 2048
+maxMessageSize = 2048
+enableStaticServing = true
 
 [browser]
 gatherUsageStats = false
+
+[theme]
+base = "dark"
+primaryColor = "#6366f1"
+backgroundColor = "#090d16"
+secondaryBackgroundColor = "#121826"
+textColor = "#f8fafc"
+font = "sans serif"

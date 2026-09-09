@@ -108,6 +108,47 @@ class TestHeadlineDrawer(unittest.TestCase):
         self.assertIn("Style: Headline", style)
         self.assertIn("50", style)
 
+    def test_render_headline_overlay_preset_colors_red_white(self):
+        from core.headline_drawer import render_headline_overlay
+        overlay = render_headline_overlay(
+            video_width=1080,
+            video_height=1920,
+            text="ALERTA URGENTE",
+            config={
+                "preset_key": "red_white",
+                "text_color": "#FFFFFF",
+                "bg_color": "#E50914"
+            }
+        )
+        # Check non-transparent pixels have red-dominant background
+        alpha = overlay[:, :, 3]
+        mask = alpha > 128
+        red_channel = overlay[:, :, 0][mask]
+        blue_channel = overlay[:, :, 2][mask]
+        # Red channel should be higher than blue for #E50914 background
+        self.assertTrue(len(red_channel) > 0)
+        self.assertTrue(red_channel.mean() > blue_channel.mean())
+
+    def test_render_headline_overlay_synonym_keys(self):
+        from core.headline_drawer import render_headline_overlay
+        overlay = render_headline_overlay(
+            video_width=1080,
+            video_height=1920,
+            text="CARD UNICO TESTE",
+            config={
+                "mode": "single_card",
+                "bg_alpha": 0.85,
+                "padding_h": 35,
+                "padding_v": 20,
+                "max_width_pct": 0.9,
+                "shadow": True,
+                "preset_key": "yellow_black"
+            }
+        )
+        self.assertEqual(overlay.shape, (1920, 1080, 4))
+        self.assertTrue(overlay[:, :, 3].max() > 0)
+
 
 if __name__ == '__main__':
     unittest.main()
+

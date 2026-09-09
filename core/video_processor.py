@@ -159,6 +159,9 @@ def download_full_video(
             'buffersize': 1048576,        # 1MB RAM buffer
             'retries': 10,
             'fragment_retries': 10,
+            'noplaylist': True,
+            'playlist_items': '1',
+            'ignoreerrors': True,
             'quiet': False,
             'no_warnings': True,
             'js_runtimes': js_runtimes_cfg
@@ -197,6 +200,9 @@ def download_full_video(
                     return {"path": output_path, "error": None}
             except Exception as exc_attempt:
                 last_err = str(exc_attempt)
+                # Se o vídeo principal já foi baixado com sucesso (> 100KB), não precisa retentar!
+                if os.path.exists(output_path) and os.path.getsize(output_path) > 102400:
+                    return {"path": output_path, "error": None}
                 continue
 
         if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
@@ -263,6 +269,8 @@ def cut_video(
     person_preference: str = "auto",
     split_top_pan: float = -0.65,
     split_bottom_pan: float = 0.65,
+    split_top_pan_y: float = 0.0,
+    split_bottom_pan_y: float = 0.0,
     split_zoom: float = 1.15,
     split_divider_color: str = "black",
     split_divider_width: int = 4,
@@ -357,6 +365,8 @@ def cut_video(
                 split_zoom=split_zoom,
                 top_pan=split_top_pan,
                 bottom_pan=split_bottom_pan,
+                top_pan_y=split_top_pan_y,
+                bottom_pan_y=split_bottom_pan_y,
                 divider_color=split_divider_color,
                 divider_width=split_divider_width,
                 auto_switch_enabled=split_auto_switch,

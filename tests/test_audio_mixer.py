@@ -91,6 +91,23 @@ class TestAudioMixer(unittest.TestCase):
                     os.remove(tf_path)
                 except Exception:
                     pass
+            if 'track' in locals() and track and os.path.exists(track.get("path", "")):
+                try:
+                    os.remove(track["path"])
+                except Exception:
+                    pass
+                try:
+                    import json
+                    ct_path = os.path.join(ASSETS_AUDIO_DIR, "custom_tracks.json")
+                    if os.path.exists(ct_path):
+                        with open(ct_path, "r", encoding="utf-8") as f_ct:
+                            ct_data = json.load(f_ct)
+                        if track["id"] in ct_data:
+                            del ct_data[track["id"]]
+                            with open(ct_path, "w", encoding="utf-8") as f_ct:
+                                json.dump(ct_data, f_ct, indent=4, ensure_ascii=False)
+                except Exception:
+                    pass
 
 
 if __name__ == '__main__':

@@ -30,3 +30,10 @@ Este guia define as boas práticas de desenvolvimento de interface no `app.py` e
    - Botão *"📂 Abrir Pasta"* disponível em todos os cards de cortes gerados.
    - Utiliza `os.startfile(os.path.normpath(folder_path))` ou `subprocess.Popen(f'explorer /select,"{video_path}"')` para abrir a pasta nativa no Windows.
    - Fornecer link markdown no formato `[Nome](file:///D:/Repository/shorcut-factory/...)` e texto monoespaçado do caminho absoluto.
+4. **Design System & Glassmorphism (`core/ui_theme.py`)**:
+   - Sempre chamar `inject_viralcut_theme()` no início do `app.py`.
+   - Utilizar componentes utilitários: `render_status_badge()`, `render_empty_state_html()` e `render_section_header()`.
+   - Manter paleta Dark Studio (`#090d16`, Indigo `#6366f1`, Pink Neon `#ec4899`) e fontes *Plus Jakarta Sans* / *JetBrains Mono*.
+5. **Navegação Progressiva (Workflow Stepper)**:
+   - Topo da aplicação organizado por `render_workflow_stepper()` para eliminar fadiga de scroll.
+   - Utilizar `navigate_to_step("X")` ao encaminhar fluxos entre etapas automaticamente.

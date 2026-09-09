@@ -1010,12 +1010,77 @@ def load_images_for_slideshow(image_paths: list, target_w: int = 1080, target_h:
     return loaded
 
 
+def extract_proportional_crop(
+    frame: np.ndarray,
+    target_w: int = 1080,
+    target_h: int = 960,
+    zoom: float = 1.0,
+    pan_x: float = 0.0,
+    pan_y: float = 0.0
+) -> np.ndarray:
+    """
+    Recorta e redimensiona um frame mantendo RIGOROSAMENTE a proporção do slot alvo (target_w / target_h),
+    eliminando 100% de qualquer distorção anamórfica ou achatamento/estiramento da imagem, independentemente
+    do valor de zoom ou margem com fundo desfocado aplicada.
+    """
+    if frame is None or frame.size == 0:
+        return np.zeros((target_h, target_w, 3), dtype=np.uint8)
+
+    h, w = frame.shape[:2]
+    if h == 0 or w == 0:
+        return np.zeros((target_h, target_w, 3), dtype=np.uint8)
+
+    target_ratio = float(target_w) / float(target_h)
+
+    # 1. Determina a maior janela proporcional possível no frame original
+    if float(h) * target_ratio <= float(w):
+        max_crop_h = float(h)
+        max_crop_w = float(h) * target_ratio
+    else:
+        max_crop_w = float(w)
+        max_crop_h = float(w) / target_ratio
+
+    # 2. Aplica o fator de zoom >= 1.0 (aproximando a janela de recorte sem distorcer)
+    eff_zoom = max(1.0, float(zoom))
+    crop_h = max(20.0, min(float(h), max_crop_h / eff_zoom))
+    crop_w = crop_h * target_ratio
+
+    if crop_w > float(w):
+        crop_w = float(w)
+        crop_h = crop_w / target_ratio
+
+    int_crop_w = max(1, min(w, int(round(crop_w))))
+    int_crop_h = max(1, min(h, int(round(crop_h))))
+
+    # 3. Limites de deslocamento (Pan X e Pan Y)
+    max_x = max(0, w - int_crop_w)
+    max_y = max(0, h - int_crop_h)
+
+    clamped_pan_x = max(-1.0, min(1.0, float(pan_x)))
+    pos_x = int(round((max_x / 2.0) + (clamped_pan_x * (max_x / 2.0)))) if max_x > 0 else 0
+    pos_x = max(0, min(max_x, pos_x))
+
+    clamped_pan_y = max(-1.0, min(1.0, float(pan_y)))
+    pos_y = int(round((max_y / 2.0) + (clamped_pan_y * (max_y / 2.0)))) if max_y > 0 else 0
+    pos_y = max(0, min(max_y, pos_y))
+
+    # 4. Recorte exato
+    cropped = frame[pos_y : pos_y + int_crop_h, pos_x : pos_x + int_crop_w]
+
+    # 5. Redimensionamento final para target_w x target_h
+    interp = cv2.INTER_AREA if (int_crop_w > target_w and int_crop_h > target_h) else cv2.INTER_LINEAR
+    resized = cv2.resize(cropped, (target_w, target_h), interpolation=interp)
+    return resized
+
+
 def generate_split_preview_image(
     input_video_path: str,
     timestamp_str: str,
     output_preview_path: str = "temp_split_preview.jpg",
     top_pan: float = -0.65,
     bottom_pan: float = 0.65,
+    top_pan_y: float = 0.0,
+    bottom_pan_y: float = 0.0,
     zoom: float = 1.15,
     divider_color: str = "black",
     divider_width: int = 4,
@@ -1054,26 +1119,9 @@ def generate_split_preview_image(
             content_h = 1920
             actual_top_margin = 0
 
-        base_w = int(h * 1.125 / zoom)
-        base_h = int(h / zoom)
-
-        max_x = max(0, w - base_w)
-        max_y = max(0, h - base_h)
-
-        # Coordenadas Topo
-        top_x = int(max(0, min(max_x, (max_x / 2.0) + (top_pan * (max_x / 2.0)))))
-        top_y = int(max(0, min(max_y, max_y / 2.0)))
-
-        # Coordenadas Base
-        bot_x = int(max(0, min(max_x, (max_x / 2.0) + (bottom_pan * (max_x / 2.0)))))
-        bot_y = top_y
-
-        # Recorta frames do vídeo principal
-        top_crop = frame[top_y : top_y + base_h, top_x : top_x + base_w]
-        bot_crop = frame[bot_y : bot_y + base_h, bot_x : bot_x + base_w]
-
-        top_resized = cv2.resize(top_crop, (1080, slot_h), interpolation=cv2.INTER_LINEAR)
-        bot_resized = cv2.resize(bot_crop, (1080, slot_h), interpolation=cv2.INTER_LINEAR)
+        # Recorta frames do vídeo principal com enquadramento proporcional estrito (sem esticar)
+        top_resized = extract_proportional_crop(frame, 1080, slot_h, zoom=zoom, pan_x=top_pan, pan_y=top_pan_y)
+        bot_resized = extract_proportional_crop(frame, 1080, slot_h, zoom=zoom, pan_x=bottom_pan, pan_y=bottom_pan_y)
 
         # Processa Mídia Secundária caso selecionada
         sec_res = None
@@ -1149,6 +1197,8 @@ def crop_video_with_dynamic_auto_switch(
     split_zoom: float = 1.15,
     top_pan: float = -0.65,
     bottom_pan: float = 0.65,
+    top_pan_y: float = 0.0,
+    bottom_pan_y: float = 0.0,
     divider_color: str = "black",
     divider_width: int = 4,
     auto_switch_enabled: bool = True,
@@ -1163,7 +1213,7 @@ def crop_video_with_dynamic_auto_switch(
     - Modo Padrão: Quando houver >= 2 pessoas, aplica Split Screen (Topo e Base).
     - Modo Vídeo Secundário: Insere vídeo local em looping contínuo na base (ou topo).
     - Modo Slideshow de Imagens: Apresenta imagens proporcionalmente ao tempo do vídeo.
-    - Margens com Fundo Desfocado: Adiciona margens com blur cinematográfico no topo e na base.
+    - Margens com Fundo Desfocado: Adiciona margens com blur cinematográfico no topo e na base sem qualquer distorção anamórfica.
     - Se auto_switch_enabled e sem mídia secundária: transiciona suavemente para 9:16 Full Screen em close-ups.
     """
     sec_cap = None
@@ -1278,17 +1328,8 @@ def crop_video_with_dynamic_auto_switch(
                 current_mode = "split"
 
             if current_mode == "split":
-                base_w = int(h * 1.125 / split_zoom)
-                base_h = int(h / split_zoom)
-                max_x = max(0, w - base_w)
-                max_y = max(0, h - base_h)
-                top_x = int(max(0, min(max_x, (max_x / 2.0) + (top_pan * (max_x / 2.0)))))
-                top_y = int(max(0, min(max_y, max_y / 2.0)))
-                bot_x = int(max(0, min(max_x, (max_x / 2.0) + (bottom_pan * (max_x / 2.0)))))
-                bot_y = top_y
-
-                top_crop = frame[top_y : top_y + base_h, top_x : top_x + base_w]
-                top_res = cv2.resize(top_crop, (1080, slot_h), interpolation=cv2.INTER_LINEAR)
+                # Recorte proporcional estrito para o slot (sem esticar)
+                top_res = extract_proportional_crop(frame, 1080, slot_h, zoom=split_zoom, pan_x=top_pan, pan_y=top_pan_y)
 
                 # Processa slot secundário
                 sec_slot_res = None
@@ -1314,8 +1355,7 @@ def crop_video_with_dynamic_auto_switch(
                     else:
                         active_content = cv2.vconcat([top_res, sec_slot_res])
                 else:
-                    bot_crop = frame[bot_y : bot_y + base_h, bot_x : bot_x + base_w]
-                    bot_res = cv2.resize(bot_crop, (1080, slot_h), interpolation=cv2.INTER_LINEAR)
+                    bot_res = extract_proportional_crop(frame, 1080, slot_h, zoom=split_zoom, pan_x=bottom_pan, pan_y=bottom_pan_y)
                     active_content = cv2.vconcat([top_res, bot_res])
 
                 # Aplica margens com fundo desfocado se margin_pct > 0

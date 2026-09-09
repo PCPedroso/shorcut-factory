@@ -98,37 +98,56 @@ def get_video_metadata(url: str):
     """
     cookie_file = get_cookie_file()
     
+    common_flags = {
+        'quiet': True,
+        'no_warnings': True,
+        'noplaylist': True,
+        'playlist_items': '1',
+        'ignoreerrors': True
+    }
+
     options_list = [
-        {'quiet': True, 'no_warnings': True},
-        {'quiet': True, 'no_warnings': True, 'extractor_args': {'youtube': {'player_client': ['android', 'web']}}},
-        {'quiet': True, 'no_warnings': True, 'live_from_start': True},
+        dict(common_flags),
+        dict(common_flags, extractor_args={'youtube': {'player_client': ['android', 'web']}}),
+        dict(common_flags, live_from_start=True),
     ]
 
     # Se houver cookies disponíveis, injeta como primeira opção
     if cookie_file:
-        options_list.insert(0, {'quiet': True, 'no_warnings': True, 'cookiefile': cookie_file})
+        options_list.insert(0, dict(common_flags, cookiefile=cookie_file))
 
     last_error = None
     for ydl_opts in options_list:
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
-                heatmap = info.get('heatmap')
-                title = info.get('title') or info.get('description', '')[:80] or "Vídeo da Web"
-                duration = info.get('duration')
-                upload_date = info.get('upload_date')
-                thumbnail = info.get('thumbnail')
-                uploader = info.get('uploader') or info.get('channel') or info.get('uploader_id') or "Perfil / Canal"
-                webpage_url = info.get('webpage_url') or url
-                track_name = info.get('track')
-                artist_name = info.get('artist') or info.get('creator')
-                album_name = info.get('album')
-                genre_name = info.get('genre')
+                if not info:
+                    continue
+
+                # Se for playlist ou artigo com múltiplos vídeos (ex: Globo/G1, UOL, etc.),
+                # seleciona a entrada principal (primeiro item) para obter metadados reais
+                target = info
+                if info.get('_type') == 'playlist' or 'entries' in info:
+                    entries = [e for e in info.get('entries', []) if e]
+                    if entries:
+                        target = entries[0]
+
+                heatmap = target.get('heatmap') or info.get('heatmap')
+                title = target.get('title') or info.get('title') or target.get('description', '')[:80] or info.get('description', '')[:80] or "Vídeo da Web"
+                duration = target.get('duration') or info.get('duration')
+                upload_date = target.get('upload_date') or info.get('upload_date')
+                thumbnail = target.get('thumbnail') or info.get('thumbnail')
+                uploader = target.get('uploader') or target.get('channel') or target.get('uploader_id') or info.get('uploader') or info.get('channel') or "Perfil / Canal"
+                webpage_url = target.get('webpage_url') or info.get('webpage_url') or url
+                track_name = target.get('track') or info.get('track')
+                artist_name = target.get('artist') or target.get('creator') or info.get('artist')
+                album_name = target.get('album') or info.get('album')
+                genre_name = target.get('genre') or info.get('genre')
                 
                 # Detecção de Live Stream / Transmissão ao Vivo
-                live_status = info.get('live_status') or ('is_live' if info.get('is_live') else 'not_live')
-                is_live = bool(info.get('is_live') or (live_status == 'is_live'))
-                was_live = bool(info.get('was_live') or (live_status in ('was_live', 'post_live')))
+                live_status = target.get('live_status') or info.get('live_status') or ('is_live' if (target.get('is_live') or info.get('is_live')) else 'not_live')
+                is_live = bool(target.get('is_live') or info.get('is_live') or (live_status == 'is_live'))
+                was_live = bool(target.get('was_live') or info.get('was_live') or (live_status in ('was_live', 'post_live')))
 
                 # Identificação inteligente do nome da música
                 clean_track_title = clean_music_title(title, artist=artist_name, track=track_name)
@@ -347,6 +366,9 @@ def download_audio(
         'buffersize': 1048576,        # 1MB buffer
         'retries': 10,
         'fragment_retries': 10,
+        'noplaylist': True,
+        'playlist_items': '1',
+        'ignoreerrors': True,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -384,10 +406,13 @@ def download_audio(
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
-                if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                    return {"path": output_path, "error": None}
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                return {"path": output_path, "error": None}
         except Exception as e:
             last_err = str(e)
+            # Se o áudio principal já foi baixado com sucesso (> 10KB), não precisa retentar
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
+                return {"path": output_path, "error": None}
             continue
 
     if os.path.exists(output_path) and os.path.getsize(output_path) > 0:

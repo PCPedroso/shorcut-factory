@@ -283,29 +283,37 @@ def render_headline_overlay(
     preset_key = config.get("preset_key", "yellow_black")
     preset = HEADLINE_PRESETS.get(preset_key, HEADLINE_PRESETS["yellow_black"])
 
-    # Cores
+    # Cores (permite override manual ou herda do preset)
     if preset_key == "custom":
-        text_color_hex = config.get("text_color", "#000000")
-        bg_color_hex = config.get("bg_color", "#FFDA29")
+        text_color_hex = config.get("text_color") or config.get("primary_color") or "#000000"
+        bg_color_hex = config.get("bg_color") or config.get("box_color") or "#FFDA29"
     else:
         text_color_hex = config.get("text_color") or preset["text_color"]
         bg_color_hex = config.get("bg_color") or preset["bg_color"]
 
-    bg_opacity = float(config.get("bg_opacity", 1.0))
+    bg_opacity_raw = config.get("bg_opacity", config.get("bg_alpha", 1.0))
+    bg_opacity = float(bg_opacity_raw) if bg_opacity_raw is not None else 1.0
     text_rgba = hex_to_rgba(text_color_hex, alpha=1.0)
     bg_rgba = hex_to_rgba(bg_color_hex, alpha=bg_opacity)
 
-    # Parâmetros de Layout
+    # Parâmetros de Layout com suporte a sinônimos
     font_size = int(config.get("font_size", 70))
     margin_top = int(config.get("margin_top", 240))
-    container_mode = config.get("container_mode", "line_boxes")  # 'line_boxes', 'single_card', 'outline_only'
-    container_width_pct = float(config.get("container_width_pct", 92.0))
-    box_padding_x = int(config.get("box_padding_x", 28))
-    box_padding_y = int(config.get("box_padding_y", 16))
+    container_mode = config.get("container_mode") or config.get("mode") or "line_boxes"
+    
+    raw_w_pct = config.get("container_width_pct", config.get("max_width_pct", 92.0))
+    try:
+        val_w = float(raw_w_pct)
+        container_width_pct = val_w * 100.0 if val_w <= 1.0 else val_w
+    except Exception:
+        container_width_pct = 92.0
+
+    box_padding_x = int(config.get("box_padding_x", config.get("padding_h", 28)))
+    box_padding_y = int(config.get("box_padding_y", config.get("padding_v", 16)))
     line_spacing = int(config.get("line_spacing", 14))
     corner_radius = int(config.get("corner_radius", 14))
     alignment = config.get("alignment", "center")  # 'center', 'left', 'right'
-    shadow_enabled = bool(config.get("shadow_enabled", True))
+    shadow_enabled = bool(config.get("shadow_enabled", config.get("shadow", True)))
     shadow_offset_y = int(config.get("shadow_offset_y", 6))
     stroke_width = int(config.get("stroke_width", 0))
     stroke_color_hex = config.get("stroke_color", "#000000")

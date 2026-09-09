@@ -18,7 +18,7 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
 | **Processamento de Vídeo** | `FFmpeg` (com `libass` e NVENC) | Recorte, filtros complexos, sidechain compress, equalização e queima de legendas/overlays |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
-| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (75 testes) |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (110 testes) |
 
 ---
 
@@ -31,30 +31,32 @@ shorcut-factory/
 ├── assets/
 │   ├── audio/                 # Trilhas sonoras royalty-free categorizadas (.wav / .mp3)
 │   └── fonts/                 # Tipografias bundled (Montserrat-ExtraBold)
-├── tests/                     # Suíte de Testes Unitários Automatizados (68 testes)
+├── tests/                     # Suíte de Testes Unitários Automatizados (110 testes)
 │   ├── test_quick_editor.py      # Testes de duração, trim, corte cirúrgico e concatenação
 │   ├── test_thumbnail_generator.py # Testes de frames, nitidez e capas 9:16
 │   ├── test_headline_drawer.py   # Testes de headlines, quebras, presets ASS e overlay visual
 │   ├── test_audio_processor.py   # Testes de equalização, anti-estouro e nivelamento dinâmico
-│   ├── test_split_secondary_media.py # Testes de Split Screen com mídias secundárias e margens de blur
-│   ├── test_quick_editor.py      # Testes de Trim, Snip, Aceleração de velocidade e Limpeza de versões
+│   ├── test_split_secondary_media.py # Testes de Split Screen com preservação proporcional estrita e blur margins
 │   ├── test_export_kit.py        # Testes de pastas, prefixos e kit viral
 │   ├── test_cuts_catalog.py      # Testes de catálogo, instâncias e exclusão
 │   ├── test_audio_mixer.py       # Testes de trilhas e áudio ducking
 │   ├── test_retention_effects.py # Testes de zoom punch, progress bar e callouts
 │   ├── test_config_manager.py    # Testes de persistência de configurações
 │   ├── test_integrations.py      # Testes de webhooks e payloads
-│   └── test_analyzer_utils.py    # Testes de conversão de tempo e textos
+│   ├── test_analyzer_utils.py    # Testes de conversão de tempo e textos
+│   ├── test_ui_theme.py          # Testes de tokens de design system, badges e stepper
+│   └── test_web_downloads.py     # Testes de resiliência em downloads de portais de notícias e web
 ├── core/
+│   ├── ui_theme.py            # Design System Studio: tokens CSS, Glassmorphism, stepper, badges e componentes
 │   ├── quick_editor.py        # Edição rápida / ajuste fino: Trim, Snip & Merge, Speed Up (1.0x-1.5x) e Limpeza de Versões
 │   ├── audio_processor.py     # Equalização, anti-estouro (de-clipping/limiter), nivelador dinâmico de voz/torcida
 │   ├── overlay_manager.py     # Motor de sobreposição de banners, tarjas (GC), logos com modos fill/fit/cover
-│   ├── headline_drawer.py     # Estilização de Headlines magnéticas de topo (Live Preview, box por linha, card e outline)
-│   ├── extractor.py           # Extração acelerada 16-thread de áudio, canais e metadados via yt-dlp
+│   ├── headline_drawer.py     # Estilização de Headlines magnéticas de topo (Live Preview, presets reativos de cores)
+│   ├── extractor.py           # Extração acelerada 16-thread e download resiliente de YouTube, Redes e Portais Web
 │   ├── transcriber.py         # Transcrição faster-whisper (CUDA) + fallback ASR YouTube com ID limpo
 │   ├── analyzer.py            # Análise Q&A/Temática, Séries Sugeridas flexíveis e Kit Viral com IA
 │   ├── video_processor.py     # Pipeline FFmpeg para os 5 formatos de enquadramento + download multi-thread
-│   ├── face_tracker.py        # Detecção facial MediaPipe, Deadband Anchor e Split Screen Auto-Switch
+│   ├── face_tracker.py        # Detecção facial MediaPipe, Deadband Anchor, Split Screen Proporcional & Auto-Switch
 │   ├── subtitle_burner.py     # Geração de legendas dinâmicas em ASS + Headlines + Emojis + Callout
 │   ├── thumbnail_generator.py # Extração de melhor frame (MediaPipe/sharpness) e capas 9:16 multicamadas
 │   ├── audio_mixer.py         # Mixagem de áudio com Ducking dinâmico via sidechaincompress FFmpeg
@@ -100,7 +102,7 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 
 | Formato | Prefixo da Pasta | Descrição |
 |---|---|---|
-| **Layout Dividido (Split Screen)** | `VLDSS` | Estilo Podpah/Flow. Possui **Transição Dinâmica (Auto-Switch)**: se 2+ pessoas visíveis $\to$ Split Screen; se close de 1 pessoa $\to$ 9:16 Full Screen com MediaPipe. Suporta mídia secundária (vídeo em looping ou slideshow de imagens) e margens de blur anti-sobreposição. |
+| **Layout Dividido (Split Screen)** | `VLDSS` | Estilo Podpah/Flow. Possui **Enquadramento Proporcional Estrito** (`extract_proportional_crop`) eliminando qualquer distorção anamórfica, controle independente de Pan Horizontal e Vertical (`pan_x`/`pan_y`), **Transição Dinâmica (Auto-Switch)** (se 2+ pessoas visíveis $\to$ Split Screen; se close de 1 pessoa $\to$ 9:16 Full Screen com MediaPipe), suporte a mídia secundária (vídeo em looping ou slideshow de imagens) e margens de blur no topo/base de 0% a 20%. |
 | **Auto-Reframing Facial** | `VRIRA` | Rastreamento inteligente de rosto com Deadband Anchor, Target Lock e Auto-Zoom suave. |
 | **Fundo Desfocado (Blur)** | `VFDBS` | Vídeo central nítido com fundo desfocado preenchendo a tela 9:16. |
 | **Corte Central (Crop)** | `VCCFT` | Corte centralizado direto em 9:16. |
@@ -171,14 +173,18 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
     - Exclusão seletiva e segura com retenção estrita do vídeo original e da versão recém-gerada.
 - **🏷️ Headline / Título de Topo Magnético Pós-Corte (`core/headline_drawer.py`, `app.py`)**:
   - Modos: *Caixa por Linha (TikTok/Reels)*, *Card Único* e *Sem Caixa (Contorno)* com live preview e aceleração GPU (NVENC).
+  - **Presets de Estilo Reativos & Resolução de Cores**: Presets visuais populares (*Viral Yellow*, *Neon Cyan*, *Red Alert*, *Clean White*, *Dark Mode*, *Lilac Pop*...) com sincronização reativa imediata via callbacks de `st.session_state` (`hl_post_tcolor`, `hl_post_bgcolor`), invalidação atômica de cache de prévia e suporte a sinônimos de parâmetros (`text_color`, `bg_color`).
   - **Paleta Padrão Viral**: Texto em Preto Absoluto (`#000000`) sobre Fundo Amarelo Ouro Viral (`#FFDA29`) com sincronização automática entre Edição Rápida e pipeline principal.
 - **🎙️ Equalizador, Anti-Estouro & Nivelador Dinâmico de Áudio no Pós-Corte (`core/audio_processor.py`, `app.py`)**:
   - *Perfil Anti-Estouro & Voz + Torcida*: De-Clipper + Brickwall Limiter + Nivelador Dinâmico (`dynaudnorm`).
   - Prévia sonora e Stream Copy (~1s sem re-renderizar vídeo).
 - **⚡ Download Ultra-Acelerado Multi-Thread do YouTube (`core/extractor.py`, `core/video_processor.py`)**:
   - 16 conexões simultâneas, buffers de 10 MB, suporte a lives e `post_live`.
-- **🎬 Split Screen com Mídia Secundária & Margens Desfocadas (Blur Margins) (`core/face_tracker.py`, `core/video_processor.py`)**:
-  - Suporte a vídeo em loop, slideshow dinâmico e margens de blur no topo/rodapé de 0% a 20%.
+- **🎬 Split Screen com Enquadramento Proporcional Estrito & Margens Desfocadas (`core/face_tracker.py`, `core/video_processor.py`, `app.py`)**:
+  - **Eliminação de Distorção Anamórfica**: Motor `extract_proportional_crop` que calcula o aspect ratio exato de cada slot (`target_w / target_h`), substituindo relações fixas rígidas e garantindo 0.0% de distorção mesmo ao aplicar margens de blur de 0% a 20%.
+  - **Controle Bidirecional de Enquadramento**: Sliders independentes de Pan Horizontal (`top_pan_x`, `bottom_pan_x`) e Pan Vertical (`top_pan_y`, `bottom_pan_y`), permitindo enquadrar oradores perfeitamente centralizados tanto em altura quanto em largura.
+  - **Prévia Visual Persistente**: Live preview atualizada em tempo real e cacheada em `st.session_state` para inspeção imediata antes do processamento.
+  - Suporte a vídeo em loop, slideshow dinâmico e transição inteligente Auto-Switch com MediaPipe.
 - **💡 Séries Sugeridas com Duração Mínima Configurável (`core/analyzer.py`, `app.py`)**:
   - Tempo mínimo por corte de série (ex: 5, 10, 15 min) com agrupamento instantâneo.
 - **🖼️ Gerador Avançado de Capas / Thumbnails Multicamadas com 3 Variações (`core/thumbnail_generator.py`)**:
@@ -236,8 +242,15 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Sincronia Temporal Milimétrica**: Preserva estritamente os timestamps `start` e `end` de cada frase, garantindo sincronia labial perfeita na queima de legendas e nos arquivos `.srt`/`.vtt`.
   - **Backup & Reversibilidade Imediata**: Salva backup em `data/<video_id>/transcript_original.json` e oferece botão de restauração instantânea `⏪ Restaurar Transcrição Original`.
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
-- **🧪 Suíte de 99 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (incluindo testes de quick editor, partial download, audio mixer, translator, face tracker e export kit).
+- **🎨 Modernização de Design System & Ergonomia Visual Streamlit (`core/ui_theme.py`, `app.py`, `.streamlit/config.toml`, `tests/test_ui_theme.py`)**:
+  - **Design System Dark Studio**: Tokens CSS profissionais, suporte a Glassmorphism, paleta personalizada (Slate `#090d16`, Indigo `#6366f1`, Pink Neon `#ec4899`, Emerald `#10b981`), fontes *Plus Jakarta Sans* e *JetBrains Mono*.
+  - **Componentes Ergonômicos**: Stepper interativo de fluxo no topo (`render_workflow_stepper`), badges semânticos de status (`render_status_badge`), headers estilizados e cards de métricas de alta legibilidade.
+  - **Prevenção de Sobrecarga Cognitiva**: Navegação suave e fluida reduzindo atrito e fadiga de scroll.
+- **🌐 Otimização e Resiliência em Downloads da Web & Portais Jornalísticos (`core/extractor.py`, `tests/test_web_downloads.py`)**:
+  - Sanitização automática de parâmetros `yt-dlp` conflitantes para páginas web e portais de notícias (ex: G1, Globo, portais jornalísticos, sites corporativos).
+  - Remoção inteligente de flags de legendas incompatíveis (`--write-subs`, `subtitleslangs`) com fallback automático para extração direta de streams HLS/m3u8, user-agents modernos e impersonate de browsers, eliminando erros de download em 100% dos testes.
+- **🧪 Suíte de 110 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (incluindo testes de quick editor, partial download, audio mixer, translator, face tracker, proportional split screen, headline drawer, ui theme, web downloads e export kit).
 
 ---
 

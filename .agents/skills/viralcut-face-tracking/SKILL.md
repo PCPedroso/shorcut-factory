@@ -45,3 +45,22 @@ Para enquadramento individual de um orador:
   - Margem Estreita (Close-up Máximo): `1.30`
   - Margem Equilibrada (Busto & Rosto - Padrão): `1.55`
   - Margem Ampla (Plano Médio): `1.85`
+
+---
+
+## 4. Enquadramento Proporcional Estrito em Split Screen (`extract_proportional_crop`)
+
+Para layouts divididos (Split Screen 9:16) com slots de proporções variáveis (por exemplo, ao aplicar margens desfocadas de 0% a 20%):
+
+1. **Prevenção de Distorção Anamórfica**:
+   - Nunca utilizar relações de aspecto fixas pré-concebidas (como `1.125`), pois quando a altura do slot é reduzida por margens de blur (ex: de 960px para 576px), a distorção anamórfica pode deformar e esticar a imagem horizontalmente em até 67%.
+   - Calcular a razão de aspecto exata do slot destino:
+     $$\text{slot\_aspect} = \frac{\text{target\_w}}{\text{target\_h}}$$
+2. **Cálculo da Janela de Corte**:
+   - Ajustar as dimensões de recorte (`crop_w`, `crop_h`) preservando estritamente `slot_aspect`:
+     - Se $\text{frame\_aspect} > \text{slot\_aspect}$: $\text{crop\_h} = \frac{H}{\text{zoom}}$, $\text{crop\_w} = \text{crop\_h} \times \text{slot\_aspect}$.
+     - Caso contrário: $\text{crop\_w} = \frac{W}{\text{zoom}}$, $\text{crop\_h} = \frac{\text{crop\_w}}{\text{slot\_aspect}}$.
+3. **Controle Bidirecional de Pan (`pan_x` e `pan_y`)**:
+   - `pan_x` $[-1.0, +1.0]$: Desloca o enquadramento horizontalmente (esquerda $\leftrightarrow$ direita).
+   - `pan_y` $[-1.0, +1.0]$: Desloca o enquadramento verticalmente (baixo $\leftrightarrow$ cima), permitindo manter os olhos do orador na linha dos terços sem cortes na cabeça ou tronco.
+

@@ -32,6 +32,8 @@ DEFAULT_SETTINGS = {
     "split_preset": "👈 Entrevistador(es) no Topo | 👉 Entrevistado na Base (Padrão Podpah/Flow)",
     "split_top_pan": -0.65,
     "split_bottom_pan": 0.65,
+    "split_top_pan_y": 0.0,
+    "split_bottom_pan_y": 0.0,
     "split_zoom": 1.15,
     "split_divider_color": "black",
     "split_divider_width": 4,

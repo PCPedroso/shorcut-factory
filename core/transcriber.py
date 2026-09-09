@@ -17,13 +17,15 @@ def extract_youtube_video_id(url_or_id: str) -> str:
     if not url_or_id:
         return ""
     clean = str(url_or_id).strip()
+    if clean.startswith(("web_", "local_", "ig_", "tt_", "tw_")):
+        return ""
     if len(clean) == 11 and "/" not in clean and "?" not in clean and "&" not in clean:
         return clean
     import re
     m = re.search(r"(?:v=|\/|youtu\.be\/|embed\/|live\/)([0-9A-Za-z_-]{11})", clean)
     if m:
         return m.group(1)
-    return clean
+    return ""
 
 
 def fetch_youtube_transcript(video_id: str, preferred_languages: list = None) -> dict:
