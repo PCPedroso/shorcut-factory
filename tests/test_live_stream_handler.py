@@ -115,25 +115,17 @@ class TestLiveStreamHandler(unittest.TestCase):
             self.assertIn('libmp3lame', call_args)
 
     @patch('yt_dlp.YoutubeDL')
-    @patch('subprocess.run')
-    def test_download_live_video_snapshot_with_time_slice(self, mock_subproc, mock_ydl_cls):
+    def test_download_live_video_snapshot_uses_yt_dlp(self, mock_ydl_cls):
+        """
+        A nova arquitetura usa yt-dlp com live_from_start=True para baixar toda a live
+        do início, em vez de manipular manualmente o manifesto HLS (sliding window).
+        Verifica que ydl.download() é chamado e que download_ranges é configurado
+        quando start_sec/end_sec são fornecidos.
+        """
         from core.video_processor import download_live_video_snapshot
 
-        mock_ydl = MagicMock()
-        mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
-        mock_ydl.extract_info.return_value = {
-            'formats': [{
-                'format_id': '270',
-                'height': 1080,
-                'protocol': 'm3u8_native',
-                'manifest_url': 'https://manifest.example.com/hls_variant.m3u8',
-                'url': 'https://manifest.example.com/stream270.m3u8'
-            }]
-        }
-
-        mock_proc = MagicMock()
-        mock_proc.returncode = 0
-        mock_subproc.return_value = mock_proc
+        mock_ydl_instance = MagicMock()
+        mock_ydl_cls.return_value.__enter__.return_value = mock_ydl_instance
 
         out_path = "scratch/test_live_video_mock.mp4"
         with patch('os.path.exists', side_effect=lambda p: True if p == out_path else False), \
@@ -145,13 +137,13 @@ class TestLiveStreamHandler(unittest.TestCase):
                 end_sec=90.0
             )
             self.assertEqual(res["path"], out_path)
-            mock_subproc.assert_called_once()
-            call_args = mock_subproc.call_args[0][0]
-            self.assertIn('-ss', call_args)
-            self.assertIn('60.0', call_args)
-            self.assertIn('-t', call_args)
-            self.assertIn('30.0', call_args)
-            self.assertIn('copy', call_args)
+            # Verifica que o yt-dlp foi invocado (nova arquitetura usa ydl.download)
+            mock_ydl_instance.download.assert_called_once_with(["https://youtu.be/live123"])
+            # Verifica que live_from_start foi configurado nas opções passadas ao construtor
+            ydl_call_kwargs = mock_ydl_cls.call_args[0][0]  # primeiro arg posicional = opts dict
+            self.assertTrue(ydl_call_kwargs.get('live_from_start'), "live_from_start deve ser True")
+            # Verifica que download_ranges foi configurado para o trecho solicitado
+            self.assertIn('download_ranges', ydl_call_kwargs, "download_ranges deve ser definido quando start/end são fornecidos")
 
 
 if __name__ == '__main__':
