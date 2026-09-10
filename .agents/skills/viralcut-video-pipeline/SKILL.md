@@ -71,4 +71,20 @@ ffmpeg -y -ss {start} -to {end} -i "{input_mp4}" \
 - **Limpeza de Versões Intermediárias**:
   - `cleanup_all_edited_versions(video_path, keep_path=...)`: Exclui versões anteriores editadas (`_trimmed`, `_snipped`, `_speed_...`, `_banner`, `_headline`, etc.), garantindo diretórios limpos e eliminando confusão no catálogo.
 
+---
+
+## 6. Motor Fast Live Snapshot para Transmissões Ao Vivo (`core/extractor.py` & `core/video_processor.py`)
+
+Para streams ao vivo do YouTube em andamento (`is_live: True`):
+
+1. **Prevenção de Gravação em Loop Contínuo:**
+   - O comportamento padrão de livestreams em downloaders mantém a conexão aberta gravando indefinidamente em tempo real (1.0x).
+   - O ViralCut contorna isso gerando uma playlist snapshot HLS com injeção mandatória de `#EXT-X-ENDLIST`.
+   - Isso instrui o FFmpeg a tratar a transmissão existente até aquele segundo como um arquivo completo e finito, finalizando o download na velocidade máxima da rede sem esperar a live continuar transmitindo.
+2. **Corte Direto de Vídeo via Stream Copy (`-c copy`):**
+   - Ao fatiar um trecho na Seção 3 (`start_sec` e `end_sec`), conecta diretamente na master manifest HLS (`manifest_url` / `hls_variant`) aplicando `-ss` e `-t` com `-c copy`, gerando o MP4 1080p cortado em menos de 25 segundos sem re-encoding.
+3. **Sanitização de Clientes:**
+   - O cliente `android` do YouTube não suporta streams HLS com `live_from_start`. Ele é automaticamente omitido em streams ao vivo para eliminar o erro `No video formats found!`.
+
+
 
