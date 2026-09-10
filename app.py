@@ -1731,7 +1731,9 @@ if show_sec1:
                             else:
                                 st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
                     else:
-                        st.button("🎥 Vídeo Já Pronto", disabled=True, key="btn_inc_top_video_done", use_container_width=True)
+                        if st.button("🎬 Assistir Vídeo Local", key="btn_inc_top_video_play", type="secondary", use_container_width=True, help="Acesse e reproduza o vídeo MP4 salvo nesta pasta."):
+                            st.session_state["show_top_video_preview"] = not st.session_state.get("show_top_video_preview", False)
+                            st.rerun()
 
                 with act_col2:
                     if comp_status["is_live"]:
@@ -1783,6 +1785,45 @@ if show_sec1:
 
                 with act_col4:
                     with st.popover("⚠️ Limpar e Recomeçar"):
+                        st.markdown("**Tem certeza que deseja apagar o cache local deste vídeo?**")
+                        st.caption("Isso removerá áudio, transcrição e cortes existentes para permitir baixar tudo do zero.")
+                        if st.button("🗑️ Confirmar Limpeza", key="btn_inc_confirm_clean", type="primary", use_container_width=True):
+                            import shutil
+                            try:
+                                shutil.rmtree(target_data_dir)
+                                st.session_state.clear()
+                                st.success("Cache do projeto limpo com sucesso!")
+                                st.rerun()
+                            except Exception as e_clean:
+                                st.error(f"Erro ao limpar pasta: {e_clean}")
+
+            # Prévia do vídeo existente se solicitado ou se ativo
+            if comp_status["has_video"] and os.path.exists(target_vfull) and (st.session_state.get("show_top_video_preview") or True):
+                with st.expander("🎬 Assistir Vídeo Original Identificado no Projeto", expanded=st.session_state.get("show_top_video_preview", False)):
+                    _col_v1, _col_v2 = st.columns([2.2, 1.2])
+                    with _col_v1:
+                        safe_display_video(target_vfull)
+                    with _col_v2:
+                        _v_res = get_video_resolution(target_vfull)
+                        _v_dur = get_video_duration(target_vfull)
+                        _v_sz = os.path.getsize(target_vfull) / (1024 * 1024)
+                        st.markdown("##### 📊 Metadados do Arquivo")
+                        st.markdown(f"- 📐 **Resolução**: `{_v_res}`\n- ⏱️ **Duração**: `{format_time_sec(_v_dur)}`\n- 💾 **Tamanho**: `{_v_sz:.1f} MB`\n- 📁 **Pasta**: `{target_check_id}`")
+                        if st.button("📂 Abrir Pasta no Computador", key="btn_open_folder_inc_top", use_container_width=True):
+                            open_in_file_explorer(target_vfull)
+                            st.toast("Pasta aberta no Windows Explorer!")
+                        with open(target_vfull, "rb") as _f_v_dl_top:
+                            st.download_button(
+                                label="📥 Baixar Arquivo MP4",
+                                data=_f_v_dl_top,
+                                file_name=f"{target_check_id}_video_full.mp4",
+                                mime="video/mp4",
+                                use_container_width=True,
+                                key="btn_dl_top_vfull"
+                            )
+                        if st.button("✂️ Recortar na Seção 3 ➔", key="btn_top_jump_sec3", type="primary", use_container_width=True):
+                            navigate_to_step("3")
+                            st.rerun()
                         st.caption("Isso excluirá os arquivos locais deste vídeo e refará o processamento do zero.")
                         if st.button("Confirmar Limpeza Total", type="primary", key="btn_confirm_wipe_top"):
                             for _f_del in [target_tr_file, target_audio_file, target_vfull, os.path.join(target_data_dir, "pautas.json"), os.path.join(target_data_dir, "shorts.json"), os.path.join(target_data_dir, "series.json")]:
@@ -2771,11 +2812,74 @@ if st.session_state.transcription_done:
     from core.transcriber import build_youtube_transcript_blocks, format_badge_time
     
     active_u_main = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-    v_id_main = get_video_id(active_u_main)
-    main_audio_path = os.path.join("data", v_id_main, "audio.mp3") if v_id_main else None
+    v_id_main = get_current_active_video_id(active_u_main) or get_video_id(active_u_main)
+    main_dir = os.path.join("data", v_id_main) if v_id_main else None
+    main_audio_path = os.path.join(main_dir, "audio.mp3") if main_dir else None
+    main_video_path = os.path.join(main_dir, "video_full.mp4") if main_dir else None
     yt_blocks = build_youtube_transcript_blocks(st.session_state.segments)
 
     if show_sec1:
+        # 🎬 Acesso ao Vídeo Completo Processado na Primeira Fase (Seção 1)
+        has_main_v = bool(main_video_path and os.path.exists(main_video_path) and os.path.getsize(main_video_path) > 10240)
+
+        with st.expander("🎬 Vídeo Processado na Seção 1 (Player & Arquivo Completo)", expanded=True):
+            if has_main_v:
+                _v_res = get_video_resolution(main_video_path)
+                _v_dur = get_video_duration(main_video_path)
+                _v_sz_mb = os.path.getsize(main_video_path) / (1024 * 1024)
+
+                col_v_left, col_v_right = st.columns([2.2, 1.2])
+                with col_v_left:
+                    st.markdown(f"##### 🎥 Reprodução do Vídeo Original ({_v_res})")
+                    safe_display_video(main_video_path)
+                with col_v_right:
+                    st.markdown("##### 📊 Metadados do Arquivo")
+                    st.markdown(f"""
+                    - 📐 **Resolução**: `{_v_res}`
+                    - ⏱️ **Duração**: `{format_time_sec(_v_dur)}`
+                    - 💾 **Tamanho**: `{_v_sz_mb:.1f} MB`
+                    - 📁 **Pasta**: `{v_id_main}`
+                    """)
+
+                    if st.button("📂 Abrir Pasta no Computador", key="btn_open_vfull_folder_s1", use_container_width=True):
+                        open_in_file_explorer(main_video_path)
+                        st.toast("Pasta aberta no Windows Explorer!")
+
+                    with open(main_video_path, "rb") as _f_v_main:
+                        st.download_button(
+                            label="📥 Baixar Arquivo de Vídeo (MP4)",
+                            data=_f_v_main,
+                            file_name=f"{v_id_main}_video_completo.mp4",
+                            mime="video/mp4",
+                            use_container_width=True,
+                            key="btn_dl_main_vfull_bottom"
+                        )
+
+                    if st.button("✂️ Ir para Recortes 9:16 (Seção 3) ➔", key="btn_jump_to_s3_from_vcard", type="primary", use_container_width=True):
+                        navigate_to_step("3")
+                        st.rerun()
+            else:
+                st.warning("⚠️ **Arquivo de vídeo MP4 ainda não baixado para esta pasta.** O áudio e a transcrição estão prontos.")
+                col_down_v1, col_down_v2 = st.columns([1.5, 1])
+                with col_down_v1:
+                    if st.button("⏬ Baixar Vídeo MP4 Completo Agora", key="btn_download_missing_v_s1", type="primary", use_container_width=True):
+                        with st.spinner("⏬ Baixando vídeo Full HD na pasta local..."):
+                            os.makedirs(main_dir, exist_ok=True)
+                            _vres = download_full_video(
+                                active_u_main,
+                                main_video_path,
+                                is_live=False,
+                                start_sec=parse_time_str(st.session_state.get("input_yt_slice_start", "")),
+                                end_sec=parse_time_str(st.session_state.get("input_yt_slice_end", ""))
+                            )
+                        if os.path.exists(main_video_path) and os.path.getsize(main_video_path) > 10240:
+                            st.success("🎥 Vídeo baixado com sucesso!")
+                            st.rerun()
+                        else:
+                            st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
+                with col_down_v2:
+                    st.caption("Ao baixar, você poderá assistir e cortar o vídeo com resolução máxima nesta mesma aba.")
+
         if main_audio_path and os.path.exists(main_audio_path) and os.path.getsize(main_audio_path) > 0:
             with st.expander("🎵 Faixa de Áudio Isolada do Vídeo Completo (MP3 de Alta Fidelidade)", expanded=False):
                 col_aud1, col_aud2 = st.columns([2.5, 1])

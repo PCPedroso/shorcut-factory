@@ -258,9 +258,17 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Injeção de `#EXT-X-ENDLIST` em Snapshot HLS**: Elimina o loop infinito do downloader (onde o `yt-dlp` continuava gravando indefinidamente em tempo real a 1x ao atingir o momento ao vivo), permitindo que o FFmpeg baixe todo o conteúdo já transmitido na velocidade máxima da conexão e finalize sozinho.
   - **Eliminação do Erro `No video formats found!`**: Sanitização automática de clientes yt-dlp em transmissões ao vivo (remoção do cliente `android` incompatível com HLS ao vivo).
   - **Recorte Direto de Vídeo 1080p via Stream Copy (`-c copy`)**: Baixa trechos cirúrgicos da master playlist HLS em poucos segundos sem re-encoding para a Seção 3 e para fatiamento de lives longas.
-  - **Performance Comprovada**: Download e conversão de mais de **45 minutos** de áudio MP3 192kbps em menos de **60 segundos** e vídeo 1080p em menos de **25 segundos** (contra 15 a 30+ minutos de espera e travamento anteriormente).
-- **🧪 Suíte de 114 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (incluindo testes de quick editor, partial download, audio mixer, translator, face tracker, proportional split screen, headline drawer, ui theme, web downloads, live stream snapshots e export kit).
+- **🎬 Acesso Imediato ao Vídeo Processado na Primeira Fase (Seção 1) (`app.py`, `tests/test_section1_video_access.py`)**:
+  - **Player de Vídeo Integrado na Ingestão**: Permite reproduzir o vídeo original completo (`video_full.mp4`) diretamente na aba da Seção 1 logo após o processamento, sem necessidade de navegar até a Seção 3 ou 4.
+  - **Painel Completo de Metadados**: Exibe resolução nativa (ex: `1920x1080 Full HD`, `1080x1920 9:16`), duração exata formatada (`HH:MM:SS`), tamanho em megabytes e pasta local do projeto.
+  - **Ações Rápidas sem Atrito**:
+    - `📥 Baixar Arquivo MP4`: Download direto do arquivo de vídeo processado do computador.
+    - `📂 Abrir Pasta no Windows Explorer`: Abertura instantânea da pasta do projeto no explorador de arquivos do Windows.
+    - `✂️ Ir Direto para Recortes (Seção 3) ➔`: Atalho de transição rápida para enquadramento e cortes.
+    - `⏬ Baixar Vídeo MP4 Completo Agora`: Botão em 1 clique para baixar o vídeo caso a ingestão inicial tenha focado apenas em áudio/transcrição (ex: lives longas).
+  - **Integração no Dashboard Modular de Topo**: Botão `🎬 Assistir Vídeo Local` no card de conteúdo existente do projeto para inspecionar vídeos já baixados imediatamente.
+- **🧪 Suíte de 126 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (incluindo testes de quick editor, partial download, audio mixer, translator, face tracker, proportional split screen, headline drawer, ui theme, web downloads, live stream snapshots, video format quality, incremental processing e section 1 video access).
 
 ---
 

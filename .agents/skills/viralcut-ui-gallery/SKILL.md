@@ -37,3 +37,6 @@ Este guia define as boas práticas de desenvolvimento de interface no `app.py` e
 5. **Navegação Progressiva (Workflow Stepper)**:
    - Topo da aplicação organizado por `render_workflow_stepper()` para eliminar fadiga de scroll.
    - Utilizar `navigate_to_step("X")` ao encaminhar fluxos entre etapas automaticamente.
+6. **Acesso Imediato ao Vídeo na Ingestão (Seção 1)**:
+   - Logo após o processamento inicial ou transcrição, disponibilizar card/expander de visualização do vídeo completo (`video_full.mp4`) com streaming nativo (`safe_display_video`), metadados (resolução, duração, tamanho) e botões diretos de download e abertura no Explorer, eliminando a necessidade de avançar para a Seção 3 apenas para conferir o material de origem.
+
