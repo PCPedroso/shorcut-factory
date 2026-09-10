@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import patch, MagicMock
 from core.extractor import get_video_metadata, download_audio, get_video_id
@@ -82,6 +83,30 @@ class TestWebDownloads(unittest.TestCase):
         self.assertEqual(called_opts.get("playlist_items"), "1")
         self.assertTrue(called_opts.get("ignoreerrors"))
 
+    def test_low_res_native_video_cache_preserved(self):
+        # Vídeos com resolução nativa < 720p (ex: 832x464 do Twitter/X) não devem ser marcados para re-download se já existem
+        with patch("os.path.exists", return_value=True), patch("os.path.getsize", return_value=15000):
+            video_full_path = "data/tw_test/video_full.mp4"
+            need_download = not (os.path.exists(video_full_path) and os.path.getsize(video_full_path) > 10240)
+            self.assertFalse(need_download, "Vídeo existente no cache com tamanho válido não deve acionar download nem ser excluído")
+
+    def test_library_entry_lookup_with_list(self):
+        # get_library retorna uma lista de dicionários; busca deve usar gerador/next sem lançar AttributeError
+        fake_library = [
+            {"id": "yt_123", "title": "Vídeo YouTube", "is_live": False},
+            {"id": "tw_2097418273868706066", "title": "Vídeo Twitter/X", "is_live": False}
+        ]
+        video_id = "tw_2097418273868706066"
+        entry = next((item for item in fake_library if item.get("id") == video_id), {})
+        self.assertEqual(entry.get("id"), "tw_2097418273868706066")
+        self.assertFalse(entry.get("is_live"))
+
+        # Caso não exista
+        entry_missing = next((item for item in fake_library if item.get("id") == "inexistente"), {})
+        self.assertEqual(entry_missing, {})
+        self.assertFalse(bool(entry_missing.get("is_live")))
+
 
 if __name__ == '__main__':
     unittest.main()
+

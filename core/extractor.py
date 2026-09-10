@@ -571,3 +571,122 @@ def download_audio(
     if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
         return {"path": output_path, "error": None}
     return {"path": None, "error": last_err or "Falha ao baixar áudio"}
+
+
+def get_video_components_status(video_id: str, data_dir: str = "data", remote_duration: float = None) -> dict:
+    """
+    Analisa os arquivos locais do vídeo em data/<video_id> e retorna um diagnóstico
+    completo e estruturado dos componentes existentes e faltantes.
+    """
+    import json
+    v_dir = os.path.join(data_dir, video_id) if video_id else None
+    res = {
+        "video_id": video_id,
+        "exists_dir": bool(v_dir and os.path.isdir(v_dir)),
+        "has_audio": False,
+        "audio_size_mb": 0.0,
+        "has_transcript": False,
+        "segments_count": 0,
+        "first_transcript_sec": None,
+        "last_transcript_sec": None,
+        "has_video": False,
+        "video_size_mb": 0.0,
+        "video_resolution": None,
+        "has_ai_analysis": False,
+        "pautas_count": 0,
+        "shorts_count": 0,
+        "is_live": False,
+        "missing_components": [],
+        "new_minutes_available": 0.0,
+        "can_process_incrementally": False
+    }
+    if not res["exists_dir"]:
+        res["missing_components"] = ["audio", "transcript", "video", "ai_analysis"]
+        return res
+
+    # 1. Metadados
+    meta_file = os.path.join(v_dir, "metadata.json")
+    if os.path.exists(meta_file):
+        try:
+            with open(meta_file, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+                res["is_live"] = bool(meta.get("is_live"))
+                if not remote_duration:
+                    remote_duration = meta.get("duration") or meta.get("duration_sec")
+        except Exception:
+            pass
+
+    # 2. Áudio
+    audio_path = os.path.join(v_dir, "audio.mp3")
+    if os.path.exists(audio_path) and os.path.getsize(audio_path) > 10240:
+        res["has_audio"] = True
+        res["audio_size_mb"] = round(os.path.getsize(audio_path) / (1024 * 1024), 2)
+    else:
+        res["missing_components"].append("audio")
+
+    # 3. Transcrição
+    tr_path = os.path.join(v_dir, "transcript.json")
+    if os.path.exists(tr_path) and os.path.getsize(tr_path) > 10:
+        try:
+            with open(tr_path, "r", encoding="utf-8") as f:
+                tr_data = json.load(f)
+                segs = tr_data.get("segments", [])
+                if segs:
+                    res["has_transcript"] = True
+                    res["segments_count"] = len(segs)
+                    res["first_transcript_sec"] = float(segs[0].get("start", 0.0))
+                    res["last_transcript_sec"] = float(segs[-1].get("end", 0.0))
+        except Exception:
+            pass
+    if not res["has_transcript"]:
+        res["missing_components"].append("transcript")
+
+    # 4. Vídeo
+    video_path = os.path.join(v_dir, "video_full.mp4")
+    if os.path.exists(video_path) and os.path.getsize(video_path) > 10240:
+        res["has_video"] = True
+        res["video_size_mb"] = round(os.path.getsize(video_path) / (1024 * 1024), 2)
+        try:
+            from core.video_processor import get_video_resolution
+            res["video_resolution"] = get_video_resolution(video_path)
+        except Exception:
+            pass
+    else:
+        res["missing_components"].append("video")
+
+    # 5. IA (Pautas e Shorts)
+    pautas_file = os.path.join(v_dir, "pautas.json")
+    if os.path.exists(pautas_file):
+        try:
+            with open(pautas_file, "r", encoding="utf-8") as f:
+                p_data = json.load(f)
+                res["pautas_count"] = len(p_data.get("pautas", []) if isinstance(p_data, dict) else p_data)
+        except Exception:
+            pass
+
+    shorts_file = os.path.join(v_dir, "shorts.json")
+    if os.path.exists(shorts_file):
+        try:
+            with open(shorts_file, "r", encoding="utf-8") as f:
+                res["shorts_count"] = len(json.load(f))
+        except Exception:
+            pass
+
+    if res["pautas_count"] > 0 or res["shorts_count"] > 0:
+        res["has_ai_analysis"] = True
+    else:
+        res["missing_components"].append("ai_analysis")
+
+    # 6. Minutos adicionais se for Live
+    if res["is_live"] and res["last_transcript_sec"] is not None and remote_duration:
+        try:
+            diff_sec = float(remote_duration) - float(res["last_transcript_sec"])
+            if diff_sec > 60:  # Mais de 1 minuto novo disponível
+                res["new_minutes_available"] = round(diff_sec / 60.0, 1)
+                res["missing_components"].append("new_live_minutes")
+        except Exception:
+            pass
+
+    res["can_process_incrementally"] = bool(res["has_transcript"] and len(res["missing_components"]) > 0)
+    return res
+

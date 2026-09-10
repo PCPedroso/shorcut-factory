@@ -77,14 +77,19 @@ ffmpeg -y -ss {start} -to {end} -i "{input_mp4}" \
 
 Para streams ao vivo do YouTube em andamento (`is_live: True`):
 
-1. **Prevenção de Gravação em Loop Contínuo:**
-   - O comportamento padrão de livestreams em downloaders mantém a conexão aberta gravando indefinidamente em tempo real (1.0x).
-   - O ViralCut contorna isso gerando uma playlist snapshot HLS com injeção mandatória de `#EXT-X-ENDLIST`.
-   - Isso instrui o FFmpeg a tratar a transmissão existente até aquele segundo como um arquivo completo e finito, finalizando o download na velocidade máxima da rede sem esperar a live continuar transmitindo.
-2. **Corte Direto de Vídeo via Stream Copy (`-c copy`):**
-   - Ao fatiar um trecho na Seção 3 (`start_sec` e `end_sec`), conecta diretamente na master manifest HLS (`manifest_url` / `hls_variant`) aplicando `-ss` e `-t` com `-c copy`, gerando o MP4 1080p cortado em menos de 25 segundos sem re-encoding.
-3. **Sanitização de Clientes:**
-   - O cliente `android` do YouTube não suporta streams HLS com `live_from_start`. Ele é automaticamente omitido em streams ao vivo para eliminar o erro `No video formats found!`.
+## 7. Estratégia de Qualidade Máxima para Mídias Sociais (`get_optimal_video_format`)
 
+Para evitar rebaixamento de qualidade ou perda de resolução em redes sociais:
 
+1. **Instagram (Reels, Stories, TV)**:
+   - Os vídeos verticais têm dimensões nativas de `1080x1920`.
+   - **Regra**: Nunca restringir com `[height<=1080]`, pois isso descartaria o Full HD vertical (height=1920) e forçaria o download para 540p com apenas ~350 kbps.
+   - **Formato Otimizado**: `bestvideo[width<=1920][height<=1920][ext=mp4]+bestaudio[ext=m4a]/bestvideo[width<=1920][height<=1920]+bestaudio/...`, garantindo 1080x1920 com bitrate de 1600+ kbps.
 
+2. **Twitter / X**:
+   - O Twitter disponibiliza arquivos progressivos MP4 via HTTPS (`http-10368`, `http-2176`, `http-832`) com bitrates originais de até 10+ Mbps.
+   - Paralelamente, fornece fluxos HLS adaptativos com bitrate severamente comprimido (1/3 a 1/4 da qualidade).
+   - **Regra**: Priorizar `best[ext=mp4][width<=1920][height<=1920]` para capturar o stream HTTP integral nativo de alta qualidade antes de recorrer a HLS fragmentado.
+
+3. **YouTube & Geral**:
+   - Dimensionamento Full HD equilibrado: `[width<=1920][height<=1920]`, cobrindo tanto 1920x1080 horizontal quanto 1080x1920 vertical (Shorts) sem rebaixamento acidental.

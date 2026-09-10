@@ -118,6 +118,66 @@ def extract_thumbnail_from_video(video_path: str, output_path: str = "temp_thumb
         return {"path": None, "error": str(exc)}
 
 
+def get_optimal_video_format(url: str) -> str:
+    """
+    Retorna a especificação de formato yt-dlp otimizada para a plataforma da URL,
+    garantindo máxima fidelidade visual (Full HD 1080p real e altos bitrates):
+    - Twitter/X: Prioriza streams MP4 HTTPS progressivos (bitrate de até 10+ Mbps)
+      em vez de fluxos adaptativos HLS com bitrate cortado pela metade.
+    - Instagram / TikTok: Permite dimensões verticais Full HD (1080x1920) evitando
+      o descarte forçado por [height<=1080] que rebaixava Reels para 540p.
+    - YouTube / Geral: Full HD 1080p horizontal (1920x1080) e vertical (Shorts 1080x1920),
+      com fallback robusto para qualquer formato disponível.
+    """
+    if not url:
+        return 'bestvideo[width<=1920][height<=1920]+bestaudio/bestvideo+bestaudio/best'
+
+    u_lower = str(url).lower()
+
+    # 1. Twitter / X (x.com / twitter.com)
+    # No Twitter/X, os arquivos estáticos MP4 via HTTPS (ex: http-10368, http-2176, http-832)
+    # possuem áudio + vídeo combinados com bitrate nativo muito superior aos streams HLS adaptativos.
+    if 'x.com' in u_lower or 'twitter.com' in u_lower or '/status/' in u_lower:
+        return (
+            'best[ext=mp4][width<=1920][height<=1920]/'
+            'best[ext=mp4]/'
+            'bestvideo[width<=1920][height<=1920]+bestaudio/'
+            'bestvideo+bestaudio/'
+            'best'
+        )
+
+    # 2. Instagram (Reels, Posts, Stories, TV)
+    # No Instagram, os vídeos verticais têm 1080x1920 (height=1920, width=1080).
+    # Usamos width<=1920 e height<=1920 para que o stream DASH 1080p seja selecionado
+    # em vez de ser descartado para 540p.
+    if 'instagram.com' in u_lower or 'instagr.am' in u_lower:
+        return (
+            'bestvideo[width<=1920][height<=1920][ext=mp4]+bestaudio[ext=m4a]/'
+            'bestvideo[width<=1920][height<=1920]+bestaudio/'
+            'best[ext=mp4][width<=1920][height<=1920]/'
+            'bestvideo+bestaudio/'
+            'best'
+        )
+
+    # 3. TikTok
+    if 'tiktok.com' in u_lower:
+        return (
+            'best[ext=mp4][width<=1920][height<=1920]/'
+            'bestvideo[width<=1920][height<=1920]+bestaudio/'
+            'best[width<=1920][height<=1920]/'
+            'best'
+        )
+
+    # 4. YouTube e Web Geral (Vídeos 16:9 1920x1080 e Shorts 9:16 1080x1920)
+    return (
+        'bestvideo[width<=1920][height<=1920][ext=mp4]+bestaudio[ext=m4a]/'
+        'bestvideo[width<=1920][height<=1920][vcodec^=avc1]+bestaudio/'
+        'bestvideo[width<=1920][height<=1920]+bestaudio/'
+        'bestvideo+bestaudio/'
+        'best'
+    )
+
+
 def download_live_video_snapshot(
     url: str,
     output_path: str = "temp_video.mp4",
@@ -148,8 +208,10 @@ def download_live_video_snapshot(
         from core.extractor import get_cookie_file, parse_time_str
         cookie_file = get_cookie_file()
 
+        format_spec = get_optimal_video_format(url)
+
         ydl_opts = {
-            'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080][vcodec^=avc1]+bestaudio/bestvideo[height<=1080]+bestaudio/bestvideo+bestaudio/best',
+            'format': format_spec,
             'outtmpl': output_path,
             'merge_output_format': 'mp4',
             'ffmpeg_location': os.path.dirname(FFMPEG_EXE) if FFMPEG_EXE else None,
@@ -230,8 +292,10 @@ def download_full_video(
         from core.extractor import get_cookie_file, parse_time_str
         cookie_file = get_cookie_file()
 
+        format_spec = get_optimal_video_format(url)
+
         base_opts = {
-            'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080][vcodec^=avc1]+bestaudio/bestvideo[height<=1080]+bestaudio/bestvideo+bestaudio/best',
+            'format': format_spec,
             'outtmpl': output_path,
             'merge_output_format': 'mp4',
             'ffmpeg_location': os.path.dirname(FFMPEG_EXE) if FFMPEG_EXE else None,
@@ -266,7 +330,7 @@ def download_full_video(
 
         attempts = [
             dict(base_opts),
-            dict(base_opts, format='bestvideo+bestaudio/best', live_from_start=True, hls_use_mpegts=True),
+            dict(base_opts, format='bestvideo[width<=1920][height<=1920]+bestaudio/bestvideo+bestaudio/best', live_from_start=True, hls_use_mpegts=True),
             dict(base_opts, live_from_start=True, hls_use_mpegts=True)
         ]
         if is_live:

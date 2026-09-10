@@ -48,9 +48,10 @@ importlib.reload(core.ui_theme)
 from core.extractor import (
     download_audio, get_video_metadata, get_video_id,
     clean_music_title, detect_music_category_suggestion,
-    parse_time_str, format_time_sec, format_elapsed_time
+    parse_time_str, format_time_sec, format_elapsed_time,
+    get_video_components_status
 )
-from core.transcriber import transcribe_audio, fetch_youtube_transcript
+from core.transcriber import transcribe_audio, fetch_youtube_transcript, append_incremental_transcript
 from core.analyzer import analyze_transcript, build_suggested_bundles, build_golden_rule_micro_cuts, normalize_time_mask
 from core.video_processor import (
     download_full_video, cut_video, get_video_resolution,
@@ -1641,15 +1642,164 @@ if show_sec1:
                 elif parsed_e is not None and parsed_s is not None and parsed_e <= parsed_s:
                     st.error("⚠️ O tempo final deve ser maior que o tempo inicial.")
     
+        # Identificação de corte de tempo ativo
+        active_slice_start = parse_time_str(st.session_state.get("input_yt_slice_start", ""))
+        active_slice_end = parse_time_str(st.session_state.get("input_yt_slice_end", ""))
+
+        # 🔍 Verificação Imediata de Conteúdo Existente no Projeto
+        check_vid = get_video_id(video_url) if video_url else None
+        target_check_id = None
+        if check_vid:
+            if active_slice_start is not None or active_slice_end is not None:
+                s_tag = f"{int(active_slice_start)}" if active_slice_start is not None else "0"
+                e_tag = f"{int(active_slice_end)}" if active_slice_end is not None else "end"
+                check_vid_sliced = f"{check_vid}_t_{s_tag}_{e_tag}"
+            else:
+                check_vid_sliced = check_vid
+            target_check_id = check_vid_sliced if (check_vid_sliced and os.path.exists(os.path.join("data", check_vid_sliced))) else check_vid
+
+        comp_status = get_video_components_status(target_check_id, data_dir="data") if target_check_id else None
+
+        if comp_status and (comp_status["has_transcript"] or comp_status["has_audio"] or comp_status["has_video"]):
+            # Sincroniza estado da sessão se ainda não carregado
+            if st.session_state.get("active_video_id") != target_check_id or not st.session_state.get("transcription_done"):
+                load_video_saved_artifacts(target_check_id)
+                st.session_state["active_video_id"] = target_check_id
+                st.session_state["video_url"] = video_url
+
+            target_data_dir = os.path.join("data", target_check_id)
+            target_vfull = os.path.join(target_data_dir, "video_full.mp4")
+            target_tr_file = os.path.join(target_data_dir, "transcript.json")
+            target_audio_file = os.path.join(target_data_dir, "audio.mp3")
+
+            with st.container():
+                st.markdown("### 📦 Conteúdo Existente Identificado no Projeto")
+                st.caption(f"📁 Diretório local: `data/{target_check_id}` | Transmissão ao vivo: {'🔴 Sim' if comp_status['is_live'] else '⚪ Não'}")
+
+                # Linha de métricas dos componentes
+                c_m1, c_m2, c_m3, c_m4 = st.columns(4)
+                with c_m1:
+                    if comp_status["has_audio"]:
+                        st.success(f"🎵 **Áudio Extraído**\n\n`{comp_status['audio_size_mb']} MB`")
+                    else:
+                        st.warning("🎵 **Áudio**\n\nNão baixado")
+                with c_m2:
+                    if comp_status["has_transcript"]:
+                        seg_txt = f"{comp_status['segments_count']} falas"
+                        if comp_status["last_transcript_sec"] is not None:
+                            seg_txt += f"\n\n`{format_time_sec(comp_status['first_transcript_sec'] or 0)} - {format_time_sec(comp_status['last_transcript_sec'])}`"
+                        st.success(f"📝 **Transcrição**\n\n{seg_txt}")
+                    else:
+                        st.warning("📝 **Transcrição**\n\nNão gerada")
+                with c_m3:
+                    if comp_status["has_video"]:
+                        res_str = f" ({comp_status['video_resolution']})" if comp_status['video_resolution'] else ""
+                        st.success(f"🎥 **Vídeo Original**\n\n`{comp_status['video_size_mb']} MB{res_str}`")
+                    else:
+                        st.info("🎥 **Vídeo Original**\n\nPendente / Sob demanda")
+                with c_m4:
+                    if comp_status["has_ai_analysis"]:
+                        ai_str = f"{comp_status['pautas_count']} pautas | {comp_status['shorts_count']} shorts"
+                        st.success(f"🧠 **Mineração IA**\n\n`{ai_str}`")
+                    else:
+                        st.info("🧠 **Mineração IA**\n\nPendente")
+
+                if comp_status["new_minutes_available"] > 0:
+                    st.warning(
+                        f"🔴 **Transmissão Ao Vivo em Continuidade**: A live continuou transmitindo no YouTube! "
+                        f"Há aproximadamente **+{comp_status['new_minutes_available']} novos minutos** "
+                        f"(a partir de `{format_time_sec(comp_status['last_transcript_sec'])}`) disponíveis para sincronização incremental."
+                    )
+
+                st.markdown("#### ⚡ Ações Modulares (Processar Apenas o que Falta):")
+                act_col1, act_col2, act_col3, act_col4 = st.columns(4)
+
+                with act_col1:
+                    if not comp_status["has_video"]:
+                        if st.button("🎥 Baixar Apenas Vídeo", key="btn_inc_top_video", type="primary", use_container_width=True, help="Baixa somente o arquivo de vídeo MP4 Full HD sem reprocessar áudio nem transcrição."):
+                            with st.spinner("⏬ Baixando vídeo Full HD na pasta local..."):
+                                _vres = download_full_video(
+                                    video_url,
+                                    target_vfull,
+                                    is_live=comp_status["is_live"],
+                                    start_sec=active_slice_start,
+                                    end_sec=active_slice_end
+                                )
+                            if os.path.exists(target_vfull):
+                                st.success("🎥 Vídeo baixado com sucesso!")
+                                st.rerun()
+                            else:
+                                st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
+                    else:
+                        st.button("🎥 Vídeo Já Pronto", disabled=True, key="btn_inc_top_video_done", use_container_width=True)
+
+                with act_col2:
+                    if comp_status["is_live"]:
+                        inc_label = "⏩ Sincronizar Novos Minutos" if comp_status["new_minutes_available"] > 0 else "🔄 Sincronizar Incremental"
+                        if st.button(inc_label, key="btn_inc_top_sync", use_container_width=True, help="Baixa apenas o áudio novo a partir do último segundo já transcrito, preservando intacto todo o histórico anterior."):
+                            _start_offset = float(comp_status["last_transcript_sec"] or 0.0)
+                            _tmp_audio = os.path.join(target_data_dir, f"audio_inc_{int(_start_offset)}.mp3")
+                            with st.spinner(f"🔴 Capturando novos minutos da live a partir de {format_time_sec(_start_offset)}..."):
+                                _inc_a_res = download_audio(
+                                    video_url,
+                                    output_path=_tmp_audio,
+                                    is_live=True,
+                                    start_sec=_start_offset,
+                                    end_sec=None
+                                )
+                            if _inc_a_res.get("path") and os.path.exists(_inc_a_res["path"]):
+                                with st.spinner(f"Transcrevendo trecho novo com Whisper ({model_size})..."):
+                                    _inc_tr = transcribe_audio(_tmp_audio, model_size=model_size, device=device_option, language="pt")
+                                if _inc_tr.get("transcript_segments"):
+                                    _merged = append_incremental_transcript(
+                                        target_tr_file,
+                                        _inc_tr["transcript_segments"],
+                                        start_offset_sec=_start_offset
+                                    )
+                                    st.session_state.full_text = _merged["full_text"]
+                                    st.session_state.segments = _merged["transcript_segments"]
+                                    st.session_state.transcription_done = True
+                                    if os.path.exists(_tmp_audio):
+                                        try:
+                                            os.remove(_tmp_audio)
+                                        except Exception:
+                                            pass
+                                    st.success(f"✅ Sincronizados {len(_inc_tr['transcript_segments'])} novos segmentos! Total: {len(_merged['transcript_segments'])} falas.")
+                                    st.rerun()
+                                else:
+                                    st.warning("Nenhum segmento novo detectado no trecho incremental.")
+                            else:
+                                st.error(f"Erro ao capturar novos minutos: {_inc_a_res.get('error')}")
+                    else:
+                        st.button("⚪ Live Desativada", disabled=True, key="btn_inc_top_no_live", use_container_width=True)
+
+                with act_col3:
+                    if comp_status["has_transcript"]:
+                        if st.button("🚀 Ir para Mineração de IA", key="btn_inc_top_sec2", use_container_width=True):
+                            st.session_state.transcription_done = True
+                            st.rerun()
+                    else:
+                        st.button("📝 Transcrição Pendente", disabled=True, key="btn_inc_top_wait_tr", use_container_width=True)
+
+                with act_col4:
+                    with st.popover("⚠️ Limpar e Recomeçar"):
+                        st.caption("Isso excluirá os arquivos locais deste vídeo e refará o processamento do zero.")
+                        if st.button("Confirmar Limpeza Total", type="primary", key="btn_confirm_wipe_top"):
+                            for _f_del in [target_tr_file, target_audio_file, target_vfull, os.path.join(target_data_dir, "pautas.json"), os.path.join(target_data_dir, "shorts.json"), os.path.join(target_data_dir, "series.json")]:
+                                if os.path.exists(_f_del):
+                                    try:
+                                        os.remove(_f_del)
+                                    except Exception:
+                                        pass
+                            st.session_state.transcription_done = False
+                            st.rerun()
+                st.divider()
+
         col_yt_b1, col_yt_b2 = st.columns([1.5, 1])
         with col_yt_b1:
             btn_process_yt = st.button("🚀 Processar Vídeo Online (Completo)", type="primary", key="btn_process_yt", use_container_width=True)
         with col_yt_b2:
             btn_audio_yt = st.button("🎵 Extrair Apenas Áudio (MP3)", key="btn_extract_audio_yt", use_container_width=True)
-    
-        # Identificação de corte de tempo ativo
-        active_slice_start = parse_time_str(st.session_state.get("input_yt_slice_start", ""))
-        active_slice_end = parse_time_str(st.session_state.get("input_yt_slice_end", ""))
     
         if btn_audio_yt:
             if not video_url:
@@ -1868,44 +2018,131 @@ if show_sec1:
                     if is_live_flag:
                         st.info("🔴 **Transmissão Ao Vivo (LIVE) Detectada!** O ViralCut capturará um **Live Snapshot acelerado** com o conteúdo transmitido até o momento atual.")
     
-                    # CACHE: Verifica se já temos a transcrição pronta
-                    if os.path.exists(transcript_file):
-                        st.success("✅ Cache encontrado! Carregando transcrição e histórico salvo...")
+                    # CACHE & COMPONENTES: Diagnóstico inteligente de partes existentes e faltantes
+                    _vfull_cache_path = os.path.join(data_dir, "video_full.mp4")
+                    comp_status = get_video_components_status(video_id, data_dir="data", remote_duration=v_dur)
+
+                    if comp_status["has_transcript"] or comp_status["has_audio"] or comp_status["has_video"]:
                         load_video_saved_artifacts(video_id)
-                        if is_live_flag:
-                            st.info("💡 **Dica de Live**: Como a transmissão continua no YouTube, você pode sincronizar novos minutos a qualquer momento.")
-                            if st.button("🔄 Sincronizar / Atualizar com o Momento Atual da Live", key="btn_sync_live_cache"):
-                                if os.path.exists(transcript_file):
-                                    os.remove(transcript_file)
-                                if os.path.exists(audio_path):
-                                    os.remove(audio_path)
-                                v_full_cache = os.path.join(data_dir, "video_full.mp4")
-                                if os.path.exists(v_full_cache):
-                                    os.remove(v_full_cache)
-                                st.rerun()
                         
-                        # Download automático do vídeo completo (se ainda não baixado)
-                        _vfull_cache_path = os.path.join(data_dir, "video_full.mp4")
-                        if not is_live_flag and not os.path.exists(_vfull_cache_path):
-                            import time
-                            _t_vcache_start = time.time()
-                            with st.spinner("⏳ Baixando vídeo (ou trecho) em 1080p para habilitar o Recorte Final..."):
-                                download_full_video(
-                                    video_url,
-                                    _vfull_cache_path,
-                                    is_live=False,
-                                    start_sec=active_slice_start,
-                                    end_sec=active_slice_end
-                                )
-                            _t_vcache_elapsed = time.time() - _t_vcache_start
-                            if os.path.exists(_vfull_cache_path):
-                                _sz_mb = os.path.getsize(_vfull_cache_path) / (1024 * 1024)
-                                _res = get_video_resolution(_vfull_cache_path)
-                                st.success(f"🎥 Vídeo baixado em ⏱️ **{format_elapsed_time(_t_vcache_elapsed)}** ({_sz_mb:.1f} MB, {_res}) — pronto para recorte!")
-                        elif os.path.exists(_vfull_cache_path):
-                            _sz_mb = os.path.getsize(_vfull_cache_path) / (1024 * 1024)
-                            _res = get_video_resolution(_vfull_cache_path)
-                            st.info(f"🎥 Vídeo já no cache ({_sz_mb:.1f} MB, {_res}) — pronto para recorte.")
+                        st.markdown("### 📦 Conteúdo Existente Identificado no Projeto")
+                        st.caption(f"📁 Diretório local: `data/{video_id}` | Transmissão ao vivo: {'🔴 Sim' if comp_status['is_live'] else '⚪ Não'}")
+                        
+                        # Dashboard de componentes
+                        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+                        with m_col1:
+                            if comp_status["has_audio"]:
+                                st.success(f"🎵 **Áudio Extraído**\n\n`{comp_status['audio_size_mb']} MB`")
+                            else:
+                                st.warning("🎵 **Áudio**\n\nNão baixado")
+                        with m_col2:
+                            if comp_status["has_transcript"]:
+                                seg_info = f"{comp_status['segments_count']} falas"
+                                if comp_status["last_transcript_sec"] is not None:
+                                    seg_info += f" ({format_time_sec(comp_status['first_transcript_sec'] or 0)} - {format_time_sec(comp_status['last_transcript_sec'])})"
+                                st.success(f"📝 **Transcrição**\n\n`{seg_info}`")
+                            else:
+                                st.warning("📝 **Transcrição**\n\nNão gerada")
+                        with m_col3:
+                            if comp_status["has_video"]:
+                                res_label = f" ({comp_status['video_resolution']})" if comp_status['video_resolution'] else ""
+                                st.success(f"🎥 **Vídeo Original**\n\n`{comp_status['video_size_mb']} MB{res_label}`")
+                            else:
+                                st.info("🎥 **Vídeo Original**\n\nPendente / Sob demanda")
+                        with m_col4:
+                            if comp_status["has_ai_analysis"]:
+                                ai_info = f"{comp_status['pautas_count']} pautas | {comp_status['shorts_count']} shorts"
+                                st.success(f"🧠 **Mineração IA**\n\n`{ai_info}`")
+                            else:
+                                st.info("🧠 **Mineração IA**\n\nPendente")
+
+                        if comp_status["new_minutes_available"] > 0:
+                            st.warning(
+                                f"🔴 **Transmissão Ao Vivo em Continuidade**: A live continuou transmitindo no YouTube! "
+                                f"Há aproximadamente **+{comp_status['new_minutes_available']} novos minutos** "
+                                f"(a partir de `{format_time_sec(comp_status['last_transcript_sec'])}`) disponíveis para sincronização incremental."
+                            )
+
+                        st.markdown("#### ⚡ Ações Modulares (Processar Apenas o que Falta):")
+                        act_col1, act_col2, act_col3, act_col4 = st.columns(4)
+
+                        with act_col1:
+                            if not comp_status["has_video"]:
+                                if st.button("🎥 Baixar Apenas Vídeo", key="btn_inc_download_video", use_container_width=True, help="Baixa somente o arquivo de vídeo MP4 Full HD sem reprocessar áudio nem transcrição."):
+                                    with st.spinner("⏬ Baixando vídeo Full HD na pasta local..."):
+                                        _vres = download_full_video(
+                                            video_url,
+                                            _vfull_cache_path,
+                                            is_live=comp_status["is_live"],
+                                            start_sec=active_slice_start,
+                                            end_sec=active_slice_end
+                                        )
+                                    if os.path.exists(_vfull_cache_path):
+                                        st.success("🎥 Vídeo baixado com sucesso!")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
+                            else:
+                                st.button("🎥 Vídeo Já Pronto", disabled=True, key="btn_inc_video_done", use_container_width=True)
+
+                        with act_col2:
+                            if comp_status["is_live"]:
+                                inc_btn_label = "⏩ Sincronizar Novos Minutos" if comp_status["new_minutes_available"] > 0 else "🔄 Sincronizar Incremental"
+                                if st.button(inc_btn_label, key="btn_inc_sync_live", use_container_width=True, help="Baixa apenas o áudio novo a partir do último segundo já transcrito, preservando intacto todo o histórico anterior."):
+                                    _start_offset = float(comp_status["last_transcript_sec"] or 0.0)
+                                    _tmp_inc_audio = os.path.join(data_dir, f"audio_inc_{int(_start_offset)}.mp3")
+                                    with st.spinner(f"🔴 Capturando novos minutos da live a partir de {format_time_sec(_start_offset)}..."):
+                                        _inc_a_res = download_audio(
+                                            video_url,
+                                            output_path=_tmp_inc_audio,
+                                            is_live=True,
+                                            start_sec=_start_offset,
+                                            end_sec=None
+                                        )
+                                    if _inc_a_res.get("path") and os.path.exists(_inc_a_res["path"]):
+                                        with st.spinner(f"Transcrevendo trecho novo com Whisper ({model_size})..."):
+                                            _inc_tr = transcribe_audio(_tmp_inc_audio, model_size=model_size, device=device_option, language="pt")
+                                        if _inc_tr.get("transcript_segments"):
+                                            _merged = append_incremental_transcript(
+                                                transcript_file,
+                                                _inc_tr["transcript_segments"],
+                                                start_offset_sec=_start_offset
+                                            )
+                                            st.session_state.full_text = _merged["full_text"]
+                                            st.session_state.segments = _merged["transcript_segments"]
+                                            st.session_state.transcription_done = True
+                                            if os.path.exists(_tmp_inc_audio):
+                                                try:
+                                                    os.remove(_tmp_inc_audio)
+                                                except Exception:
+                                                    pass
+                                            st.success(f"✅ Sincronizados {len(_inc_tr['transcript_segments'])} novos segmentos! Total: {len(_merged['transcript_segments'])} falas.")
+                                            st.rerun()
+                                        else:
+                                            st.warning("Nenhum segmento novo detectado no trecho incremental.")
+                                    else:
+                                        st.error(f"Erro ao capturar novos minutos: {_inc_a_res.get('error')}")
+                            else:
+                                st.button("⚪ Live Desativada", disabled=True, key="btn_inc_no_live", use_container_width=True)
+
+                        with act_col3:
+                            if comp_status["has_transcript"]:
+                                st.button("🚀 Avançar p/ Seção 2", key="btn_inc_go_sec2", use_container_width=True, help="O áudio e a transcrição já estão prontos. Prossiga para a análise de pautas e cortes virais.")
+                            else:
+                                st.button("📝 Transcrição Pendente", disabled=True, key="btn_inc_tr_wait", use_container_width=True)
+
+                        with act_col4:
+                            with st.popover("⚠️ Limpar e Recomeçar"):
+                                st.caption("Isso excluirá os arquivos locais deste vídeo e refará o processamento do zero.")
+                                if st.button("Confirmar Limpeza Total", type="primary", key="btn_confirm_wipe_cache_inc"):
+                                    for _f_del in [transcript_file, audio_path, _vfull_cache_path, os.path.join(data_dir, "pautas.json"), os.path.join(data_dir, "shorts.json"), os.path.join(data_dir, "series.json")]:
+                                        if os.path.exists(_f_del):
+                                            try:
+                                                os.remove(_f_del)
+                                            except Exception:
+                                                pass
+                                    st.rerun()
+                        st.divider()
                     else:
                         platform_label = "Instagram" if video_id.startswith("ig_") else ("TikTok" if video_id.startswith("tt_") else "YouTube/Web")
                         st.info(f"Iniciando extração do vídeo ({platform_label})...")
@@ -2030,6 +2267,24 @@ if show_sec1:
                                     _sz_mb = os.path.getsize(_vfull_path) / (1024 * 1024)
                                     _res = get_video_resolution(_vfull_path)
                                     st.success(f"🎥 Vídeo baixado em ⏱️ **{format_elapsed_time(_t_vpost_elapsed)}** ({_sz_mb:.1f} MB, {_res}) — pronto para recorte na Seção 3!")
+                            elif is_live_flag and not os.path.exists(_vfull_path):
+                                st.info("ℹ️ **Transmissão Ao Vivo (LIVE):** Áudio e transcrição prontos! Para maior agilidade, o vídeo será capturado sob demanda diretamente ao gerar cortes na Seção 3.")
+                                if st.button("⏬ Baixar Vídeo da Live Agora para a Pasta Local", key="btn_download_live_manual_fresh"):
+                                    with st.spinner("🔴 Baixando vídeo da live em alta velocidade..."):
+                                        _vres = download_full_video(
+                                            video_url,
+                                            _vfull_path,
+                                            is_live=True,
+                                            start_sec=active_slice_start,
+                                            end_sec=active_slice_end
+                                        )
+                                    if os.path.exists(_vfull_path):
+                                        _sz_mb = os.path.getsize(_vfull_path) / (1024 * 1024)
+                                        _res = get_video_resolution(_vfull_path)
+                                        st.success(f"🎥 Vídeo da live baixado com sucesso ({_sz_mb:.1f} MB, {_res})!")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Erro ao baixar vídeo da live: {_vres.get('error', 'Falha desconhecida')}")
     
     else:
         # 💻 Modo Arquivo de Vídeo Local do Computador (Suporte a 1 ou 2 vídeos)
@@ -4935,20 +5190,9 @@ if st.session_state.transcription_done:
                     safe_aspect_name = selected_aspect.replace(":", "-")
                     corte_output_path = os.path.join(data_dir, f"corte_{safe_aspect_name}.mp4")
                     
-                    # Detecta se o vídeo no cache é de baixa resolução (< 720p) e força o download em 1080p
-                    need_download = not os.path.exists(video_full_path)
-                    if os.path.exists(video_full_path):
-                        current_res = get_video_resolution(video_full_path)
-                        try:
-                            h = int(current_res.split('x')[1])
-                            if h < 720:
-                                st.info(f"🔄 Cache antigo detectado em baixa resolução ({current_res}). Baixando automaticamente em 1080p Full HD...")
-                                if os.path.exists(video_full_path):
-                                    os.remove(video_full_path)
-                                need_download = True
-                        except Exception:
-                            pass
-    
+                    # Verifica se o vídeo já existe no cache local com tamanho válido (> 10KB)
+                    need_download = not (os.path.exists(video_full_path) and os.path.getsize(video_full_path) > 10240)
+
                     if need_download:
                         import time
                         _t_vsec3_start = time.time()
@@ -4961,10 +5205,10 @@ if st.session_state.transcription_done:
                             except Exception:
                                 pass
                         if not _is_live_corte:
-                            _lib_entry = get_library().get(video_id, {})
+                            _lib_entry = next((item for item in get_library() if item.get("id") == video_id), {})
                             _is_live_corte = bool(_lib_entry.get("is_live"))
 
-                        _sp_v3_msg = "🔴 Capturando vídeo da live em alta velocidade..." if _is_live_corte else "Baixando vídeo original na máxima resolução disponível (1080p Full HD)..."
+                        _sp_v3_msg = "🔴 Capturando vídeo da live em alta velocidade..." if _is_live_corte else "Baixando vídeo original na máxima resolução disponível..."
                         with st.spinner(_sp_v3_msg):
     
                             # Extrai intervalo de slice caso o vídeo seja fatiado (_t_start_end)

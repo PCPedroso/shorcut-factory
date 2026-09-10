@@ -311,4 +311,76 @@ def build_youtube_transcript_blocks(segments: list, min_duration: float = 5.8, t
     return blocks
 
 
+def append_incremental_transcript(existing_transcript_path: str, new_segments: list, start_offset_sec: float = 0.0) -> dict:
+    """
+    Mescla novos segmentos de áudio fatiado/incremental a uma transcrição existente,
+    aplicando o deslocamento temporal (start_offset_sec) e regravando o arquivo JSON.
+    Garante que nenhum segmento anterior seja perdido ou corrompido.
+    """
+    import json
+    if not os.path.exists(existing_transcript_path):
+        adjusted_new = []
+        for s in new_segments:
+            item = dict(s)
+            item["start"] = round(float(item.get("start", 0.0)) + start_offset_sec, 2)
+            item["end"] = round(float(item.get("end", 0.0)) + start_offset_sec, 2)
+            if "words" in item and isinstance(item["words"], list):
+                adj_words = []
+                for w in item["words"]:
+                    w_dict = dict(w)
+                    w_dict["start"] = round(float(w_dict.get("start", 0.0)) + start_offset_sec, 3)
+                    w_dict["end"] = round(float(w_dict.get("end", 0.0)) + start_offset_sec, 3)
+                    adj_words.append(w_dict)
+                item["words"] = adj_words
+            adjusted_new.append(item)
+        full_text = " ".join([seg.get("text", "").strip() for seg in adjusted_new if seg.get("text")])
+        res_data = {
+            "full_text": full_text.strip(),
+            "segments": adjusted_new,
+            "transcript_segments": adjusted_new,
+            "source": "Whisper Incremental"
+        }
+        with open(existing_transcript_path, "w", encoding="utf-8") as f:
+            json.dump(res_data, f, ensure_ascii=False, indent=4)
+        return res_data
+
+    with open(existing_transcript_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    existing_segs = data.get("segments", [])
+    adjusted_new = []
+    for s in new_segments:
+        item = dict(s)
+        item["start"] = round(float(item.get("start", 0.0)) + start_offset_sec, 2)
+        item["end"] = round(float(item.get("end", 0.0)) + start_offset_sec, 2)
+        if "words" in item and isinstance(item["words"], list):
+            adj_words = []
+            for w in item["words"]:
+                w_dict = dict(w)
+                w_dict["start"] = round(float(w_dict.get("start", 0.0)) + start_offset_sec, 3)
+                w_dict["end"] = round(float(w_dict.get("end", 0.0)) + start_offset_sec, 3)
+                adj_words.append(w_dict)
+            item["words"] = adj_words
+        adjusted_new.append(item)
+
+    combined = existing_segs + adjusted_new
+    combined.sort(key=lambda x: x.get("start", 0.0))
+
+    full_text = " ".join([seg.get("text", "").strip() for seg in combined if seg.get("text")])
+    data["segments"] = combined
+    data["full_text"] = full_text.strip()
+    data["incremental_updated_at"] = True
+
+    with open(existing_transcript_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+    return {
+        "full_text": full_text.strip(),
+        "transcript_segments": combined,
+        "segments": combined,
+        "source": data.get("source", "Whisper Incremental")
+    }
+
+
+
 

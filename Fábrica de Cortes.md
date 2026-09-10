@@ -201,8 +201,13 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 - **⏱️ Máscara Interativa & Normalização de Tempo com Milissegundos (`HH:MM:SS.ms`) (`core/analyzer.py`, `app.py`)**:
   - Injeção de máscara interativa JavaScript nos campos de tempo (`Tempo Inicial` e `Tempo Final`) formatando dígitos automaticamente no padrão `HH:MM:SS.ms` (com 2 dígitos de milissegundos) durante a digitação.
   - Normalizador Python de alta precisão (`normalize_time_mask`) e parser float (`parse_time_str_to_seconds`) com suporte integral a cortes no milissegundo exato (ex: `00:01:30.50`, `00:00:45.00`, `1000` -> `00:10:00.00`).
-- **📱 Ingestão Multi-Plataforma & Download Automático (Instagram, TikTok, YouTube & Web) (`core/extractor.py`, `core/video_processor.py`, `app.py`)**:
+- **📱 Ingestão Multi-Plataforma & Download em Alta Definição (Instagram, Twitter/X, TikTok, YouTube & Web) (`core/extractor.py`, `core/video_processor.py`, `app.py`)**:
   - Reconhecimento automático de links de múltiplas redes sociais: **Instagram Reels / Posts / TV** (`ig_...`), **TikTok** (`tt_...`), **Twitter/X** (`tw_...`), **YouTube** e links web genéricos.
+  - **Otimizador Inteligente de Qualidade por Plataforma (`get_optimal_video_format`)**:
+    - **Instagram**: Elimina o limitador `[height<=1080]` que rebaixava Reels verticais (1080x1920) forçadamente para 540p (350 kbps). Passa a selecionar streams DASH Full HD nativos (1080x1920) com bitrate de 1600+ kbps (mais de 4.5x a fidelidade de imagem anterior).
+    - **Twitter / X**: Prioriza streams MP4 HTTPS progressivos diretos (onde o Twitter fornece resoluções até 1080p e bitrates de até 10.368 kbps!) em vez de casar fluxos HLS adaptativos fragmentados que cortavam o bitrate para 1/4 da qualidade.
+    - **TikTok**: Garante suporte a vídeos verticais Full HD (1080x1920) com taxa de bits nativa sem compressão prévia.
+    - **YouTube & Web Geral**: Mantém 1080p Full HD estrito tanto na horizontal (1920x1080) quanto em Shorts verticais (1080x1920).
   - Suporte automático a arquivos de autenticação/cookies (`data/cookies.txt` ou `data/instagram_cookies.txt`) para extração sem restrições de bloqueio de bots.
   - Transcrição automática instantânea com Faster-Whisper em Português-BR para qualquer vídeo baixado das redes.
 - **🔥 Ganchos Virais & Duração Máxima Configurável para Shorts (`core/analyzer.py`, `app.py`)**:
