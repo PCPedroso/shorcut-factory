@@ -3001,6 +3001,8 @@ if st.session_state.transcription_done:
     
     active_u_main = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
     v_id_main = get_current_active_video_id(active_u_main) or get_video_id(active_u_main)
+    if v_id_main and not st.session_state.get("active_video_id"):
+        st.session_state["active_video_id"] = v_id_main
     main_dir = os.path.join("data", v_id_main) if v_id_main else None
     main_audio_path = os.path.join(main_dir, "audio.mp3") if main_dir else None
     main_video_path = os.path.join(main_dir, "video_full.mp4") if main_dir else None
@@ -3107,6 +3109,9 @@ if st.session_state.transcription_done:
                             st.error(f"❌ Erro: {_split_res['error']}")
                         else:
                             st.session_state["smart_split_result"] = _split_res
+                            st.session_state["_carousel_expander_open"] = True
+                            if v_id_main:
+                                st.session_state["active_video_id"] = v_id_main
                             st.success(
                                 f"✅ {_split_res['num_generated']} partes geradas em `{_split_out_dir}` "
                                 f"(duração total: {format_time_sec(_split_res['total_duration'])})"
@@ -3144,6 +3149,20 @@ if st.session_state.transcription_done:
                                         if st.button("📂 Abrir Pasta", key=f"open_split_folder_{_p['index']}", use_container_width=True):
                                             open_in_file_explorer(_p["path"])
                                             st.toast("Pasta aberta!")
+
+                            st.markdown("")
+                            if st.button(
+                                "✂️ Ir para Fábrica de Enquadramento 9:16 (Processar Partes em Massa) ➔",
+                                type="primary",
+                                key="btn_nav_s1_carrossel_to_s3",
+                                use_container_width=True,
+                                help="Abre a Seção 3 com o painel do Carrossel Inteligente aberto para aplicar enquadramento e efeitos em massa"
+                            ):
+                                st.session_state["_carousel_expander_open"] = True
+                                if v_id_main:
+                                    st.session_state["active_video_id"] = v_id_main
+                                navigate_to_step('3')
+                                st.rerun()
 
                     st.markdown("---")
                     st.caption("⏱️ **Capturar Momento Pausado no Player:**")
@@ -4071,6 +4090,30 @@ if st.session_state.transcription_done:
         render_section_header('3', 'Fábrica de Cortes (Recorte Final)', sec3_b_text, sec3_b_var)
         st.markdown("Baixe o vídeo real usando o trecho selecionado.")
         
+        # ── Banner de Carrossel Inteligente no topo da Seção 3 ──────────
+        _sec3_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+        _sec3_vid = get_current_active_video_id(_sec3_url) or get_video_id(_sec3_url) or st.session_state.get("active_video_id") or ""
+        if not _sec3_vid and st.session_state.get("smart_split_result"):
+            _ssr_p = st.session_state["smart_split_result"].get("parts", [])
+            if _ssr_p and os.path.exists(_ssr_p[0].get("path", "")):
+                _sec3_vid = os.path.basename(os.path.dirname(os.path.dirname(_ssr_p[0]["path"])))
+
+        _sec3_carrossel_dir = os.path.join("data", _sec3_vid, "carrossel") if _sec3_vid else None
+        _sec3_c_parts = [
+            f for f in os.listdir(_sec3_carrossel_dir)
+            if f.startswith("parte_") and f.endswith(".mp4") and os.path.getsize(os.path.join(_sec3_carrossel_dir, f)) > 10240
+        ] if (_sec3_carrossel_dir and os.path.isdir(_sec3_carrossel_dir)) else []
+
+        if _sec3_c_parts:
+            st.markdown(
+                f'<div style="background:linear-gradient(135deg,rgba(99,102,241,0.22),rgba(139,92,246,0.15));border:1.5px solid rgba(139,92,246,0.45);border-radius:10px;padding:12px 18px;margin-bottom:14px;">'
+                f'🎞️ <strong style="color:#c4b5fd;font-size:15px;">Carrossel Inteligente Ativo:</strong> '
+                f'<strong>{len(_sec3_c_parts)} partes</strong> prontas em <code>data/{_sec3_vid}/carrossel/</code><br>'
+                f'<span style="font-size:13px;color:#cbd5e1;">Configure o formato, enquadramento e efeitos abaixo. Ao final da página, use o painel roxo <b>🎞️ Carrossel Inteligente</b> para processar todas as partes em lote com 1 clique.</span>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
         if 'cut_ready_banner' in st.session_state and st.session_state.cut_ready_banner:
             st.success(st.session_state.cut_ready_banner)
         
@@ -5177,7 +5220,11 @@ if st.session_state.transcription_done:
         # Kit de Publicação Viral & Título (IA)
         # ─────────────────────────────────────────────────────────────────
         _active_url_cat = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-        _vid_id_cat = get_video_id(_active_url_cat) or ""
+        _vid_id_cat = get_current_active_video_id(_active_url_cat) or get_video_id(_active_url_cat) or st.session_state.get("active_video_id") or ""
+        if not _vid_id_cat and st.session_state.get("smart_split_result"):
+            _ssr_p = st.session_state["smart_split_result"].get("parts", [])
+            if _ssr_p and os.path.exists(_ssr_p[0].get("path", "")):
+                _vid_id_cat = os.path.basename(os.path.dirname(os.path.dirname(_ssr_p[0]["path"])))
     
         # Consulta se a minutagem e o formato específico já foram gerados anteriormente
         existing_cut = get_cut_entry(_vid_id_cat, start_time, end_time) if (_vid_id_cat and start_time and end_time) else None
@@ -5608,6 +5655,12 @@ if st.session_state.transcription_done:
         # 🎞️ CARROSSEL INTELIGENTE — Processamento em Massa das Partes
         # ══════════════════════════════════════════════════════════════════════
         _carrossel_dir = os.path.join("data", _vid_id_cat, "carrossel") if _vid_id_cat else None
+        if not _carrossel_dir or not os.path.isdir(_carrossel_dir):
+            _ssr = st.session_state.get("smart_split_result")
+            if _ssr and _ssr.get("parts") and os.path.exists(_ssr["parts"][0].get("path", "")):
+                _carrossel_dir = os.path.dirname(_ssr["parts"][0]["path"])
+                _vid_id_cat = os.path.basename(os.path.dirname(_carrossel_dir))
+
         _carrossel_parts = []
         if _carrossel_dir and os.path.isdir(_carrossel_dir):
             for _fname in sorted(os.listdir(_carrossel_dir)):
@@ -5620,7 +5673,7 @@ if st.session_state.transcription_done:
             st.markdown("---")
             with st.expander(
                 f"🎞️ Carrossel Inteligente — {len(_carrossel_parts)} parte(s) disponíveis para processamento em massa",
-                expanded=st.session_state.get("_carousel_expander_open", False)
+                expanded=st.session_state.get("_carousel_expander_open", True)
             ):
                 st.markdown(
                     f"<div style='background:linear-gradient(135deg,rgba(99,102,241,0.15),rgba(139,92,246,0.1));border:1px solid rgba(139,92,246,0.35);border-radius:10px;padding:12px 16px;margin-bottom:12px;'>"
