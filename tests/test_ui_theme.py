@@ -52,10 +52,12 @@ def test_navigate_to_step(monkeypatch):
     res3 = navigate_to_step("3")
     assert res3 is True
     assert fake_state["active_workflow_step"] == "3. ✂️ Fábrica de Enquadramento 9:16"
+    assert fake_state["workflow_stepper_radio"] == "3. ✂️ Fábrica de Enquadramento 9:16"
 
     res1 = navigate_to_step("ingestão")
     assert res1 is True
     assert fake_state["active_workflow_step"] == "1. 📥 Ingestão & Transcrição"
+    assert fake_state["workflow_stepper_radio"] == "1. 📥 Ingestão & Transcrição"
 
     res_inv = navigate_to_step("etapa_inexistente_999")
     assert res_inv is False

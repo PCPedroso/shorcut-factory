@@ -258,6 +258,10 @@ def render_workflow_stepper(default_step: str = None) -> str:
     if st.session_state["active_workflow_step"] not in WORKFLOW_STEPS:
         st.session_state["active_workflow_step"] = WORKFLOW_STEPS[0]
 
+    # Garante sincronização da chave do widget radio com active_workflow_step
+    if st.session_state.get("workflow_stepper_radio") != st.session_state["active_workflow_step"]:
+        st.session_state["workflow_stepper_radio"] = st.session_state["active_workflow_step"]
+
     st.markdown('<div class="viralcut-stepper-box">', unsafe_allow_html=True)
     
     current_index = WORKFLOW_STEPS.index(st.session_state["active_workflow_step"])
@@ -275,6 +279,7 @@ def render_workflow_stepper(default_step: str = None) -> str:
 
     if selected_step != st.session_state["active_workflow_step"]:
         st.session_state["active_workflow_step"] = selected_step
+        st.session_state["workflow_stepper_radio"] = selected_step
 
     return st.session_state["active_workflow_step"]
 
@@ -284,16 +289,23 @@ def navigate_to_step(step_name_or_number: str):
     Ex: navigate_to_step('3') ou navigate_to_step('Fábrica')
     """
     match_str = str(step_name_or_number).strip().lower()
+    target_step = None
     
     # Se for um dígito (ex: '1', '2', '3', '4'), busca pelo prefixo exato
     if match_str.isdigit():
         for step in WORKFLOW_STEPS:
             if step.startswith(f"{match_str}."):
-                st.session_state["active_workflow_step"] = step
-                return True
+                target_step = step
+                break
 
-    for step in WORKFLOW_STEPS:
-        if match_str in step.lower():
-            st.session_state["active_workflow_step"] = step
-            return True
+    if not target_step:
+        for step in WORKFLOW_STEPS:
+            if match_str in step.lower():
+                target_step = step
+                break
+
+    if target_step:
+        st.session_state["active_workflow_step"] = target_step
+        st.session_state["workflow_stepper_radio"] = target_step
+        return True
     return False

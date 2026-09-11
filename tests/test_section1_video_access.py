@@ -52,6 +52,27 @@ class TestSection1VideoAccess(unittest.TestCase):
         # 3. Intervalo resultante para corte na Seção 3
         self.assertTrue(session["final_start_time"] < session["final_end_time"])
 
+    def test_open_in_file_explorer_directory_and_file(self):
+        from app import open_in_file_explorer
+
+        with patch("os.path.exists", return_value=True), \
+             patch("os.path.isdir", return_value=True), \
+             patch("os.startfile") as mock_startfile:
+            res = open_in_file_explorer("data/test_vid")
+            self.assertTrue(res)
+            mock_startfile.assert_called_once()
+
+    def test_navigate_to_section3_syncs_stepper_radio(self):
+        from core.ui_theme import navigate_to_step
+        import streamlit as st
+
+        mock_state = {"active_workflow_step": "1. 📥 Ingestão & Transcrição", "workflow_stepper_radio": "1. 📥 Ingestão & Transcrição"}
+        with patch.object(st, "session_state", mock_state):
+            nav_ok = navigate_to_step("3")
+            self.assertTrue(nav_ok)
+            self.assertEqual(mock_state["active_workflow_step"], "3. ✂️ Fábrica de Enquadramento 9:16")
+            self.assertEqual(mock_state["workflow_stepper_radio"], "3. ✂️ Fábrica de Enquadramento 9:16")
+
 
 if __name__ == "__main__":
     unittest.main()

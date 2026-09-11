@@ -481,17 +481,40 @@ def get_file_bytes_loader(filepath: str):
 def open_in_file_explorer(target_path: str) -> bool:
     """
     Abre a pasta diretamente no Explorador de Arquivos do Windows (ou seleciona o arquivo).
+    Garante o uso de caminho absoluto e fallback de pasta para máxima confiabilidade.
     """
-    if not target_path or not os.path.exists(target_path):
+    if not target_path:
         return False
     try:
-        norm_p = os.path.normpath(target_path)
-        if os.path.isfile(norm_p):
-            subprocess.Popen(f'explorer /select,"{norm_p}"', shell=True)
-        else:
-            os.startfile(norm_p)
-        return True
+        abs_p = os.path.abspath(target_path)
+        if not os.path.exists(abs_p):
+            parent_d = os.path.dirname(abs_p)
+            if os.path.exists(parent_d):
+                abs_p = parent_d
+            else:
+                return False
+
+        if os.path.isdir(abs_p):
+            os.startfile(abs_p)
+            return True
+        elif os.path.isfile(abs_p):
+            try:
+                subprocess.Popen(f'explorer /select,"{abs_p}"')
+                return True
+            except Exception:
+                folder = os.path.dirname(abs_p)
+                if os.path.exists(folder):
+                    os.startfile(folder)
+                    return True
+        return False
     except Exception:
+        try:
+            folder = abs_p if os.path.isdir(abs_p) else os.path.dirname(abs_p)
+            if os.path.exists(folder):
+                os.startfile(folder)
+                return True
+        except Exception:
+            pass
         return False
 
 def format_time(seconds):
@@ -1978,19 +2001,38 @@ if show_sec1:
                         _v_sz = os.path.getsize(target_vfull) / (1024 * 1024)
                         st.markdown("##### 📊 Metadados do Arquivo")
                         st.markdown(f"- 📐 **Resolução**: `{_v_res}`\n- ⏱️ **Duração**: `{format_time_sec(_v_dur)}`\n- 💾 **Tamanho**: `{_v_sz:.1f} MB`\n- 📁 **Pasta**: `{target_check_id}`")
+                        _folder_to_open_top = os.path.abspath(target_data_dir) if (target_data_dir and os.path.exists(target_data_dir)) else (os.path.dirname(os.path.abspath(target_vfull)) if target_vfull else None)
                         if st.button("📂 Abrir Pasta no Computador", key="btn_open_folder_inc_top", use_container_width=True):
-                            open_in_file_explorer(target_vfull)
-                            st.toast("Pasta aberta no Windows Explorer!")
-                        with open(target_vfull, "rb") as _f_v_dl_top:
-                            st.download_button(
-                                label="📥 Baixar Arquivo MP4",
-                                data=_f_v_dl_top,
-                                file_name=f"{target_check_id}_video_full.mp4",
-                                mime="video/mp4",
+                            if open_in_file_explorer(_folder_to_open_top):
+                                st.toast("Pasta aberta no Windows Explorer!")
+                            else:
+                                st.warning("Não foi possível abrir a pasta no computador.")
+
+                        _orig_url_top = ""
+                        if video_url and (str(video_url).startswith("http://") or str(video_url).startswith("https://")):
+                            _orig_url_top = video_url
+                        else:
+                            _lib_item_top = next((item for item in get_library() if item.get("id") == target_check_id), {})
+                            _cand_url_top = _lib_item_top.get("url", "")
+                            if _cand_url_top and (str(_cand_url_top).startswith("http://") or str(_cand_url_top).startswith("https://")):
+                                _orig_url_top = _cand_url_top
+
+                        if _orig_url_top:
+                            st.link_button(
+                                "🌐 Abrir Vídeo Original (Fonte)",
+                                url=_orig_url_top,
                                 use_container_width=True,
-                                key="btn_dl_top_vfull"
+                                help=f"Abre a fonte original do vídeo ({_orig_url_top}) em uma nova aba do navegador."
                             )
-                        if st.button("✂️ Recortar na Seção 3 ➔", key="btn_top_jump_sec3", type="primary", use_container_width=True):
+                        else:
+                            if st.button("🎬 Abrir Vídeo Original no Player", key="btn_open_orig_v_player_top", use_container_width=True, help="Abre o arquivo de vídeo original no player padrão do Windows."):
+                                try:
+                                    os.startfile(os.path.abspath(target_vfull))
+                                    st.toast("Vídeo original aberto no player do Windows!")
+                                except Exception as _e_p:
+                                    st.warning(f"Não foi possível abrir o player: {_e_p}")
+
+                        if st.button("✂️ Ir para Recortes 9:16 (Seção 3) ➔", key="btn_top_jump_sec3", type="primary", use_container_width=True):
                             navigate_to_step("3")
                             st.rerun()
 
@@ -3066,19 +3108,36 @@ if _has_media_ready:
                     - 📁 **Pasta**: `{v_id_main}`
                     """)
 
+                    _folder_to_open_s1 = os.path.abspath(main_dir) if (main_dir and os.path.exists(main_dir)) else (os.path.dirname(os.path.abspath(main_video_path)) if main_video_path else None)
                     if st.button("📂 Abrir Pasta no Computador", key="btn_open_vfull_folder_s1", use_container_width=True):
-                        open_in_file_explorer(main_video_path)
-                        st.toast("Pasta aberta no Windows Explorer!")
+                        if open_in_file_explorer(_folder_to_open_s1):
+                            st.toast("Pasta aberta no Windows Explorer!")
+                        else:
+                            st.warning("Não foi possível abrir a pasta no computador.")
 
-                    with open(main_video_path, "rb") as _f_v_main:
-                        st.download_button(
-                            label="📥 Baixar Arquivo de Vídeo (MP4)",
-                            data=_f_v_main,
-                            file_name=f"{v_id_main}_video_completo.mp4",
-                            mime="video/mp4",
+                    _orig_url_s1 = ""
+                    if active_u_main and (str(active_u_main).startswith("http://") or str(active_u_main).startswith("https://")):
+                        _orig_url_s1 = active_u_main
+                    else:
+                        _lib_item_s1 = next((item for item in get_library() if item.get("id") == v_id_main), {})
+                        _cand_url_s1 = _lib_item_s1.get("url", "")
+                        if _cand_url_s1 and (str(_cand_url_s1).startswith("http://") or str(_cand_url_s1).startswith("https://")):
+                            _orig_url_s1 = _cand_url_s1
+
+                    if _orig_url_s1:
+                        st.link_button(
+                            "🌐 Abrir Vídeo Original (Fonte)",
+                            url=_orig_url_s1,
                             use_container_width=True,
-                            key="btn_dl_main_vfull_bottom"
+                            help=f"Abre a fonte original do vídeo ({_orig_url_s1}) em uma nova aba do navegador."
                         )
+                    else:
+                        if st.button("🎬 Abrir Vídeo Original no Player", key="btn_open_orig_v_player_s1", use_container_width=True, help="Abre o arquivo de vídeo original no player padrão do Windows."):
+                            try:
+                                os.startfile(os.path.abspath(main_video_path))
+                                st.toast("Vídeo original aberto no player do Windows!")
+                            except Exception as _e_p:
+                                st.warning(f"Não foi possível abrir o player: {_e_p}")
 
                     if st.button("✂️ Ir para Recortes 9:16 (Seção 3) ➔", key="btn_jump_to_s3_from_vcard", type="primary", use_container_width=True):
                         navigate_to_step("3")
