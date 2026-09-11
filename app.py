@@ -1750,8 +1750,15 @@ show_sec4 = workflow_step.startswith('4.') or workflow_step.startswith('🌐')
 
 # Seção 1
 if show_sec1:
-    sec1_b_text = 'Transcrito ✓' if st.session_state.get('transcription_done') else 'Aguardando Vídeo'
-    sec1_b_var = 'success' if st.session_state.get('transcription_done') else 'neutral'
+    if st.session_state.get('transcription_done'):
+        sec1_b_text = 'Transcrito ✓'
+        sec1_b_var = 'success'
+    elif st.session_state.get('video_ready'):
+        sec1_b_text = 'Vídeo Pronto ✓'
+        sec1_b_var = 'score'
+    else:
+        sec1_b_text = 'Aguardando Vídeo'
+        sec1_b_var = 'neutral'
     render_section_header('1', 'Ingestão e Transcrição do Vídeo', sec1_b_text, sec1_b_var)
     
     input_mode = st.radio(
@@ -2413,107 +2420,97 @@ if show_sec1:
                                     if len(langs) > 1:
                                         st.caption(f"🌐 **Idiomas detectados no YouTube ({len(langs)} faixas):** {', '.join([l['name'] for l in langs])}")
     
-                        # Se não obteve segmentos oficiais (ou for Instagram/TikTok/Web), processa áudio via Whisper local
-                        if not transcribe_res.get("transcript_segments"):
-                            if not base_vid.startswith(("ig_", "tt_", "tw_", "local_")):
-                                st.info("Legendas oficiais em português não encontradas no YouTube. Processando áudio via Whisper local (PT-BR)...")
-                            else:
-                                st.info(f"Processando áudio do {platform_label} via Whisper local (PT-BR)...")
-    
-                            if os.path.exists(audio_path):
-                                audio_res = {"path": audio_path, "error": None}
-                            else:
-                                _sp_msg = "🔴 Capturando Live Snapshot de áudio da transmissão ao vivo..." if is_live_flag else f"Baixando áudio do vídeo ({platform_label})..."
-                                with st.spinner(_sp_msg):
-                                    audio_res = download_audio(
-                                        video_url,
-                                        output_path=audio_path,
-                                        is_live=is_live_flag,
-                                        start_sec=active_slice_start,
-                                        end_sec=active_slice_end
-                                    )
-                                    
-                            if audio_res.get("error"):
-                                st.error(f"Erro no download: {audio_res['error']}")
-                                transcribe_res = {"error": audio_res["error"]}
-                            else:
-                                # Atualiza a duração se era desconhecida
-                                if os.path.exists(audio_path):
-                                    v_dur = get_video_duration(audio_path)
-                                    add_or_update_video_in_library(
-                                        video_id=video_id,
-                                        title=v_title,
-                                        upload_date_raw=v_date,
-                                        url=video_url,
-                                        thumbnail_url=v_thumb,
-                                        duration_sec=v_dur,
-                                        channel=meta.get("channel"),
-                                        is_live=is_live_flag
-                                    )
-    
-                                with st.spinner(f"Transcrevendo áudio com Whisper ({model_size}) em Português na {device_option.upper()}..."):
-                                    transcribe_res = transcribe_audio(
-                                        audio_res["path"], 
-                                        model_size=model_size, 
-                                        device=device_option,
-                                        language="pt"
-                                    )
-                                    
-                        if transcribe_res.get("error"):
-                            st.error(f"Erro na transcrição: {transcribe_res['error']}")
+                        # 2. Garante o download do áudio se ainda não existir
+                        if not os.path.exists(audio_path):
+                            _sp_msg = "🔴 Capturando Live Snapshot de áudio da transmissão ao vivo..." if is_live_flag else f"Baixando áudio do vídeo ({platform_label})..."
+                            with st.spinner(_sp_msg):
+                                audio_res = download_audio(
+                                    video_url,
+                                    output_path=audio_path,
+                                    is_live=is_live_flag,
+                                    start_sec=active_slice_start,
+                                    end_sec=active_slice_end
+                                )
                         else:
-                            st.success("Transcrição concluída com sucesso!")
+                            audio_res = {"path": audio_path, "error": None}
+
+                        if audio_res.get("error"):
+                            st.error(f"Erro no download do áudio: {audio_res['error']}")
+                        else:
+                            if os.path.exists(audio_path):
+                                v_dur = get_video_duration(audio_path)
+                                add_or_update_video_in_library(
+                                    video_id=video_id,
+                                    title=v_title,
+                                    upload_date_raw=v_date,
+                                    url=video_url,
+                                    thumbnail_url=v_thumb,
+                                    duration_sec=v_dur,
+                                    channel=meta.get("channel"),
+                                    is_live=is_live_flag
+                                )
+
+                        # 3. Download automático do vídeo completo/trecho (essencial para o player e recortes)
+                        _vfull_path = os.path.join(data_dir, "video_full.mp4")
+                        if not is_live_flag and not os.path.exists(_vfull_path):
+                            import time
+                            _t_vpost_start = time.time()
+                            with st.spinner("⏬ Baixando vídeo em 1080p Full HD para player e recortes..."):
+                                _vres = download_full_video(
+                                    video_url,
+                                    _vfull_path,
+                                    is_live=False,
+                                    start_sec=active_slice_start,
+                                    end_sec=active_slice_end
+                                )
+                            _t_vpost_elapsed = time.time() - _t_vpost_start
+                            if _vres.get("error"):
+                                st.warning(f"⚠️ Aviso no download do vídeo: {_vres['error']}")
+                            elif os.path.exists(_vfull_path):
+                                _sz_mb = os.path.getsize(_vfull_path) / (1024 * 1024)
+                                _res = get_video_resolution(_vfull_path)
+                                st.success(f"🎥 Vídeo baixado em ⏱️ **{format_elapsed_time(_t_vpost_elapsed)}** ({_sz_mb:.1f} MB, {_res})!")
+
+                        # 4. Trata transcrição: se veio oficial do YouTube salva imediatamente, senão mantém sob demanda
+                        if transcribe_res.get("transcript_segments"):
                             st.session_state.transcription_done = True
                             st.session_state.full_text = transcribe_res["full_text"]
                             st.session_state.segments = transcribe_res["transcript_segments"]
                             st.session_state.transcript_source = transcribe_res.get("source", "YouTube Oficial")
-                            
-                            # Salvar no cache
                             with open(transcript_file, "w", encoding="utf-8") as f:
                                 json.dump({
                                     "full_text": st.session_state.full_text,
                                     "segments": st.session_state.segments,
                                     "source": st.session_state.transcript_source
                                 }, f, ensure_ascii=False, indent=4)
-    
-                            # Download automático do vídeo completo/trecho logo após a transcrição
-                            _vfull_path = os.path.join(data_dir, "video_full.mp4")
-                            if not is_live_flag and not os.path.exists(_vfull_path):
-                                import time
-                                _t_vpost_start = time.time()
-                                with st.spinner("⏬ Baixando vídeo em 1080p Full HD (necessário para o Recorte Final)..."):
+                            st.success("⚡ Legendas oficiais do YouTube carregadas e salvas com sucesso!")
+                        else:
+                            st.session_state.transcription_done = False
+                            st.session_state.full_text = ""
+                            st.session_state.segments = []
+                            st.session_state.video_ready = True
+                            st.session_state.active_video_id = video_id
+                            st.success("🎉 **Vídeo e áudio prontos para visualização e recortes imediatos!**")
+                            st.info("💡 **Transcrição completa com Whisper mantida sob demanda:** O vídeo pode ser fatiado e exportado agora mesmo. A transcrição completa pode ser gerada a qualquer momento caso queira buscar palavras ou minerar pautas com IA.")
+
+                        if is_live_flag and not os.path.exists(_vfull_path):
+                            st.info("ℹ️ **Transmissão Ao Vivo (LIVE):** Áudio e transcrição prontos! Para maior agilidade, o vídeo será capturado sob demanda diretamente ao gerar cortes na Seção 3.")
+                            if st.button("⏬ Baixar Vídeo da Live Agora para a Pasta Local", key="btn_download_live_manual_fresh"):
+                                with st.spinner("🔴 Baixando vídeo da live em alta velocidade..."):
                                     _vres = download_full_video(
                                         video_url,
                                         _vfull_path,
-                                        is_live=False,
+                                        is_live=True,
                                         start_sec=active_slice_start,
                                         end_sec=active_slice_end
                                     )
-                                _t_vpost_elapsed = time.time() - _t_vpost_start
-                                if _vres.get("error"):
-                                    st.warning(f"⚠️ Vídeo baixado parcialmente ou com aviso em ⏱️ {format_elapsed_time(_t_vpost_elapsed)}: {_vres['error']}")
-                                elif os.path.exists(_vfull_path):
+                                if os.path.exists(_vfull_path):
                                     _sz_mb = os.path.getsize(_vfull_path) / (1024 * 1024)
                                     _res = get_video_resolution(_vfull_path)
-                                    st.success(f"🎥 Vídeo baixado em ⏱️ **{format_elapsed_time(_t_vpost_elapsed)}** ({_sz_mb:.1f} MB, {_res}) — pronto para recorte na Seção 3!")
-                            elif is_live_flag and not os.path.exists(_vfull_path):
-                                st.info("ℹ️ **Transmissão Ao Vivo (LIVE):** Áudio e transcrição prontos! Para maior agilidade, o vídeo será capturado sob demanda diretamente ao gerar cortes na Seção 3.")
-                                if st.button("⏬ Baixar Vídeo da Live Agora para a Pasta Local", key="btn_download_live_manual_fresh"):
-                                    with st.spinner("🔴 Baixando vídeo da live em alta velocidade..."):
-                                        _vres = download_full_video(
-                                            video_url,
-                                            _vfull_path,
-                                            is_live=True,
-                                            start_sec=active_slice_start,
-                                            end_sec=active_slice_end
-                                        )
-                                    if os.path.exists(_vfull_path):
-                                        _sz_mb = os.path.getsize(_vfull_path) / (1024 * 1024)
-                                        _res = get_video_resolution(_vfull_path)
-                                        st.success(f"🎥 Vídeo da live baixado com sucesso ({_sz_mb:.1f} MB, {_res})!")
-                                        st.rerun()
-                                    else:
-                                        st.error(f"Erro ao baixar vídeo da live: {_vres.get('error', 'Falha desconhecida')}")
+                                    st.success(f"🎥 Vídeo da live baixado com sucesso ({_sz_mb:.1f} MB, {_res})!")
+                                    st.rerun()
+                                else:
+                                    st.error(f"Erro ao baixar vídeo da live: {_vres.get('error', 'Falha desconhecida')}")
     
     else:
         # 💻 Modo Arquivo de Vídeo Local do Computador (Suporte a 1 ou 2 vídeos)
@@ -2996,17 +2993,24 @@ if show_sec1:
     
     
 
-if st.session_state.transcription_done:
+active_u_main = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+v_id_main = get_current_active_video_id(active_u_main) or get_video_id(active_u_main) or st.session_state.get("active_video_id") or ""
+if v_id_main and not st.session_state.get("active_video_id"):
+    st.session_state["active_video_id"] = v_id_main
+main_dir = os.path.join("data", v_id_main) if v_id_main else None
+main_audio_path = os.path.join(main_dir, "audio.mp3") if main_dir else None
+main_video_path = os.path.join(main_dir, "video_full.mp4") if main_dir else None
+
+_has_media_ready = (
+    st.session_state.get("transcription_done", False) or 
+    st.session_state.get("video_ready", False) or 
+    (main_video_path and os.path.exists(main_video_path) and os.path.getsize(main_video_path) > 10240) or
+    (main_audio_path and os.path.exists(main_audio_path) and os.path.getsize(main_audio_path) > 10240)
+)
+
+if _has_media_ready:
     from core.transcriber import build_youtube_transcript_blocks, format_badge_time
-    
-    active_u_main = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-    v_id_main = get_current_active_video_id(active_u_main) or get_video_id(active_u_main)
-    if v_id_main and not st.session_state.get("active_video_id"):
-        st.session_state["active_video_id"] = v_id_main
-    main_dir = os.path.join("data", v_id_main) if v_id_main else None
-    main_audio_path = os.path.join(main_dir, "audio.mp3") if main_dir else None
-    main_video_path = os.path.join(main_dir, "video_full.mp4") if main_dir else None
-    yt_blocks = build_youtube_transcript_blocks(st.session_state.segments)
+    yt_blocks = build_youtube_transcript_blocks(st.session_state.get("segments") or [])
 
     if show_sec1:
         # Captura parâmetros de tempo síncronos enviados pelo JavaScript do player
@@ -3097,6 +3101,22 @@ if st.session_state.transcription_done:
                     ):
                         _split_transcript = os.path.join(main_dir, "transcript.json")
                         _split_out_dir = os.path.join(main_dir, "carrossel")
+
+                        # Transcrição sob demanda para o carrossel se ainda não existir
+                        if not os.path.exists(_split_transcript) and main_audio_path and os.path.exists(main_audio_path):
+                            with st.spinner(f"🎙️ Transcrevendo áudio com Whisper ({model_size}) para identificar pausas naturais entre frases..."):
+                                _sp_tr = transcribe_audio(main_audio_path, model_size=model_size, device=device_option, language="pt")
+                                if not _sp_tr.get("error"):
+                                    with open(_split_transcript, "w", encoding="utf-8") as _stf:
+                                        json.dump({
+                                            "full_text": _sp_tr["full_text"],
+                                            "segments": _sp_tr["transcript_segments"],
+                                            "source": "Whisper Local (Carrossel)"
+                                        }, _stf, ensure_ascii=False, indent=4)
+                                    st.session_state.transcription_done = True
+                                    st.session_state.full_text = _sp_tr["full_text"]
+                                    st.session_state.segments = _sp_tr["transcript_segments"]
+
                         with st.spinner(f"⏳ Dividindo vídeo em {_split_n} partes inteligentes... Aguarde."):
                             _split_res = split_video_smart(
                                 input_path=main_video_path,
@@ -3249,43 +3269,69 @@ if st.session_state.transcription_done:
                             key="btn_dl_main_audio_full"
                         )
     
-        src_badge = st.session_state.get("transcript_source", "YouTube Oficial")
-        with st.expander(f"📜 Transcrição em Blocos (Estilo YouTube Oficial)", expanded=False):
-            col_search, col_cnt = st.columns([3, 1])
-            with col_search:
-                search_term = st.text_input("🔍 Pesquisar na transcrição:", placeholder="Ex: ministro, justiça, reforma, imposto...", key="yt_transcript_search")
-            
-            # Filtra blocos se houver termo de busca
-            displayed_blocks = yt_blocks
-            if search_term.strip():
-                displayed_blocks = [b for b in yt_blocks if search_term.lower() in b['text'].lower()]
-                with col_cnt:
-                    st.caption(f"🎯 **{len(displayed_blocks)}** blocos encontrados")
-            else:
-                with col_cnt:
-                    st.caption(f"Total: **{len(yt_blocks)}** blocos ({src_badge})")
-            
-            # Container nativo do Streamlit com rolagem e renderização visual limpa
-            with st.container(height=420):
-                for b in displayed_blocks:
-                    text_display = b['text']
-                    if search_term.strip():
-                        escaped = re.escape(search_term.strip())
-                        text_display = re.sub(
-                            f"({escaped})",
-                            r"<mark style='background-color:#ffe082;color:#111;font-weight:bold;padding:1px 4px;border-radius:3px;'>\1</mark>",
-                            text_display,
-                            flags=re.IGNORECASE
+        if yt_blocks:
+            src_badge = st.session_state.get("transcript_source", "YouTube Oficial")
+            with st.expander(f"📜 Transcrição em Blocos ({src_badge})", expanded=False):
+                col_search, col_cnt = st.columns([3, 1])
+                with col_search:
+                    search_term = st.text_input("🔍 Pesquisar na transcrição:", placeholder="Ex: ministro, justiça, reforma, imposto...", key="yt_transcript_search")
+                
+                # Filtra blocos se houver termo de busca
+                displayed_blocks = yt_blocks
+                if search_term.strip():
+                    displayed_blocks = [b for b in yt_blocks if search_term.lower() in b['text'].lower()]
+                    with col_cnt:
+                        st.caption(f"🎯 **{len(displayed_blocks)}** blocos encontrados")
+                else:
+                    with col_cnt:
+                        st.caption(f"Total: **{len(yt_blocks)}** blocos ({src_badge})")
+                
+                # Container nativo do Streamlit com rolagem e renderização visual limpa
+                with st.container(height=420):
+                    for b in displayed_blocks:
+                        text_display = b['text']
+                        if search_term.strip():
+                            escaped = re.escape(search_term.strip())
+                            text_display = re.sub(
+                                f"({escaped})",
+                                r"<mark style='background-color:#ffe082;color:#111;font-weight:bold;padding:1px 4px;border-radius:3px;'>\1</mark>",
+                                text_display,
+                                flags=re.IGNORECASE
+                            )
+                        
+                        line_html = (
+                            f"<div style='display:flex;align-items:flex-start;margin-bottom:10px;line-height:1.5;'>"
+                            f"<span style='display:inline-block;min-width:48px;background-color:#2b2b2b;color:#58a6ff;font-size:12px;font-weight:700;padding:2px 8px;border-radius:12px;margin-right:12px;text-align:center;letter-spacing:0.5px;'>{b['time_label']}</span>"
+                            f"<span style='color:#e6edf3;font-size:14px;flex:1;'>{text_display}</span>"
+                            f"</div>"
                         )
-                    
-                    # HTML em linha única sem recuo de espaços para não ser interpretado como código
-                    line_html = (
-                        f"<div style='display:flex;align-items:flex-start;margin-bottom:10px;line-height:1.5;'>"
-                        f"<span style='display:inline-block;min-width:48px;background-color:#2b2b2b;color:#58a6ff;font-size:12px;font-weight:700;padding:2px 8px;border-radius:12px;margin-right:12px;text-align:center;letter-spacing:0.5px;'>{b['time_label']}</span>"
-                        f"<span style='color:#e6edf3;font-size:14px;flex:1;'>{text_display}</span>"
-                        f"</div>"
-                    )
-                    st.markdown(line_html, unsafe_allow_html=True)
+                        st.markdown(line_html, unsafe_allow_html=True)
+        else:
+            with st.expander("📜 Transcrição Completa com Whisper (Sob Demanda)", expanded=False):
+                st.info("ℹ️ **Transcrição completa ainda não gerada para este vídeo.** O vídeo já está liberado para reproduzir, pausar, marcar tempos e fazer recortes manuais ou carrossel.")
+                st.caption("Deseja buscar palavras no texto ou liberar a Mineração IA na Seção 2? Gere a transcrição completa abaixo:")
+                if st.button("🎙️ Transcrever Vídeo Completo com Whisper Agora", key="btn_transcribe_s1_ondemand", type="primary"):
+                    if main_audio_path and os.path.exists(main_audio_path):
+                        with st.spinner(f"Transcrevendo áudio com Whisper ({model_size}) na {device_option.upper()}..."):
+                            _tr_res = transcribe_audio(main_audio_path, model_size=model_size, device=device_option, language="pt")
+                        if _tr_res.get("error"):
+                            st.error(f"Erro na transcrição: {_tr_res['error']}")
+                        else:
+                            st.session_state.transcription_done = True
+                            st.session_state.full_text = _tr_res["full_text"]
+                            st.session_state.segments = _tr_res["transcript_segments"]
+                            st.session_state.transcript_source = "Whisper Local"
+                            _t_file_s1 = os.path.join(main_dir, "transcript.json")
+                            with open(_t_file_s1, "w", encoding="utf-8") as _tf:
+                                json.dump({
+                                    "full_text": _tr_res["full_text"],
+                                    "segments": _tr_res["transcript_segments"],
+                                    "source": "Whisper Local"
+                                }, _tf, ensure_ascii=False, indent=4)
+                            st.success("🎉 Transcrição concluída com sucesso!")
+                            st.rerun()
+                    else:
+                        st.warning("⚠️ Arquivo de áudio não encontrado para transcrição.")
         
         if workflow_step.startswith('1.'):
             st.markdown('<br>', unsafe_allow_html=True)
@@ -3301,39 +3347,93 @@ if st.session_state.transcription_done:
         render_section_header('2', 'Inteligência Temática (Llama 3)', sec2_b_text, sec2_b_var)
         st.markdown("Use a Inteligência Artificial para extrair os tempos exatos para cortes.")
         
-        # Construir lista de chunks estruturada (com start/end em segundos)
-        def build_chunks_list(segments, chunk_seconds=60):
-            """Retorna lista de dicts com start, end, text para cada chunk de 1 minuto."""
-            if not segments:
-                return []
-            chunks = []
-            chunk_start = segments[0]['start']
-            chunk_texts = []
-            
-            for seg in segments:
-                chunk_texts.append(seg['text'].strip())
-                if seg['end'] - chunk_start >= chunk_seconds:
+        _v_id_s2 = get_current_active_video_id(video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or "") or st.session_state.get("active_video_id") or ""
+        _tr_file_s2 = os.path.join("data", _v_id_s2, "transcript.json") if _v_id_s2 else ""
+        _aud_file_s2 = os.path.join("data", _v_id_s2, "audio.mp3") if _v_id_s2 else ""
+
+        if not st.session_state.get("segments"):
+            if _tr_file_s2 and os.path.exists(_tr_file_s2):
+                try:
+                    with open(_tr_file_s2, "r", encoding="utf-8") as _f_s2:
+                        _d_s2 = json.load(_f_s2)
+                        st.session_state.segments = _d_s2.get("segments", [])
+                        st.session_state.full_text = _d_s2.get("full_text", "")
+                        st.session_state.transcription_done = True
+                except Exception:
+                    pass
+
+        if not st.session_state.get("segments"):
+            st.markdown(
+                f'<div style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.18), rgba(139, 92, 246, 0.12)); border: 1.5px solid rgba(139, 92, 246, 0.4); border-radius: 12px; padding: 24px; text-align: center; margin: 16px 0;">'
+                f'<div style="font-size: 2.2rem; margin-bottom: 8px;">🧠</div>'
+                f'<h3 style="margin: 0 0 8px 0; color: #f8fafc;">Transcrição Completa Necessária para Mineração IA</h3>'
+                f'<p style="color: #cbd5e1; max-width: 560px; margin: 0 auto 16px auto; font-size: 14px;">'
+                f'O Llama 3 precisa analisar o texto de todo o vídeo para ranquear os melhores momentos e assuntos. '
+                f'Gere a transcrição agora com o Whisper ou vá direto para a Seção 3 caso queira apenas cortar trechos manuais sem esperar.'
+                f'</p>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+            col_tr_act, col_skip_act = st.columns([1.8, 1.8])
+            with col_tr_act:
+                if _aud_file_s2 and os.path.exists(_aud_file_s2):
+                    if st.button("🎙️ Transcrever Vídeo Completo com Whisper Agora", type="primary", key="btn_transcribe_s2_ondemand", use_container_width=True):
+                        with st.spinner(f"Transcrevendo áudio com Whisper ({model_size}) na {device_option.upper()}..."):
+                            _tr_res = transcribe_audio(_aud_file_s2, model_size=model_size, device=device_option, language="pt")
+                        if _tr_res.get("error"):
+                            st.error(f"Erro na transcrição: {_tr_res['error']}")
+                        else:
+                            st.session_state.transcription_done = True
+                            st.session_state.full_text = _tr_res["full_text"]
+                            st.session_state.segments = _tr_res["transcript_segments"]
+                            with open(_tr_file_s2, "w", encoding="utf-8") as _f_s2_w:
+                                json.dump({
+                                    "full_text": st.session_state.full_text,
+                                    "segments": st.session_state.segments,
+                                    "source": "Whisper Local (Mineração IA)"
+                                }, _f_s2_w, ensure_ascii=False, indent=4)
+                            st.success("✅ Transcrição concluída! Liberando mineração...")
+                            st.rerun()
+                else:
+                    st.warning("⚠️ Áudio não encontrado. Processe o vídeo na Seção 1 primeiro.")
+            with col_skip_act:
+                if st.button("✂️ Pular para Fábrica de Enquadramento 9:16 ➔", use_container_width=True, key="btn_skip_s2_to_s3"):
+                    navigate_to_step('3')
+                    st.rerun()
+        else:
+            # Construir lista de chunks estruturada (com start/end em segundos)
+            def build_chunks_list(segments, chunk_seconds=60):
+                """Retorna lista de dicts com start, end, text para cada chunk de 1 minuto."""
+                if not segments:
+                    return []
+                chunks = []
+                chunk_start = segments[0]['start']
+                chunk_texts = []
+                
+                for seg in segments:
+                    chunk_texts.append(seg['text'].strip())
+                    if seg['end'] - chunk_start >= chunk_seconds:
+                        chunks.append({
+                            'start': chunk_start,
+                            'end': seg['end'],
+                            'text': ' '.join(chunk_texts)
+                        })
+                        chunk_start = seg['end']
+                        chunk_texts = []
+                
+                if chunk_texts:
                     chunks.append({
                         'start': chunk_start,
-                        'end': seg['end'],
+                        'end': segments[-1]['end'],
                         'text': ' '.join(chunk_texts)
                     })
-                    chunk_start = seg['end']
-                    chunk_texts = []
-            
-            if chunk_texts:
-                chunks.append({
-                    'start': chunk_start,
-                    'end': segments[-1]['end'],
-                    'text': ' '.join(chunk_texts)
-                })
-            return chunks
-    
-        chunks_list = build_chunks_list(st.session_state.segments)
-        chunked_transcript = "\n".join(
-            f"[{format_time(c['start'])} - {format_time(c['end'])}] {c['text']}"
-            for c in chunks_list
-        )
+                return chunks
+
+            chunks_list = build_chunks_list(st.session_state.segments)
+            chunked_transcript = "\n".join(
+                f"[{format_time(c['start'])} - {format_time(c['end'])}] {c['text']}"
+                for c in chunks_list
+            )
     
         # --- Seção 2: Seleção de Cortes e Compositor ---
         st.header("2. Seleção e Composição de Cortes")
@@ -5276,9 +5376,52 @@ if st.session_state.transcription_done:
                 if st.button("✨ Gerar Título e Textos com IA", use_container_width=True, type="secondary", help="Analisa o trecho exato do corte e gera Título Viral específico, Descrição contextualizada com CTA e Hashtags estratégicas."):
                     _transcript_path_meta = os.path.join("data", _vid_id_cat, "transcript.json") if _vid_id_cat else ""
                     if not os.path.exists(_transcript_path_meta):
-                        st.warning("⚠️ Transcrição não encontrada. Transcreva o vídeo na Seção 1 primeiro.")
-                    elif not start_time or not end_time:
+                        # Transcrição pontual do trecho sob demanda se não houver transcrição global
+                        _slice_tr_cand = os.path.join("data", _vid_id_cat, f"_cut_tr_{start_time.replace(':','-')}_{end_time.replace(':','-')}.json")
+                        if os.path.exists(_slice_tr_cand):
+                            _transcript_path_meta = _slice_tr_cand
+                        elif _vid_id_cat and start_time and end_time:
+                            _v_src_meta = os.path.join("data", _vid_id_cat, "video_full.mp4")
+                            _a_src_meta = os.path.join("data", _vid_id_cat, "audio.mp3")
+                            _input_media = _v_src_meta if os.path.exists(_v_src_meta) else _a_src_meta
+                            if _input_media and os.path.exists(_input_media):
+                                with st.spinner("🎙️ Transcrevendo áudio do trecho para IA (1 a 2 segundos)..."):
+                                    _slice_aud_tmp = os.path.join("data", _vid_id_cat, f"_slice_aud_{start_time.replace(':','-')}_{end_time.replace(':','-')}.mp3")
+                                    try:
+                                        import subprocess
+                                        from core.video_processor import _get_ffmpeg_cmd
+                                        _ff = _get_ffmpeg_cmd()
+                                        _s_sec = parse_time_str(start_time) or 0.0
+                                        _e_sec = parse_time_str(end_time)
+                                        _dur_sec = (_e_sec - _s_sec) if _e_sec else None
+                                        _ff_args = [_ff, "-y", "-ss", start_time]
+                                        if _dur_sec and _dur_sec > 0:
+                                            _ff_args.extend(["-t", str(_dur_sec)])
+                                        _ff_args.extend(["-i", _input_media, "-vn", "-acodec", "libmp3lame", "-q:a", "2", _slice_aud_tmp])
+                                        subprocess.run(_ff_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                        if os.path.exists(_slice_aud_tmp):
+                                            _slice_res = transcribe_audio(_slice_aud_tmp, model_size=model_size, device=device_option, language="pt")
+                                            if not _slice_res.get("error"):
+                                                for _sg in _slice_res.get("transcript_segments", []):
+                                                    _sg["start"] = _sg.get("start", 0.0) + _s_sec
+                                                    _sg["end"] = _sg.get("end", 0.0) + _s_sec
+                                                    for _w in _sg.get("words", []):
+                                                        _w["start"] = _w.get("start", 0.0) + _s_sec
+                                                        _w["end"] = _w.get("end", 0.0) + _s_sec
+                                                with open(_slice_tr_cand, "w", encoding="utf-8") as _stf:
+                                                    json.dump({
+                                                        "full_text": _slice_res["full_text"],
+                                                        "segments": _slice_res["transcript_segments"],
+                                                        "source": "Whisper Pontual (IA Meta)"
+                                                    }, _stf, ensure_ascii=False, indent=4)
+                                                _transcript_path_meta = _slice_tr_cand
+                                    except Exception:
+                                        pass
+
+                    if not start_time or not end_time:
                         st.warning("⚠️ Defina o tempo inicial e final do corte primeiro.")
+                    elif not os.path.exists(_transcript_path_meta):
+                        st.warning("⚠️ Transcrição do trecho não pôde ser gerada. Verifique se o vídeo possui áudio.")
                     else:
                         with st.spinner(f"Analisando falas de [{start_time} → {end_time}] e gerando kit viral com {ollama_model}..."):
                             import core.analyzer
@@ -5990,8 +6133,48 @@ if st.session_state.transcription_done:
                                 else:
                                     st.toast(f"✅ {res_cut_tr['count']} frase(s) traduzida(s) para {_target_tr_lang}!")
     
+                        _transcript_path_cut = os.path.join(data_dir, "transcript.json")
+                        # Se legendas estiverem ativas e não houver transcrição completa, transcreve pontualmente apenas este corte
+                        if subtitle_enabled and not os.path.exists(_transcript_path_cut):
+                            _slice_tr_tag = f"_cut_tr_{start_time.replace(':','-')}_{end_time.replace(':','-')}.json"
+                            _cut_tr_file = os.path.join(data_dir, _slice_tr_tag)
+                            if os.path.exists(_cut_tr_file):
+                                _transcript_path_cut = _cut_tr_file
+                            else:
+                                _slice_aud_tmp = os.path.join(data_dir, f"_slice_aud_{start_time.replace(':','-')}_{end_time.replace(':','-')}.mp3")
+                                try:
+                                    import subprocess
+                                    from core.video_processor import _get_ffmpeg_cmd
+                                    _ff = _get_ffmpeg_cmd()
+                                    _s_sec = parse_time_str(start_time) or 0.0
+                                    _e_sec = parse_time_str(end_time)
+                                    _dur_sec = (_e_sec - _s_sec) if _e_sec else None
+                                    _ff_args = [_ff, "-y", "-ss", start_time]
+                                    if _dur_sec and _dur_sec > 0:
+                                        _ff_args.extend(["-t", str(_dur_sec)])
+                                    _ff_args.extend(["-i", video_res["path"], "-vn", "-acodec", "libmp3lame", "-q:a", "2", _slice_aud_tmp])
+                                    subprocess.run(_ff_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                    if os.path.exists(_slice_aud_tmp):
+                                        with st.spinner(f"🎙️ Transcrevendo trecho do corte ({start_time} ➔ {end_time}) com Whisper (1 a 2s)..."):
+                                            _slice_res = transcribe_audio(_slice_aud_tmp, model_size=model_size, device=device_option, language="pt")
+                                        if not _slice_res.get("error"):
+                                            for _sg in _slice_res.get("transcript_segments", []):
+                                                _sg["start"] = _sg.get("start", 0.0) + _s_sec
+                                                _sg["end"] = _sg.get("end", 0.0) + _s_sec
+                                                for _w in _sg.get("words", []):
+                                                    _w["start"] = _w.get("start", 0.0) + _s_sec
+                                                    _w["end"] = _w.get("end", 0.0) + _s_sec
+                                            with open(_cut_tr_file, "w", encoding="utf-8") as _ctf:
+                                                json.dump({
+                                                    "full_text": _slice_res["full_text"],
+                                                    "segments": _slice_res["transcript_segments"],
+                                                    "source": "Whisper Pontual (Corte)"
+                                                }, _ctf, ensure_ascii=False, indent=4)
+                                            _transcript_path_cut = _cut_tr_file
+                                except Exception as _e_tr_c:
+                                    st.warning(f"Aviso na transcrição do corte: {_e_tr_c}")
+
                         with st.spinner(f"Renderizando corte [{start_time} → {end_time}] no formato {aspect_option}{extra_info}..."):
-                            _transcript_path_cut = os.path.join(data_dir, "transcript.json")
                             cut_res = cut_video(
                                 video_res["path"],
                                 start_time,
@@ -6508,15 +6691,27 @@ if st.session_state.transcription_done:
     
     
 
-# ── EMPTY STATE QUANDO TRANSCRIÇÃO NÃO ESTIVER CONCLUÍDA ───────────────
-if not st.session_state.transcription_done and (workflow_step.startswith('2.') or workflow_step.startswith('3.') or workflow_step.startswith('4.')):
+# ── EMPTY STATE QUANDO NENHUM VÍDEO FOI CARREGADO OU BAIXADO ───────────
+_active_chk_id = get_current_active_video_id(video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or "") or st.session_state.get("active_video_id") or ""
+_active_chk_dir = os.path.join("data", _active_chk_id) if _active_chk_id else ""
+_has_any_project_media = (
+    st.session_state.get("transcription_done", False) or
+    st.session_state.get("video_ready", False) or
+    bool(_active_chk_dir and os.path.isdir(_active_chk_dir) and (
+        os.path.exists(os.path.join(_active_chk_dir, "video_full.mp4")) or
+        os.path.exists(os.path.join(_active_chk_dir, "audio.mp3")) or
+        os.path.exists(os.path.join(_active_chk_dir, "cuts_catalog.json"))
+    ))
+)
+
+if not _has_any_project_media and (workflow_step.startswith('3.') or workflow_step.startswith('4.')):
     st.markdown(render_empty_state_html(
-        icon='🧠',
-        title='Transcrição Pendente',
-        description='Para minerar pautas com o Llama 3, gerar cortes 9:16 ou visualizar a galeria, conclua o download e a transcrição na Seção 1.'
+        icon='📥',
+        title='Nenhum Vídeo Processado',
+        description='Para gerar cortes 9:16 ou visualizar a galeria, insira e processe um vídeo na Seção 1 primeiro.'
     ), unsafe_allow_html=True)
     c_emp_back, _ = st.columns([1.6, 3])
     with c_emp_back:
-        if st.button('⬅️ Ir para Ingestão e Transcrição (Seção 1)', type='primary', use_container_width=True, key='btn_empty_back_to_s1'):
+        if st.button('⬅️ Ir para Ingestão e Processamento (Seção 1)', type='primary', use_container_width=True, key='btn_empty_back_to_s1'):
             navigate_to_step('1')
             st.rerun()
