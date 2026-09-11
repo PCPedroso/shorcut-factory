@@ -148,7 +148,35 @@ class TestHeadlineDrawer(unittest.TestCase):
         self.assertEqual(overlay.shape, (1920, 1080, 4))
         self.assertTrue(overlay[:, :, 3].max() > 0)
 
+    def test_apply_headline_with_start_offset(self):
+        from core.headline_drawer import apply_headline_to_video
+        from unittest.mock import patch, MagicMock
+        with patch("subprocess.run") as mock_run, \
+             patch("cv2.VideoCapture") as mock_vc, \
+             patch("os.path.exists", return_value=True), \
+             patch("os.path.getsize", return_value=1024), \
+             patch("os.rename"):
+            mock_cap = MagicMock()
+            mock_cap.isOpened.return_value = True
+            mock_cap.get.side_effect = [1080, 1920]
+            mock_vc.return_value = mock_cap
+            mock_run.return_value = MagicMock(returncode=0, stderr=b"")
+
+            res = apply_headline_to_video(
+                video_path="dummy.mp4",
+                text="TESTE DELAY",
+                start_offset_s=4.5,
+                output_path="dummy_out.mp4"
+            )
+            self.assertIsNone(res.get("error"))
+            self.assertEqual(res.get("start_offset_s"), 4.5)
+            # Check filter_complex contains enable='gte(t,4.500)'
+            called_cmd = mock_run.call_args[0][0]
+            fc_arg = called_cmd[called_cmd.index("-filter_complex") + 1]
+            self.assertIn("enable='gte(t,4.500)'", fc_arg)
+
 
 if __name__ == '__main__':
     unittest.main()
+
 

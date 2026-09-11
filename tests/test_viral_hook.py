@@ -7,6 +7,7 @@ from PIL import Image
 from core.quick_editor import (
     create_hook_badge_image,
     apply_hook_style_to_frame,
+    overlay_badge_on_frame,
     add_viral_hook_to_video,
     record_quick_edit,
     load_edit_history,
@@ -138,7 +139,35 @@ class TestViralHook(unittest.TestCase):
         self.assertEqual(res.get("hook_duration"), 4.0)
         self.assertEqual(res.get("style"), "noir")
         self.assertEqual(res.get("mode"), "teaser")
+        self.assertEqual(res.get("badge_y_pct"), 12.0)
         self.assertTrue(os.path.exists(out_path))
+
+    def test_overlay_badge_on_frame(self):
+        dummy_frame = np.full((720, 1280, 3), 100, dtype=np.uint8)
+        overlaid = overlay_badge_on_frame(
+            frame_rgb=dummy_frame,
+            badge_text="🔥 VEJA O QUE ELE DISSE...",
+            badge_style="gold_viral",
+            badge_y_pct=25.0
+        )
+        self.assertIsNotNone(overlaid)
+        self.assertEqual(overlaid.shape, (720, 1280, 3))
+        # O frame sobreposto deve ter sido modificado na região do badge
+        self.assertFalse(np.array_equal(dummy_frame, overlaid))
+
+    def test_create_hook_badge_with_all_presets(self):
+        for idx, preset_text in enumerate(HOOK_BADGE_PRESETS):
+            out_p = os.path.join(self.test_dir, f"badge_preset_{idx}.png")
+            res = create_hook_badge_image(
+                badge_text=preset_text,
+                badge_style="gold_viral",
+                video_width=1080,
+                video_height=1920,
+                output_png_path=out_p
+            )
+            self.assertIsNotNone(res)
+            self.assertTrue(os.path.exists(res))
+            self.assertTrue(os.path.getsize(res) > 0)
 
     def test_record_hook_edit_in_history(self):
         target_out = os.path.join(self.test_dir, "corte_com_gancho.mp4")
@@ -149,10 +178,13 @@ class TestViralHook(unittest.TestCase):
             video_path=self.dummy_video,
             action_name="🎣 Gancho Viral (Hook / Teaser)",
             details="Trecho: 10.0s a 14.0s (4.0s) | Estilo: Noir | Modo: Teaser",
-            output_path=target_out
+            output_path=target_out,
+            extra_info={"hook_duration": 4.0, "badge_y_pct": 14.0}
         )
 
         self.assertEqual(entry["action"], "🎣 Gancho Viral (Hook / Teaser)")
+        self.assertEqual(entry["extra_info"]["hook_duration"], 4.0)
+        self.assertEqual(entry["extra_info"]["badge_y_pct"], 14.0)
         history = load_edit_history(self.dummy_video)
         self.assertGreaterEqual(len(history), 1)
         self.assertEqual(history[0]["action"], "🎣 Gancho Viral (Hook / Teaser)")
@@ -160,3 +192,4 @@ class TestViralHook(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

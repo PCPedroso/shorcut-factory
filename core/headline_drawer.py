@@ -517,6 +517,8 @@ def generate_headline_preview(
 ) -> np.ndarray:
     """
     Gera uma prévia visual instantânea (RGB) da Headline sobreposta no frame exato do vídeo.
+    Se o vídeo tiver um gancho configurado e o timestamp_s estiver antes do término do gancho (start_offset_s),
+    o frame é exibido sem headline para refletir com fidelidade o início do vídeo.
     """
     if not video_path or not os.path.exists(video_path):
         return None
@@ -534,6 +536,11 @@ def generate_headline_preview(
     if not ret or frame is None:
         return None
 
+    cfg = config or {}
+    start_offset = float(cfg.get("start_offset_s", 0.0))
+    if start_offset > 0.05 and timestamp_s < start_offset and not cfg.get("force_headline_on_preview", False):
+        return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
     return draw_headline_on_frame(frame, text, config)
 
 
@@ -541,17 +548,26 @@ def apply_headline_to_video(
     video_path: str,
     text: str,
     config: dict = None,
-    output_path: str = None
+    output_path: str = None,
+    start_offset_s: float = 0.0
 ) -> dict:
     """
     Renderiza e queima a Headline diretamente no arquivo de vídeo com aceleração por GPU (NVENC).
     Pós-corte instantâneo sem necessitar de reprocessamento do vídeo do zero.
+    - start_offset_s: Se > 0, a Headline só aparece após esse tempo (ex: duração do Gancho Viral).
     """
     if not video_path or not os.path.exists(video_path):
         return {"path": None, "error": "Vídeo original não encontrado."}
 
     if not text or not text.strip():
         return {"path": None, "error": "Texto da Headline está vazio."}
+
+    cfg = config or {}
+    if start_offset_s <= 0.05 and "start_offset_s" in cfg:
+        try:
+            start_offset_s = float(cfg["start_offset_s"])
+        except Exception:
+            start_offset_s = 0.0
 
     # 1. Obtém resolução do vídeo
     cap = cv2.VideoCapture(video_path)
@@ -584,7 +600,10 @@ def apply_headline_to_video(
             pass
 
     # 3. Executa FFmpeg com GPU NVENC e fallback CPU
-    filter_complex = "[0:v][1:v]overlay=0:0[outv]"
+    if start_offset_s > 0.05:
+        filter_complex = f"[0:v][1:v]overlay=0:0:enable='gte(t,{start_offset_s:.3f})'[outv]"
+    else:
+        filter_complex = "[0:v][1:v]overlay=0:0[outv]"
 
     cmd_gpu = [
         FFMPEG_EXE, "-y",
@@ -635,7 +654,7 @@ def apply_headline_to_video(
             except Exception:
                 pass
         os.rename(tmp_out, target_out)
-        return {"path": target_out, "error": None}
+        return {"path": target_out, "error": None, "start_offset_s": start_offset_s}
     else:
         if os.path.exists(tmp_out):
             os.remove(tmp_out)

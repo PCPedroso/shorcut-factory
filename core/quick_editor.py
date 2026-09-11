@@ -423,10 +423,12 @@ def create_hook_badge_image(
 ) -> str:
     """
     Gera uma imagem de badge PNG transparente com texto estilizado de retenção viral.
+    Possui suporte a renderização de emojis coloridos via fontes do sistema (ex: Segoe UI Emoji no Windows).
     """
     if not badge_text or not badge_text.strip():
         return None
 
+    import unicodedata
     from PIL import Image, ImageDraw, ImageFont
 
     clean_text = badge_text.strip()
@@ -448,19 +450,45 @@ def create_hook_badge_image(
     if font is None:
         font = ImageFont.load_default()
 
-    try:
-        bbox = font.getbbox(clean_text)
-        text_w = bbox[2] - bbox[0]
-        text_h = bbox[3] - bbox[1]
-    except Exception:
-        text_w = len(clean_text) * (font_size * 0.6)
-        text_h = font_size
+    # Procura fonte de emojis do sistema para evitar glifos vazios / [?]
+    emoji_font = None
+    system_emoji_fonts = [
+        "C:/Windows/Fonts/seguiemj.ttf",
+        "/System/Library/Fonts/Apple Color Emoji.ttc",
+        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"
+    ]
+    for ef in system_emoji_fonts:
+        if os.path.exists(ef):
+            try:
+                emoji_font = ImageFont.truetype(ef, font_size)
+                break
+            except Exception:
+                pass
+
+    # Medição precisa dividindo caracteres comuns de emojis
+    segments = []
+    total_w = 0
+    max_text_h = font_size
+    for ch in clean_text:
+        is_em = bool(emoji_font and (ord(ch) >= 0x1F000 or (0x2300 <= ord(ch) <= 0x27BF) or unicodedata.category(ch) in ('So', 'Sk')))
+        f = emoji_font if is_em else font
+        try:
+            bbox = f.getbbox(ch)
+            cw = (bbox[2] - bbox[0]) if bbox else int(font_size * 0.5)
+            ch_h = (bbox[3] - bbox[1]) if bbox else font_size
+        except Exception:
+            cw = int(font_size * 0.5)
+            ch_h = font_size
+        segments.append((ch, is_em, f, cw))
+        total_w += cw
+        if ch_h > max_text_h:
+            max_text_h = ch_h
 
     pad_x = max(16, int(font_size * 0.75))
     pad_y = max(10, int(font_size * 0.45))
 
-    badge_w = int(text_w + pad_x * 2)
-    badge_h = int(text_h + pad_y * 2)
+    badge_w = int(total_w + pad_x * 2)
+    badge_h = int(max_text_h + pad_y * 2)
 
     if badge_style == "gold_viral":
         bg_color = (255, 218, 41, 240)
@@ -491,12 +519,17 @@ def create_hook_badge_image(
         width=max(1, int(video_width * 0.0025))
     )
 
-    draw.text(
-        (pad_x, pad_y - int(font_size * 0.1)),
-        clean_text,
-        font=font,
-        fill=text_color
-    )
+    cur_x = pad_x
+    cur_y = pad_y - int(font_size * 0.1)
+    for ch, is_em, f, cw in segments:
+        if is_em:
+            try:
+                draw.text((cur_x, cur_y), ch, font=f, embedded_color=True)
+            except Exception:
+                draw.text((cur_x, cur_y), ch, font=f, fill=text_color)
+        else:
+            draw.text((cur_x, cur_y), ch, font=f, fill=text_color)
+        cur_x += cw
 
     out_file = output_png_path
     if not out_file:
@@ -506,6 +539,55 @@ def create_hook_badge_image(
 
     badge_img.save(out_file, format="PNG")
     return out_file
+
+
+def overlay_badge_on_frame(
+    frame_rgb: np.ndarray,
+    badge_text: str,
+    badge_style: str = "red_alert",
+    badge_y_pct: float = 12.0
+) -> np.ndarray:
+    """
+    Sobrepõe o badge estilizado diretamente no frame RGB para pré-visualização instantânea na interface.
+    """
+    if frame_rgb is None or not badge_text or not badge_text.strip():
+        return frame_rgb
+
+    h, w = frame_rgb.shape[:2]
+    tmp_png = None
+    try:
+        import tempfile
+        from PIL import Image
+        t_fd, tmp_png = tempfile.mkstemp(suffix="_prev_badge.png")
+        os.close(t_fd)
+
+        create_hook_badge_image(
+            badge_text=badge_text.strip(),
+            badge_style=badge_style,
+            video_width=w,
+            video_height=h,
+            output_png_path=tmp_png
+        )
+
+        if os.path.exists(tmp_png) and os.path.getsize(tmp_png) > 0:
+            badge_pil = Image.open(tmp_png).convert("RGBA")
+            bw, bh = badge_pil.size
+            bx = max(0, (w - bw) // 2)
+            by = max(10, min(h - bh - 10, int(h * (badge_y_pct / 100.0))))
+
+            frame_pil = Image.fromarray(frame_rgb).convert("RGBA")
+            frame_pil.paste(badge_pil, (bx, by), mask=badge_pil)
+            return np.array(frame_pil.convert("RGB"))
+    except Exception:
+        pass
+    finally:
+        if tmp_png and os.path.exists(tmp_png):
+            try:
+                os.remove(tmp_png)
+            except Exception:
+                pass
+
+    return frame_rgb
 
 
 def apply_hook_style_to_frame(frame_rgb: np.ndarray, hook_style: str = "noir") -> np.ndarray:
@@ -563,6 +645,7 @@ def add_viral_hook_to_video(
     hook_style: str = "noir",
     badge_text: str = "",
     badge_style: str = "red_alert",
+    badge_y_pct: float = 12.0,
     transition_type: str = "flash_white",
     hook_mode: str = "teaser",
     output_path: str = None
@@ -573,6 +656,7 @@ def add_viral_hook_to_video(
       seguido pelo vídeo completo original. Duração total = hook_dur + original_dur.
     - hook_mode == 'move': O trecho selecionado é movido para o início e excluído de sua posição original.
       Duração total = original_dur.
+    - badge_y_pct: Posição vertical percentual do topo onde a etiqueta flutuante é renderizada.
     """
     if not video_path or not os.path.exists(video_path):
         return {"path": None, "error": "Arquivo de vídeo de origem não encontrado."}
@@ -658,7 +742,7 @@ def add_viral_hook_to_video(
 
     if badge_png and os.path.exists(badge_png):
         filter_parts.append(f"[0:v]{hook_vf_str}[v_hook_raw]")
-        badge_y = max(40, int(v_h * 0.10))
+        badge_y = max(20, min(v_h - 60, int(v_h * (float(badge_y_pct) / 100.0))))
         filter_parts.append(f"[v_hook_raw][1:v]overlay=(W-w)/2:{badge_y}:enable='between(t,0,{hook_dur:.3f})'[v_hook]")
     else:
         filter_parts.append(f"[0:v]{hook_vf_str}[v_hook]")
@@ -761,7 +845,8 @@ def add_viral_hook_to_video(
             "hook_start": hook_start_s,
             "hook_end": hook_end_s,
             "style": hook_style,
-            "mode": hook_mode
+            "mode": hook_mode,
+            "badge_y_pct": badge_y_pct
         }
     else:
         if os.path.exists(tmp_out):

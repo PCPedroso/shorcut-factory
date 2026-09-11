@@ -80,7 +80,7 @@ from core.quick_editor import (
     change_video_speed, list_edited_video_versions, delete_edited_video_version,
     cleanup_all_edited_versions, load_edit_history, record_quick_edit,
     add_viral_hook_to_video, create_hook_badge_image, apply_hook_style_to_frame,
-    HOOK_STYLES, HOOK_BADGE_PRESETS, HOOK_TRANSITIONS
+    overlay_badge_on_frame, HOOK_STYLES, HOOK_BADGE_PRESETS, HOOK_TRANSITIONS
 )
 from core.overlay_manager import apply_overlay_to_video, generate_overlay_preview, OVERLAY_PRESETS
 from core.audio_processor import (
@@ -1032,23 +1032,55 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 elif "Ciano" in badge_style_opt: badge_style_key = "neon_cyan"
 
             badge_txt_key = f"hook_badge_text_{unique_key}"
+            badge_input_key = f"hook_badge_input_{unique_key}"
             if badge_txt_key not in st.session_state:
                 st.session_state[badge_txt_key] = "🔥 VEJA O QUE ACONTECEU..."
+            if badge_input_key not in st.session_state:
+                st.session_state[badge_input_key] = st.session_state[badge_txt_key]
 
             st.caption("🏷️ **Etiqueta Flutuante de Alerta (Opcional - Deixe vazio se não quiser badge):**")
-            badge_text_input = st.text_input(
-                "Texto do Badge no Gancho:",
-                value=st.session_state.get(badge_txt_key, "🔥 VEJA O QUE ACONTECEU..."),
-                key=f"hook_badge_input_{unique_key}",
-                placeholder="Ex: 🔥 VEJA O QUE ELE DISSE... ou deixe em branco"
-            )
+            col_btxt, col_bpos = st.columns([2.2, 1.8])
+            with col_btxt:
+                badge_text_input = st.text_input(
+                    "Texto do Badge no Gancho:",
+                    key=badge_input_key,
+                    placeholder="Ex: 🔥 VEJA O QUE ELE DISSE... ou deixe em branco"
+                )
+                st.session_state[badge_txt_key] = badge_text_input
 
-            st.caption("⚡ **Atalhos Rápidos de Texto:**")
-            bp_cols = st.columns(len(HOOK_BADGE_PRESETS))
+            with col_bpos:
+                bpos_presets = {
+                    "Topo Alto (10%)": 10.0,
+                    "Topo Padrão (14%)": 14.0,
+                    "Abaixo do Topo / Headline (20%)": 20.0,
+                    "Terço Superior (28%)": 28.0,
+                    "Centro da Tela (48%)": 48.0,
+                    "Terço Inferior (72%)": 72.0,
+                    "Rodapé Inferior (82%)": 82.0,
+                    "🎯 Personalizado (Slider %)": -1.0
+                }
+                bpos_keys = list(bpos_presets.keys())
+                sel_bpos_label = st.selectbox(
+                    "Posição Vertical do Badge:",
+                    bpos_keys,
+                    index=1,
+                    key=f"hook_badge_pos_sel_{unique_key}"
+                )
+
+            if "Personalizado" in sel_bpos_label:
+                badge_y_pct = float(st.slider("Altura Vertical Y (% do topo):", 2, 95, 14, 1, key=f"hook_badge_slider_ypct_{unique_key}"))
+            else:
+                badge_y_pct = float(bpos_presets[sel_bpos_label])
+
+            st.caption("⚡ **Atalhos Rápidos de Texto (Clique para aplicar imediatamente):**")
+            col_bp1, col_bp2 = st.columns(2)
             for b_idx, b_preset in enumerate(HOOK_BADGE_PRESETS):
-                with bp_cols[b_idx]:
+                col_target = col_bp1 if (b_idx % 2 == 0) else col_bp2
+                with col_target:
                     if st.button(b_preset, key=f"btn_h_preset_{unique_key}_{b_idx}", use_container_width=True):
+                        st.session_state[badge_input_key] = b_preset
                         st.session_state[badge_txt_key] = b_preset
+                        st.session_state.pop(f"hook_prev_img_{unique_key}", None)
                         st.rerun(scope="fragment")
 
             col_hprev_hdr, col_hprev_btn = st.columns([4.2, 0.8])
@@ -1057,11 +1089,29 @@ def render_quick_editor_component(video_path: str, unique_key: str):
             with col_hprev_btn:
                 btn_trig_hook = st.button("🔄", key=f"btn_refresh_hook_prev_{unique_key}", help="Atualizar pré-visualização do gancho com o estilo selecionado")
 
-            if btn_trig_hook or f"hook_prev_img_{unique_key}" not in st.session_state:
+            badge_changed = (
+                badge_text_input != st.session_state.get(f"hook_last_badge_txt_{unique_key}")
+                or badge_style_key != st.session_state.get(f"hook_last_badge_style_{unique_key}")
+                or badge_y_pct != st.session_state.get(f"hook_last_badge_ypct_{unique_key}")
+            )
+            if btn_trig_hook or f"hook_prev_img_{unique_key}" not in st.session_state or badge_changed:
                 raw_f = extract_frame_at_timestamp(video_path, hook_start)
-                styled_f = apply_hook_style_to_frame(raw_f, hook_style=sel_style_key) if raw_f is not None else None
+                if raw_f is not None:
+                    styled_f = apply_hook_style_to_frame(raw_f, hook_style=sel_style_key)
+                    if badge_text_input and badge_text_input.strip():
+                        styled_f = overlay_badge_on_frame(
+                            styled_f,
+                            badge_text=badge_text_input.strip(),
+                            badge_style=badge_style_key,
+                            badge_y_pct=badge_y_pct
+                        )
+                else:
+                    styled_f = None
                 st.session_state[f"hook_prev_img_{unique_key}"] = styled_f
                 st.session_state[f"hook_prev_raw_{unique_key}"] = raw_f
+                st.session_state[f"hook_last_badge_txt_{unique_key}"] = badge_text_input
+                st.session_state[f"hook_last_badge_style_{unique_key}"] = badge_style_key
+                st.session_state[f"hook_last_badge_ypct_{unique_key}"] = badge_y_pct
 
             prev_styled = st.session_state.get(f"hook_prev_img_{unique_key}")
             prev_raw = st.session_state.get(f"hook_prev_raw_{unique_key}")
@@ -1100,6 +1150,7 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         hook_style=sel_style_key,
                         badge_text=badge_text_input.strip() if badge_text_input else "",
                         badge_style=badge_style_key,
+                        badge_y_pct=badge_y_pct,
                         transition_type=sel_trans_key,
                         hook_mode=hook_mode_param,
                         output_path=out_target
@@ -1113,7 +1164,15 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                             video_path=video_path,
                             action_name="🎣 Gancho Viral (Hook / Teaser)",
                             details=f"Trecho: {hook_start:.1f}s a {hook_end:.1f}s ({hook_dur_calc:.1f}s) | Estilo: {sel_style_label} | Modo: {hook_mode_choice} | Nova Duração: {hook_res.get('new_duration', new_dur_est):.1f}s",
-                            output_path=out_target
+                            output_path=out_target,
+                            extra_info={
+                                "hook_duration": hook_dur_calc,
+                                "hook_start": hook_start,
+                                "hook_end": hook_end,
+                                "hook_mode": hook_mode_param,
+                                "badge_text": badge_text_input.strip() if badge_text_input else "",
+                                "badge_y_pct": badge_y_pct
+                            }
                         )
                         st.session_state[f"last_edit_status_{unique_key}"] = entry
                         st.session_state[f"just_edited_{unique_key}"] = True
@@ -1483,6 +1542,53 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 with col_hl_s2:
                     sel_hl_shadow = st.toggle("Sombra Projetada Suave (Drop Shadow)", value=True, key=f"hl_post_shadow_{unique_key}")
 
+            # Detecção inteligente de Gancho Viral no histórico deste vídeo
+            edit_hist = load_edit_history(video_path)
+            detected_hook_dur = 0.0
+            has_hook_in_history = False
+            for h_item in edit_hist:
+                act_str = str(h_item.get("action", ""))
+                extra = h_item.get("extra_info", {}) or {}
+                if "Gancho" in act_str or "hook" in str(extra).lower():
+                    has_hook_in_history = True
+                    if "hook_duration" in extra and float(extra["hook_duration"]) > 0:
+                        detected_hook_dur = float(extra["hook_duration"])
+                        break
+                    det_str = str(h_item.get("details", ""))
+                    import re
+                    m = re.search(r'\((\d+(?:\.\d+)?)s\)', det_str)
+                    if m:
+                        detected_hook_dur = float(m.group(1))
+                        break
+
+            col_hldelay1, col_hldelay2 = st.columns([2.2, 1.8])
+            with col_hldelay1:
+                default_delay_check = bool(has_hook_in_history and detected_hook_dur > 0)
+                delay_hook_on = st.checkbox(
+                    "⏱️ Exibir Headline apenas após o Gancho Viral",
+                    value=st.session_state.get(f"hl_delay_enabled_{unique_key}", default_delay_check),
+                    key=f"hl_delay_check_{unique_key}",
+                    help="Mantém a Headline oculta durante o teaser/gancho de abertura e exibe-a somente a partir do momento em que o vídeo principal começa."
+                )
+                st.session_state[f"hl_delay_enabled_{unique_key}"] = delay_hook_on
+
+            with col_hldelay2:
+                init_offset_val = detected_hook_dur if (has_hook_in_history and detected_hook_dur > 0) else 4.0
+                hl_start_offset = st.number_input(
+                    "Iniciar Headline aos (segundos):",
+                    min_value=0.0,
+                    max_value=max(0.1, float(dur)),
+                    value=float(st.session_state.get(f"hl_start_offset_val_{unique_key}", init_offset_val)),
+                    step=0.5,
+                    format="%.1f",
+                    key=f"hl_start_offset_num_{unique_key}",
+                    disabled=not delay_hook_on,
+                    help="Segundo exato do vídeo em que a Headline fará sua entrada na tela."
+                )
+                st.session_state[f"hl_start_offset_val_{unique_key}"] = hl_start_offset
+
+            final_hl_start_offset = float(hl_start_offset) if delay_hook_on else 0.0
+
             current_hl_cfg = {
                 "preset_key": sel_hl_preset_key,
                 "container_mode": sel_hl_mode,
@@ -1505,7 +1611,8 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 "shadow_enabled": sel_hl_shadow,
                 "shadow": sel_hl_shadow,
                 "stroke_color": "#000000",
-                "stroke_width": 2 if sel_hl_mode == "outline_only" else 0
+                "stroke_width": 2 if sel_hl_mode == "outline_only" else 0,
+                "start_offset_s": final_hl_start_offset
             }
 
             # 4. Prévia Visual Instantânea do Frame (Com acionamento por botão ou reativo)
@@ -1526,6 +1633,7 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 btn_trig_hl
                 or (f"cached_hl_prev_{unique_key}" not in st.session_state)
                 or (hl_preview_sec != st.session_state.get(f"cached_hl_prev_sec_{unique_key}"))
+                or (final_hl_start_offset != st.session_state.get(f"cached_hl_offset_{unique_key}"))
             )
             if need_prev_update:
                 with st.spinner("Atualizando prévia da Headline..."):
@@ -1536,12 +1644,17 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         timestamp_s=hl_preview_sec
                     )
                     st.session_state[f"cached_hl_prev_sec_{unique_key}"] = hl_preview_sec
+                    st.session_state[f"cached_hl_offset_{unique_key}"] = final_hl_start_offset
 
             prev_hl_frame = st.session_state.get(f"cached_hl_prev_{unique_key}")
             prev_hl_sec_shown = st.session_state.get(f"cached_hl_prev_sec_{unique_key}", hl_preview_sec)
             with col_hl_prev_view:
                 if prev_hl_frame is not None:
-                    safe_display_image(prev_hl_frame, caption=f"Prévia com Headline aos {prev_hl_sec_shown:.1f}s", use_container_width=True)
+                    if delay_hook_on and final_hl_start_offset > 0.05 and prev_hl_sec_shown < final_hl_start_offset:
+                        safe_display_image(prev_hl_frame, caption=f"Prévia aos {prev_hl_sec_shown:.1f}s (Gancho ativo — Headline oculta até {final_hl_start_offset:.1f}s)", use_container_width=True)
+                        st.info(f"💡 **Gancho Viral em reprodução aos {prev_hl_sec_shown:.1f}s.** A Headline surgirá a partir dos **{final_hl_start_offset:.1f}s**. Deslize o slider para além de `{final_hl_start_offset:.1f}s` para vê-la!")
+                    else:
+                        safe_display_image(prev_hl_frame, caption=f"Prévia com Headline aos {prev_hl_sec_shown:.1f}s", use_container_width=True)
                 else:
                     st.caption("ℹ️ Clique no botão 🔄 para gerar a prévia da headline.")
 
@@ -1561,7 +1674,8 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         video_path=video_path,
                         text=hl_text_input,
                         config=current_hl_cfg,
-                        output_path=out_target_hl
+                        output_path=out_target_hl,
+                        start_offset_s=final_hl_start_offset
                     )
 
                     if hl_res.get("error"):
@@ -1572,8 +1686,9 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         entry = record_quick_edit(
                             video_path=video_path,
                             action_name="🏷️ Headline de Topo",
-                            details=f"Texto: '{hl_text_input.replace(chr(10), ' ')}' | Modo: {current_hl_cfg.get('mode', 'line_boxes')} | Preset: {sel_hl_preset_data['name']}",
-                            output_path=out_target_hl
+                            details=f"Texto: '{hl_text_input.replace(chr(10), ' ')}' | Início: {final_hl_start_offset:.1f}s | Modo: {current_hl_cfg.get('mode', 'line_boxes')} | Preset: {sel_hl_preset_data['name']}",
+                            output_path=out_target_hl,
+                            extra_info={"start_offset_s": final_hl_start_offset}
                         )
                         st.session_state[f"last_edit_status_{unique_key}"] = entry
                         st.session_state[f"just_edited_{unique_key}"] = True
