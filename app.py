@@ -56,7 +56,8 @@ from core.analyzer import analyze_transcript, build_suggested_bundles, build_gol
 from core.video_processor import (
     download_full_video, cut_video, get_video_resolution,
     extract_audio_from_local_video, extract_thumbnail_from_video, generate_local_video_id,
-    generate_local_dual_video_id, generate_dual_split_preview, compose_dual_video_split_sequence
+    generate_local_dual_video_id, generate_dual_split_preview, compose_dual_video_split_sequence,
+    split_video_smart
 )
 from core.library_manager import get_library, add_or_update_video_in_library, remove_video_from_library
 from core.config_manager import load_settings, save_all_settings, save_setting
@@ -3076,6 +3077,73 @@ if st.session_state.transcription_done:
                     if st.button("✂️ Ir para Recortes 9:16 (Seção 3) ➔", key="btn_jump_to_s3_from_vcard", type="primary", use_container_width=True):
                         navigate_to_step("3")
                         st.rerun()
+
+                    # ── 🎞️ Divisão Inteligente para Carrossel ─────────────────
+                    st.markdown("---")
+                    st.caption("🎞️ **Dividir em Partes para Carrossel:**")
+                    _split_n = st.number_input(
+                        "Número de partes",
+                        min_value=2, max_value=20, value=3, step=1,
+                        key="smart_split_num_parts",
+                        help="O vídeo será dividido em partes de duração semelhante, cortando sempre ao fim de frases completas (sem interromper palavras ou frases)."
+                    )
+                    if st.button(
+                        f"🎬 Dividir em {_split_n} Partes Inteligentes",
+                        key="btn_smart_split_video",
+                        use_container_width=True,
+                        help="Usa a transcrição para encontrar pontos de corte naturais entre frases, gerando partes equilibradas para carrossel de vídeos."
+                    ):
+                        _split_transcript = os.path.join(main_dir, "transcript.json")
+                        _split_out_dir = os.path.join(main_dir, "carrossel")
+                        with st.spinner(f"⏳ Dividindo vídeo em {_split_n} partes inteligentes... Aguarde."):
+                            _split_res = split_video_smart(
+                                input_path=main_video_path,
+                                transcript_path=_split_transcript if os.path.exists(_split_transcript) else None,
+                                num_parts=int(_split_n),
+                                output_dir=_split_out_dir,
+                                output_prefix="parte",
+                            )
+                        if _split_res.get("error"):
+                            st.error(f"❌ Erro: {_split_res['error']}")
+                        else:
+                            st.session_state["smart_split_result"] = _split_res
+                            st.success(
+                                f"✅ {_split_res['num_generated']} partes geradas em `{_split_out_dir}` "
+                                f"(duração total: {format_time_sec(_split_res['total_duration'])})"
+                            )
+                            if _split_res.get("warnings"):
+                                st.warning("⚠️ Avisos: " + "; ".join(_split_res["warnings"]))
+                            st.rerun()
+
+                    # Exibe resultado da última divisão inteligente
+                    _prev_split = st.session_state.get("smart_split_result")
+                    if _prev_split and _prev_split.get("parts"):
+                        _split_out_dir = os.path.join(main_dir, "carrossel")
+                        _parts_ok = [p for p in _prev_split["parts"] if os.path.exists(p["path"])]
+                        if _parts_ok:
+                            st.caption(f"📂 **{len(_parts_ok)} partes prontas em** `{_split_out_dir}`:")
+                            for _p in _parts_ok:
+                                _p_mb = os.path.getsize(_p["path"]) / (1024 * 1024)
+                                _p_dur = _p["duration"]
+                                _p_start_lbl = format_time_sec(_p["start"])
+                                _p_end_lbl = format_time_sec(_p["end"])
+                                with st.expander(f"▶ Parte {_p['index']:02d} — {_p_start_lbl} → {_p_end_lbl} ({_p_dur:.0f}s / {_p_mb:.1f} MB)", expanded=False):
+                                    safe_display_video(_p["path"])
+                                    col_dl_p, col_open_p = st.columns(2)
+                                    with col_dl_p:
+                                        with open(_p["path"], "rb") as _pf:
+                                            st.download_button(
+                                                label=f"📥 Baixar {_p['filename']}",
+                                                data=_pf,
+                                                file_name=_p["filename"],
+                                                mime="video/mp4",
+                                                use_container_width=True,
+                                                key=f"dl_split_part_{_p['index']}"
+                                            )
+                                    with col_open_p:
+                                        if st.button("📂 Abrir Pasta", key=f"open_split_folder_{_p['index']}", use_container_width=True):
+                                            open_in_file_explorer(_p["path"])
+                                            st.toast("Pasta aberta!")
 
                     st.markdown("---")
                     st.caption("⏱️ **Capturar Momento Pausado no Player:**")

@@ -1325,3 +1325,198 @@ def compose_dual_video_split_sequence(
                 except Exception:
                     pass
 
+
+def split_video_smart(
+    input_path: str,
+    transcript_path: str,
+    num_parts: int,
+    output_dir: str,
+    output_prefix: str = "parte",
+) -> dict:
+    """
+    Divide o vídeo em `num_parts` partes de duração semelhante, respeitando
+    limites naturais de fala (fim de segmentos do transcript) para não cortar
+    no meio de palavras ou frases.
+
+    Parâmetros:
+    - input_path: caminho para o vídeo original (MP4)
+    - transcript_path: caminho para o transcript.json com 'segments'
+    - num_parts: número de partes desejadas (>= 2)
+    - output_dir: pasta onde os arquivos de saída serão salvos
+    - output_prefix: prefixo dos arquivos de saída (ex: 'parte' => parte_01.mp4)
+
+    Retorna dict com:
+    - 'parts': lista de {'path', 'start', 'end', 'duration', 'index'}
+    - 'error': None ou string de erro
+    """
+    try:
+        import json as _json_mod
+
+        if num_parts < 2:
+            return {"parts": [], "error": "Número de partes deve ser pelo menos 2."}
+
+        if not os.path.exists(input_path):
+            return {"parts": [], "error": f"Arquivo de vídeo não encontrado: {input_path}"}
+
+        # ── 1. Determinar duração total ──────────────────────────────────────
+        # Tenta ffprobe; se não encontrar, usa moviepy como fallback confiável
+        total_duration = 0.0
+        ffprobe_exe = os.path.join(os.path.dirname(FFMPEG_EXE), "ffprobe.exe")
+        if not os.path.exists(ffprobe_exe):
+            ffprobe_exe = os.path.join(os.path.dirname(FFMPEG_EXE), "ffprobe")
+        if not os.path.exists(ffprobe_exe):
+            ffprobe_exe = None
+
+        if ffprobe_exe:
+            cmd_probe = [
+                ffprobe_exe, "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                input_path
+            ]
+            probe_res = subprocess.run(cmd_probe, capture_output=True, text=True)
+            try:
+                total_duration = float(probe_res.stdout.strip())
+            except Exception:
+                total_duration = 0.0
+
+        if total_duration <= 0:
+            # Fallback: detecta duração via FFmpeg stderr (suportado mesmo sem ffprobe)
+            try:
+                cmd_dur = [FFMPEG_EXE, "-i", input_path]
+                dur_res = subprocess.run(cmd_dur, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                stderr_txt = dur_res.stderr.decode(errors="replace")
+                dur_match = re.search(r"Duration:\s*(\d+):(\d+):([\d.]+)", stderr_txt)
+                if dur_match:
+                    h, m, s = int(dur_match.group(1)), int(dur_match.group(2)), float(dur_match.group(3))
+                    total_duration = h * 3600 + m * 60 + s
+            except Exception:
+                total_duration = 0.0
+
+        if total_duration <= 0:
+            # Último fallback: moviepy
+            try:
+                from moviepy.video.io.VideoFileClip import VideoFileClip as _VFC
+                with _VFC(input_path) as _vc:
+                    total_duration = _vc.duration
+            except Exception:
+                pass
+
+        if total_duration <= 0:
+            return {"parts": [], "error": "Não foi possível determinar a duração do vídeo."}
+
+        # ── 2. Carregar segmentos do transcript ──────────────────────────────
+        segment_ends = []  # timestamps de fim de cada segmento de fala
+        if transcript_path and os.path.exists(transcript_path):
+            with open(transcript_path, "r", encoding="utf-8") as _tf:
+                _t = _json_mod.load(_tf)
+            segs = _t.get("segments", [])
+            for seg in segs:
+                end_t = seg.get("end", 0.0)
+                if 0 < end_t < total_duration:
+                    segment_ends.append(float(end_t))
+
+        segment_ends = sorted(set(segment_ends))
+
+        # ── 3. Calcular pontos de corte ideais (tempo equidistante) ──────────
+        ideal_cuts = []
+        for i in range(1, num_parts):
+            ideal_cuts.append(total_duration * i / num_parts)
+
+        # ── 4. Mapear cada corte ideal para o fim de segmento mais próximo ───
+        actual_cuts = []
+        for ideal_t in ideal_cuts:
+            if not segment_ends:
+                actual_cuts.append(ideal_t)
+                continue
+
+            # Janela de busca: ±40% da duração esperada por parte
+            window = total_duration / num_parts * 0.40
+            candidates = [t for t in segment_ends if abs(t - ideal_t) <= window]
+
+            if candidates:
+                # Prefere o fim de frase ANTES do ideal para não interromper
+                before = [t for t in candidates if t <= ideal_t]
+                after  = [t for t in candidates if t > ideal_t]
+                if before:
+                    best = max(before)
+                else:
+                    best = min(after)
+            else:
+                best = ideal_t
+
+            actual_cuts.append(round(best, 3))
+
+        actual_cuts = sorted(set(actual_cuts))
+
+        # ── 5. Construir pares [start, end] e cortar com FFmpeg ─────────────
+        boundaries = [0.0] + actual_cuts + [total_duration]
+        os.makedirs(output_dir, exist_ok=True)
+
+        parts = []
+        errors = []
+
+        for idx, (t_start, t_end) in enumerate(zip(boundaries[:-1], boundaries[1:]), start=1):
+            duration = round(t_end - t_start, 3)
+            if duration <= 0.1:
+                continue
+
+            part_num = str(idx).zfill(2)
+            out_filename = f"{output_prefix}_{part_num}.mp4"
+            out_path = os.path.join(output_dir, out_filename)
+
+            # Primeiro tenta copy (rápido, sem re-encode)
+            cmd_copy = [
+                FFMPEG_EXE, "-y",
+                "-ss", str(round(t_start, 3)),
+                "-i", input_path,
+                "-t", str(duration),
+                "-c:v", "copy", "-c:a", "copy",
+                "-avoid_negative_ts", "make_zero",
+                "-movflags", "+faststart",
+                out_path
+            ]
+            res = subprocess.run(cmd_copy, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+            # Se copy falhou, faz re-encode rápido
+            if res.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) < 1024:
+                cmd_enc = [
+                    FFMPEG_EXE, "-y",
+                    "-ss", str(round(t_start, 3)),
+                    "-i", input_path,
+                    "-t", str(duration),
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+                    "-c:a", "aac", "-b:a", "192k",
+                    "-avoid_negative_ts", "make_zero",
+                    "-movflags", "+faststart",
+                    out_path
+                ]
+                res2 = subprocess.run(cmd_enc, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                if res2.returncode != 0:
+                    errors.append(f"Parte {idx}: erro FFmpeg")
+                    continue
+
+            if os.path.exists(out_path) and os.path.getsize(out_path) > 1024:
+                parts.append({
+                    "index": idx,
+                    "path": out_path,
+                    "filename": out_filename,
+                    "start": t_start,
+                    "end": t_end,
+                    "duration": duration,
+                })
+
+        if not parts:
+            return {"parts": [], "error": "Nenhuma parte foi gerada. " + "; ".join(errors)}
+
+        return {
+            "parts": parts,
+            "total_duration": total_duration,
+            "num_requested": num_parts,
+            "num_generated": len(parts),
+            "error": None,
+            "warnings": errors if errors else None,
+        }
+
+    except Exception as exc:
+        return {"parts": [], "error": str(exc)}
