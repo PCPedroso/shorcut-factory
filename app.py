@@ -1072,16 +1072,23 @@ def render_quick_editor_component(video_path: str, unique_key: str):
             else:
                 badge_y_pct = float(bpos_presets[sel_bpos_label])
 
+            def _set_badge_preset(preset_val, inp_key=badge_input_key, txt_key=badge_txt_key, u_key=unique_key):
+                st.session_state[inp_key] = preset_val
+                st.session_state[txt_key] = preset_val
+                st.session_state.pop(f"hook_prev_img_{u_key}", None)
+
             st.caption("⚡ **Atalhos Rápidos de Texto (Clique para aplicar imediatamente):**")
             col_bp1, col_bp2 = st.columns(2)
             for b_idx, b_preset in enumerate(HOOK_BADGE_PRESETS):
                 col_target = col_bp1 if (b_idx % 2 == 0) else col_bp2
                 with col_target:
-                    if st.button(b_preset, key=f"btn_h_preset_{unique_key}_{b_idx}", use_container_width=True):
-                        st.session_state[badge_input_key] = b_preset
-                        st.session_state[badge_txt_key] = b_preset
-                        st.session_state.pop(f"hook_prev_img_{unique_key}", None)
-                        st.rerun(scope="fragment")
+                    st.button(
+                        b_preset,
+                        key=f"btn_h_preset_{unique_key}_{b_idx}",
+                        on_click=_set_badge_preset,
+                        args=(b_preset,),
+                        use_container_width=True
+                    )
 
             col_hprev_hdr, col_hprev_btn = st.columns([4.2, 0.8])
             with col_hprev_hdr:
