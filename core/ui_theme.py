@@ -251,16 +251,19 @@ def render_workflow_stepper(default_step: str = None) -> str:
     Renderiza o Stepper de navegação horizontal no topo da aplicação.
     Permite alternar entre as 4 seções focadas ou visão completa contínua.
     """
+    # Aplica navegação pendente solicitada programaticamente antes de instanciar o widget
+    if "_pending_workflow_step" in st.session_state:
+        pending = st.session_state.pop("_pending_workflow_step")
+        if pending in WORKFLOW_STEPS:
+            st.session_state["active_workflow_step"] = pending
+            st.session_state["workflow_stepper_radio"] = pending
+
     if "active_workflow_step" not in st.session_state:
         st.session_state["active_workflow_step"] = default_step or WORKFLOW_STEPS[0]
 
     # Garante que o step atual seja válido
     if st.session_state["active_workflow_step"] not in WORKFLOW_STEPS:
         st.session_state["active_workflow_step"] = WORKFLOW_STEPS[0]
-
-    # Garante sincronização da chave do widget radio com active_workflow_step
-    if st.session_state.get("workflow_stepper_radio") != st.session_state["active_workflow_step"]:
-        st.session_state["workflow_stepper_radio"] = st.session_state["active_workflow_step"]
 
     st.markdown('<div class="viralcut-stepper-box">', unsafe_allow_html=True)
     
@@ -277,11 +280,9 @@ def render_workflow_stepper(default_step: str = None) -> str:
     
     st.markdown('</div>', unsafe_allow_html=True)
 
-    if selected_step != st.session_state["active_workflow_step"]:
-        st.session_state["active_workflow_step"] = selected_step
-        st.session_state["workflow_stepper_radio"] = selected_step
+    st.session_state["active_workflow_step"] = selected_step
 
-    return st.session_state["active_workflow_step"]
+    return selected_step
 
 def navigate_to_step(step_name_or_number: str):
     """
@@ -306,6 +307,6 @@ def navigate_to_step(step_name_or_number: str):
 
     if target_step:
         st.session_state["active_workflow_step"] = target_step
-        st.session_state["workflow_stepper_radio"] = target_step
+        st.session_state["_pending_workflow_step"] = target_step
         return True
     return False

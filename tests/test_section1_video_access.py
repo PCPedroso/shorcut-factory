@@ -66,12 +66,12 @@ class TestSection1VideoAccess(unittest.TestCase):
         from core.ui_theme import navigate_to_step
         import streamlit as st
 
-        mock_state = {"active_workflow_step": "1. 📥 Ingestão & Transcrição", "workflow_stepper_radio": "1. 📥 Ingestão & Transcrição"}
+        mock_state = {"active_workflow_step": "1. 📥 Ingestão & Transcrição"}
         with patch.object(st, "session_state", mock_state):
             nav_ok = navigate_to_step("3")
             self.assertTrue(nav_ok)
             self.assertEqual(mock_state["active_workflow_step"], "3. ✂️ Fábrica de Enquadramento 9:16")
-            self.assertEqual(mock_state["workflow_stepper_radio"], "3. ✂️ Fábrica de Enquadramento 9:16")
+            self.assertEqual(mock_state["_pending_workflow_step"], "3. ✂️ Fábrica de Enquadramento 9:16")
 
 
 if __name__ == "__main__":

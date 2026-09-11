@@ -52,12 +52,28 @@ def test_navigate_to_step(monkeypatch):
     res3 = navigate_to_step("3")
     assert res3 is True
     assert fake_state["active_workflow_step"] == "3. ✂️ Fábrica de Enquadramento 9:16"
-    assert fake_state["workflow_stepper_radio"] == "3. ✂️ Fábrica de Enquadramento 9:16"
+    assert fake_state["_pending_workflow_step"] == "3. ✂️ Fábrica de Enquadramento 9:16"
 
     res1 = navigate_to_step("ingestão")
     assert res1 is True
     assert fake_state["active_workflow_step"] == "1. 📥 Ingestão & Transcrição"
-    assert fake_state["workflow_stepper_radio"] == "1. 📥 Ingestão & Transcrição"
+    assert fake_state["_pending_workflow_step"] == "1. 📥 Ingestão & Transcrição"
 
     res_inv = navigate_to_step("etapa_inexistente_999")
     assert res_inv is False
+
+def test_render_workflow_stepper_pending_and_manual(monkeypatch):
+    import streamlit as st
+    from core.ui_theme import render_workflow_stepper
+
+    fake_state = {
+        "active_workflow_step": "1. 📥 Ingestão & Transcrição",
+        "_pending_workflow_step": "3. ✂️ Fábrica de Enquadramento 9:16"
+    }
+    monkeypatch.setattr(st, "session_state", fake_state)
+    monkeypatch.setattr(st, "radio", lambda *args, **kwargs: kwargs.get("index") or fake_state.get("workflow_stepper_radio", WORKFLOW_STEPS[2]))
+
+    step = render_workflow_stepper()
+    # Verifica que _pending_workflow_step foi consumido e aplicado
+    assert "_pending_workflow_step" not in fake_state
+    assert fake_state["workflow_stepper_radio"] == "3. ✂️ Fábrica de Enquadramento 9:16"
