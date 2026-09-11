@@ -384,6 +384,396 @@ def change_video_speed(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# 🎣 Gancho Viral (Hook / Teaser / Cold Open)
+# ──────────────────────────────────────────────────────────────────────────────
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_FONTS_DIR = os.path.join(_SCRIPT_DIR, "fonts")
+_FONT_BOLD_PATH = os.path.join(_FONTS_DIR, "Montserrat-ExtraBold.ttf")
+
+HOOK_STYLES = {
+    "noir": "🖤 Preto e Branco (Noir Clássico)",
+    "vignette_zoom": "🎯 Vinheta Escura + Auto-Zoom (1.10x)",
+    "retro": "🎞️ Retrô / Sépia Vintage",
+    "flash_forward": "✨ Flash-Forward (Dessaturação 50%)",
+    "clean": "🎨 Cores Originais (Sem Filtro)"
+}
+
+HOOK_BADGE_PRESETS = [
+    "🔥 VEJA O QUE ELE DISSE...",
+    "👀 ASSISTA ATÉ O FINAL",
+    "⚡ SPOILER / MOMENTO CHAVE",
+    "🎙️ MOMENTO TENSO",
+    "💥 VEJA O QUE ACONTECEU..."
+]
+
+HOOK_TRANSITIONS = {
+    "flash_white": "⚡ Flash Branco Cinematográfico",
+    "dip_black": "🌑 Fade para Preto",
+    "jump_cut": "✂️ Corte Seco (Instantâneo)"
+}
+
+
+def create_hook_badge_image(
+    badge_text: str,
+    badge_style: str = "red_alert",
+    video_width: int = 1080,
+    video_height: int = 1920,
+    output_png_path: str = None
+) -> str:
+    """
+    Gera uma imagem de badge PNG transparente com texto estilizado de retenção viral.
+    """
+    if not badge_text or not badge_text.strip():
+        return None
+
+    from PIL import Image, ImageDraw, ImageFont
+
+    clean_text = badge_text.strip()
+    font_size = max(18, int(video_width * 0.036))
+
+    font = None
+    if os.path.exists(_FONT_BOLD_PATH):
+        try:
+            font = ImageFont.truetype(_FONT_BOLD_PATH, font_size)
+        except Exception:
+            pass
+    if font is None:
+        for fb_f in ["arialbd.ttf", "arial.ttf"]:
+            try:
+                font = ImageFont.truetype(fb_f, font_size)
+                break
+            except Exception:
+                pass
+    if font is None:
+        font = ImageFont.load_default()
+
+    try:
+        bbox = font.getbbox(clean_text)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+    except Exception:
+        text_w = len(clean_text) * (font_size * 0.6)
+        text_h = font_size
+
+    pad_x = max(16, int(font_size * 0.75))
+    pad_y = max(10, int(font_size * 0.45))
+
+    badge_w = int(text_w + pad_x * 2)
+    badge_h = int(text_h + pad_y * 2)
+
+    if badge_style == "gold_viral":
+        bg_color = (255, 218, 41, 240)
+        text_color = (15, 23, 42, 255)
+        border_color = (0, 0, 0, 160)
+    elif badge_style == "dark_pill":
+        bg_color = (15, 23, 42, 230)
+        text_color = (255, 255, 255, 255)
+        border_color = (139, 92, 246, 220)
+    elif badge_style == "neon_cyan":
+        bg_color = (6, 182, 212, 235)
+        text_color = (15, 23, 42, 255)
+        border_color = (255, 255, 255, 200)
+    else:  # red_alert
+        bg_color = (225, 29, 72, 235)
+        text_color = (255, 255, 255, 255)
+        border_color = (255, 255, 255, 180)
+
+    badge_img = Image.new("RGBA", (badge_w, badge_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(badge_img)
+
+    radius = max(8, int(badge_h * 0.35))
+    draw.rounded_rectangle(
+        [0, 0, badge_w - 1, badge_h - 1],
+        radius=radius,
+        fill=bg_color,
+        outline=border_color,
+        width=max(1, int(video_width * 0.0025))
+    )
+
+    draw.text(
+        (pad_x, pad_y - int(font_size * 0.1)),
+        clean_text,
+        font=font,
+        fill=text_color
+    )
+
+    out_file = output_png_path
+    if not out_file:
+        import tempfile
+        t_fd, out_file = tempfile.mkstemp(suffix="_hook_badge.png")
+        os.close(t_fd)
+
+    badge_img.save(out_file, format="PNG")
+    return out_file
+
+
+def apply_hook_style_to_frame(frame_rgb: np.ndarray, hook_style: str = "noir") -> np.ndarray:
+    """
+    Aplica o estilo visual do gancho a um frame isolado para pré-visualização instantânea na UI.
+    """
+    if frame_rgb is None or not isinstance(frame_rgb, np.ndarray):
+        return None
+
+    frame = frame_rgb.copy()
+    h, w = frame.shape[:2]
+
+    if hook_style == "noir":
+        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        return cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+
+    elif hook_style == "retro":
+        kernel = np.array([
+            [0.272, 0.534, 0.131],
+            [0.349, 0.686, 0.168],
+            [0.393, 0.769, 0.189]
+        ])
+        sepia = cv2.transform(frame, kernel)
+        return np.clip(sepia, 0, 255).astype(np.uint8)
+
+    elif hook_style == "flash_forward":
+        hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV).astype(np.float32)
+        hsv[..., 1] *= 0.45
+        hsv[..., 2] = np.clip(hsv[..., 2] * 1.15, 0, 255)
+        res = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
+        return res
+
+    elif hook_style == "vignette_zoom":
+        crop_h = int(h / 1.10)
+        crop_w = int(w / 1.10)
+        y1 = (h - crop_h) // 2
+        x1 = (w - crop_w) // 2
+        cropped = frame[y1:y1 + crop_h, x1:x1 + crop_w]
+        zoomed = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+
+        X = cv2.getGaussianKernel(w, w / 2.2)
+        Y = cv2.getGaussianKernel(h, h / 2.2)
+        kernel = Y * X.T
+        mask = kernel / kernel.max()
+        vignette = zoomed.astype(np.float32) * mask[..., np.newaxis]
+        return np.clip(vignette, 0, 255).astype(np.uint8)
+
+    return frame
+
+
+def add_viral_hook_to_video(
+    video_path: str,
+    hook_start_s: float,
+    hook_end_s: float,
+    hook_style: str = "noir",
+    badge_text: str = "",
+    badge_style: str = "red_alert",
+    transition_type: str = "flash_white",
+    hook_mode: str = "teaser",
+    output_path: str = None
+) -> dict:
+    """
+    Cria e acopla um Gancho Viral (Hook / Teaser) no início do vídeo com estilização visual e badge.
+    - hook_mode == 'teaser': (Padrão) O trecho selecionado é duplicado no início como teaser,
+      seguido pelo vídeo completo original. Duração total = hook_dur + original_dur.
+    - hook_mode == 'move': O trecho selecionado é movido para o início e excluído de sua posição original.
+      Duração total = original_dur.
+    """
+    if not video_path or not os.path.exists(video_path):
+        return {"path": None, "error": "Arquivo de vídeo de origem não encontrado."}
+
+    total_dur = get_video_duration(video_path)
+    if total_dur < 1.0:
+        return {"path": None, "error": "Vídeo muito curto para criação de gancho."}
+
+    hook_start_s = max(0.0, float(hook_start_s))
+    hook_end_s = min(total_dur, float(hook_end_s))
+
+    if hook_start_s >= hook_end_s:
+        return {"path": None, "error": "O ponto inicial do gancho deve ser menor que o ponto final."}
+
+    hook_dur = hook_end_s - hook_start_s
+    if hook_dur < 0.5:
+        return {"path": None, "error": "O gancho viral deve ter pelo menos 0.5 segundos de duração."}
+
+    target_out = output_path if output_path else video_path
+    is_in_place = not bool(output_path)
+
+    tmp_out = target_out + ".hook_tmp.mp4"
+    if os.path.exists(tmp_out):
+        try:
+            os.remove(tmp_out)
+        except Exception:
+            pass
+
+    v_w = 1080
+    v_h = 1920
+    try:
+        cap = cv2.VideoCapture(video_path)
+        if cap.isOpened():
+            cw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            ch = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            if cw > 0 and ch > 0:
+                v_w, v_h = cw, ch
+            cap.release()
+    except Exception:
+        pass
+
+    badge_png = None
+    if badge_text and badge_text.strip():
+        badge_png = os.path.join(os.path.dirname(os.path.abspath(target_out)), f"_tmp_hook_badge_{os.getpid()}.png")
+        create_hook_badge_image(
+            badge_text=badge_text.strip(),
+            badge_style=badge_style,
+            video_width=v_w,
+            video_height=v_h,
+            output_png_path=badge_png
+        )
+
+    has_audio = has_audio_stream(video_path)
+
+    hook_vf_list = [f"trim=start={hook_start_s:.3f}:end={hook_end_s:.3f}", "setpts=PTS-STARTPTS"]
+
+    if hook_style == "noir":
+        hook_vf_list.append("hue=s=0")
+    elif hook_style == "vignette_zoom":
+        scale_w = int(v_w * 1.10)
+        scale_h = int(v_h * 1.10)
+        if scale_w % 2 != 0: scale_w += 1
+        if scale_h % 2 != 0: scale_h += 1
+        hook_vf_list.append(f"scale={scale_w}:{scale_h}")
+        hook_vf_list.append(f"crop={v_w}:{v_h}")
+        hook_vf_list.append("vignette=PI/4")
+    elif hook_style == "retro":
+        hook_vf_list.append("colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131")
+    elif hook_style == "flash_forward":
+        hook_vf_list.append("eq=saturation=0.45:contrast=1.2:brightness=0.03")
+
+    if transition_type == "flash_white":
+        fade_d = min(0.24, max(0.12, hook_dur * 0.08))
+        fade_st = max(0.0, hook_dur - fade_d)
+        hook_vf_list.append(f"fade=t=out:st={fade_st:.3f}:d={fade_d:.3f}:color=white")
+    elif transition_type == "dip_black":
+        fade_d = min(0.20, max(0.10, hook_dur * 0.08))
+        fade_st = max(0.0, hook_dur - fade_d)
+        hook_vf_list.append(f"fade=t=out:st={fade_st:.3f}:d={fade_d:.3f}:color=black")
+
+    hook_vf_str = ",".join(hook_vf_list)
+    filter_parts = []
+
+    if badge_png and os.path.exists(badge_png):
+        filter_parts.append(f"[0:v]{hook_vf_str}[v_hook_raw]")
+        badge_y = max(40, int(v_h * 0.10))
+        filter_parts.append(f"[v_hook_raw][1:v]overlay=(W-w)/2:{badge_y}:enable='between(t,0,{hook_dur:.3f})'[v_hook]")
+    else:
+        filter_parts.append(f"[0:v]{hook_vf_str}[v_hook]")
+
+    if has_audio:
+        aud_fade_d = min(0.05, hook_dur * 0.05)
+        aud_fade_st = max(0.0, hook_dur - aud_fade_d)
+        filter_parts.append(f"[0:a]atrim=start={hook_start_s:.3f}:end={hook_end_s:.3f},asetpts=PTS-STARTPTS,afade=t=out:st={aud_fade_st:.3f}:d={aud_fade_d:.3f}[a_hook]")
+
+    if hook_mode == "move":
+        p1_dur = hook_start_s
+        p2_dur = total_dur - hook_end_s
+
+        concat_v_tags = ["[v_hook]"]
+        concat_a_tags = ["[a_hook]"] if has_audio else []
+        concat_n = 1
+
+        if p1_dur > 0.1:
+            filter_parts.append(f"[0:v]trim=start=0:end={hook_start_s:.3f},setpts=PTS-STARTPTS[v_p1]")
+            concat_v_tags.append("[v_p1]")
+            if has_audio:
+                filter_parts.append(f"[0:a]atrim=start=0:end={hook_start_s:.3f},asetpts=PTS-STARTPTS[a_p1]")
+                concat_a_tags.append("[a_p1]")
+            concat_n += 1
+
+        if p2_dur > 0.1:
+            filter_parts.append(f"[0:v]trim=start={hook_end_s:.3f}:end={total_dur:.3f},setpts=PTS-STARTPTS[v_p2]")
+            concat_v_tags.append("[v_p2]")
+            if has_audio:
+                filter_parts.append(f"[0:a]atrim=start={hook_end_s:.3f}:end={total_dur:.3f},asetpts=PTS-STARTPTS[a_p2]")
+                concat_a_tags.append("[a_p2]")
+            concat_n += 1
+
+        if has_audio:
+            concat_inputs = "".join([f"{v}{a}" for v, a in zip(concat_v_tags, concat_a_tags)])
+            filter_parts.append(f"{concat_inputs}concat=n={concat_n}:v=1:a=1[vout][aout]")
+        else:
+            concat_inputs = "".join(concat_v_tags)
+            filter_parts.append(f"{concat_inputs}concat=n={concat_n}:v=1:a=0[vout]")
+
+    else:
+        # Modo Teaser (Duplica trecho no início)
+        filter_parts.append(f"[0:v]trim=start=0:end={total_dur:.3f},setpts=PTS-STARTPTS[v_main]")
+        if has_audio:
+            filter_parts.append(f"[0:a]atrim=start=0:end={total_dur:.3f},asetpts=PTS-STARTPTS[a_main]")
+            filter_parts.append("[v_hook][a_hook][v_main][a_main]concat=n=2:v=1:a=1[vout][aout]")
+        else:
+            filter_parts.append("[v_hook][v_main]concat=n=2:v=1:a=0[vout]")
+
+    full_filter_complex = ";".join(filter_parts)
+
+    cmd = [
+        FFMPEG_EXE, "-y",
+        "-i", video_path
+    ]
+    if badge_png and os.path.exists(badge_png):
+        cmd.extend(["-i", badge_png])
+
+    cmd.extend([
+        "-filter_complex", full_filter_complex,
+        "-map", "[vout]"
+    ])
+    if has_audio:
+        cmd.extend([
+            "-map", "[aout]",
+            "-c:a", "aac",
+            "-b:a", "192k"
+        ])
+
+    cmd.extend([
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "20",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        tmp_out
+    ])
+
+    res = subprocess.run(cmd, capture_output=True, text=True)
+
+    if badge_png and os.path.exists(badge_png):
+        try:
+            os.remove(badge_png)
+        except Exception:
+            pass
+
+    if res.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
+        if is_in_place and os.path.exists(target_out):
+            try:
+                os.remove(target_out)
+            except Exception:
+                pass
+        os.replace(tmp_out, target_out)
+        new_dur = get_video_duration(target_out)
+        return {
+            "path": target_out,
+            "error": None,
+            "new_duration": new_dur,
+            "hook_duration": hook_dur,
+            "hook_start": hook_start_s,
+            "hook_end": hook_end_s,
+            "style": hook_style,
+            "mode": hook_mode
+        }
+    else:
+        if os.path.exists(tmp_out):
+            try:
+                os.remove(tmp_out)
+            except Exception:
+                pass
+        err_msg = res.stderr[-1200:] if res.stderr else "Erro desconhecido no FFmpeg ao aplicar gancho viral."
+        return {"path": None, "error": err_msg}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Histórico de Ajustes e Sinalização de Conclusão da Edição Rápida
 # ──────────────────────────────────────────────────────────────────────────────
 

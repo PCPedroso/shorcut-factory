@@ -78,7 +78,9 @@ from core.integrations import (
 from core.quick_editor import (
     get_video_duration, extract_frame_at_timestamp, trim_video, remove_snippet_and_merge,
     change_video_speed, list_edited_video_versions, delete_edited_video_version,
-    cleanup_all_edited_versions, load_edit_history, record_quick_edit
+    cleanup_all_edited_versions, load_edit_history, record_quick_edit,
+    add_viral_hook_to_video, create_hook_badge_image, apply_hook_style_to_frame,
+    HOOK_STYLES, HOOK_BADGE_PRESETS, HOOK_TRANSITIONS
 )
 from core.overlay_manager import apply_overlay_to_video, generate_overlay_preview, OVERLAY_PRESETS
 from core.audio_processor import (
@@ -658,10 +660,11 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     help="Remove automaticamente versões editadas anteriores desta pasta ao salvar a nova versão para não deixar vestígios."
                 )
 
-        tab_trim, tab_snip, tab_speed, tab_overlay, tab_headline, tab_audio = st.tabs([
+        tab_trim, tab_snip, tab_speed, tab_hook, tab_overlay, tab_headline, tab_audio = st.tabs([
             "✂️ Aparar (Trim)", 
             "🗑️ Remover Trecho",
             "⚡ Velocidade",
+            "🎣 Gancho Viral (Hook)",
             "🎨 Banner (Overlay)",
             "🏷️ Headline de Topo",
             "🎙️ Equalizador & Áudio"
@@ -933,6 +936,183 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                             video_path=video_path,
                             action_name="⚡ Aceleração de Velocidade",
                             details=f"Velocidade: {sel_speed:.2f}x (+{pct_faster:.0f}%) | Duração: {dur:.1f}s ➔ {speed_res.get('new_duration', dur_after_speed):.1f}s (Economia: {time_saved:.1f}s)",
+                            output_path=out_target
+                        )
+                        st.session_state[f"last_edit_status_{unique_key}"] = entry
+                        st.session_state[f"just_edited_{unique_key}"] = True
+                        if out_target:
+                            st.session_state[f"last_edited_video_{unique_key}"] = out_target
+                        st.rerun(scope="app")
+
+        with tab_hook:
+            st.markdown("##### 🎣 Gancho Viral (Hook / Teaser / Cold Open)")
+            st.caption("Selecione um trecho de alto impacto (ex: 3 a 6s) para iniciar o vídeo prendendo a atenção imediata do espectador nos primeiros 3 segundos.")
+
+            col_hk1, col_hk2 = st.columns(2)
+            with col_hk1:
+                default_h_start = round(min(float(dur * 0.4), max(0.0, float(dur - 4.0))), 1)
+                default_h_end = round(min(float(dur), default_h_start + 3.5), 1)
+
+                hook_start = st.number_input(
+                    "Ponto Inicial do Gancho (segundos):",
+                    min_value=0.0,
+                    max_value=max(0.0, float(dur - 0.5)),
+                    value=float(default_h_start),
+                    step=0.1,
+                    key=f"hook_start_{unique_key}",
+                    help="Segundo inicial do momento mais impactante, polêmico ou instigante do corte."
+                )
+            with col_hk2:
+                hook_end = st.number_input(
+                    "Ponto Final do Gancho (segundos):",
+                    min_value=min(float(dur), hook_start + 0.5),
+                    max_value=float(dur),
+                    value=float(max(hook_start + 0.5, default_h_end)),
+                    step=0.1,
+                    key=f"hook_end_{unique_key}",
+                    help="Segundo final do trecho do gancho (recomendado entre 2.5s e 6.0s)."
+                )
+
+            hook_dur_calc = hook_end - hook_start
+
+            col_hmode, col_hstyle = st.columns([1.2, 1.2])
+            with col_hmode:
+                hook_mode_choice = st.radio(
+                    "Estrutura do Gancho no Vídeo:",
+                    [
+                        "🔁 Teaser / Cold Open (Recomendado)",
+                        "🔀 Deslocar Trecho para o Início"
+                    ],
+                    index=0,
+                    key=f"hook_mode_choice_{unique_key}",
+                    help="Teaser: Duplica o momento no início para prender o espectador e o vídeo toca completo logo em seguida. Deslocar: Move o momento para o início e o remove da sua posição original."
+                )
+                hook_mode_param = "teaser" if "Teaser" in hook_mode_choice else "move"
+
+            with col_hstyle:
+                style_keys = list(HOOK_STYLES.keys())
+                style_labels = list(HOOK_STYLES.values())
+                sel_style_label = st.selectbox(
+                    "Diferenciação Visual do Gancho:",
+                    style_labels,
+                    index=0,
+                    key=f"hook_style_sel_{unique_key}",
+                    help="Aplica um tratamento visual diferenciado exclusivamente durante os segundos do gancho para que o espectador perceba que é um spoiler / teaser."
+                )
+                sel_style_key = style_keys[style_labels.index(sel_style_label)]
+
+            col_htrans, col_hbadge_style = st.columns([1.2, 1.2])
+            with col_htrans:
+                trans_keys = list(HOOK_TRANSITIONS.keys())
+                trans_labels = list(HOOK_TRANSITIONS.values())
+                sel_trans_label = st.selectbox(
+                    "Transição ao Fim do Gancho:",
+                    trans_labels,
+                    index=0,
+                    key=f"hook_trans_sel_{unique_key}",
+                    help="Efeito de transição na passagem do gancho para a história principal."
+                )
+                sel_trans_key = trans_keys[trans_labels.index(sel_trans_label)]
+
+            with col_hbadge_style:
+                badge_style_opt = st.selectbox(
+                    "Estilo da Etiqueta (Badge) do Gancho:",
+                    [
+                        "🔴 Alerta Vermelho (Red Alert)",
+                        "🟡 Amarelo Viral (Gold Viral)",
+                        "🟣 Dark Pill (Fundo Escuro com Borda Roxa)",
+                        "🔵 Ciano Elétrico (Neon Cyan)"
+                    ],
+                    index=0,
+                    key=f"hook_badge_style_{unique_key}"
+                )
+                badge_style_key = "red_alert"
+                if "Amarelo" in badge_style_opt: badge_style_key = "gold_viral"
+                elif "Dark" in badge_style_opt: badge_style_key = "dark_pill"
+                elif "Ciano" in badge_style_opt: badge_style_key = "neon_cyan"
+
+            badge_txt_key = f"hook_badge_text_{unique_key}"
+            if badge_txt_key not in st.session_state:
+                st.session_state[badge_txt_key] = "🔥 VEJA O QUE ACONTECEU..."
+
+            st.caption("🏷️ **Etiqueta Flutuante de Alerta (Opcional - Deixe vazio se não quiser badge):**")
+            badge_text_input = st.text_input(
+                "Texto do Badge no Gancho:",
+                value=st.session_state.get(badge_txt_key, "🔥 VEJA O QUE ACONTECEU..."),
+                key=f"hook_badge_input_{unique_key}",
+                placeholder="Ex: 🔥 VEJA O QUE ELE DISSE... ou deixe em branco"
+            )
+
+            st.caption("⚡ **Atalhos Rápidos de Texto:**")
+            bp_cols = st.columns(len(HOOK_BADGE_PRESETS))
+            for b_idx, b_preset in enumerate(HOOK_BADGE_PRESETS):
+                with bp_cols[b_idx]:
+                    if st.button(b_preset, key=f"btn_h_preset_{unique_key}_{b_idx}", use_container_width=True):
+                        st.session_state[badge_txt_key] = b_preset
+                        st.rerun(scope="fragment")
+
+            col_hprev_hdr, col_hprev_btn = st.columns([4.2, 0.8])
+            with col_hprev_hdr:
+                st.markdown("###### 👁️ Pré-visualização do Gancho Estilizado:")
+            with col_hprev_btn:
+                btn_trig_hook = st.button("🔄", key=f"btn_refresh_hook_prev_{unique_key}", help="Atualizar pré-visualização do gancho com o estilo selecionado")
+
+            if btn_trig_hook or f"hook_prev_img_{unique_key}" not in st.session_state:
+                raw_f = extract_frame_at_timestamp(video_path, hook_start)
+                styled_f = apply_hook_style_to_frame(raw_f, hook_style=sel_style_key) if raw_f is not None else None
+                st.session_state[f"hook_prev_img_{unique_key}"] = styled_f
+                st.session_state[f"hook_prev_raw_{unique_key}"] = raw_f
+
+            prev_styled = st.session_state.get(f"hook_prev_img_{unique_key}")
+            prev_raw = st.session_state.get(f"hook_prev_raw_{unique_key}")
+
+            if prev_styled is not None:
+                col_hp1, col_hp2 = st.columns(2)
+                with col_hp1:
+                    st.caption(f"Original ({hook_start:.1f}s):")
+                    if prev_raw is not None:
+                        safe_display_image(prev_raw, use_container_width=True)
+                with col_hp2:
+                    st.caption(f"Com Gancho Estilizado ({sel_style_label}):")
+                    safe_display_image(prev_styled, use_container_width=True)
+
+            new_dur_est = (dur + hook_dur_calc) if hook_mode_param == "teaser" else dur
+            st.info(
+                f"⏱️ **Trecho do Gancho:** `{hook_start:.1f}s ➔ {hook_end:.1f}s` (Duração: **{hook_dur_calc:.1f}s**) | "
+                f"**Nova Duração Final:** **`{new_dur_est:.1f}s`**\n\n"
+                f"🎬 **Estrutura:** Gancho [{sel_style_label}] ➔ Transição [{sel_trans_label}] ➔ Vídeo Principal."
+            )
+
+            btn_label_hook = "🎣 Salvar como Novo Vídeo com Gancho" if "Salvar como um novo vídeo" in save_mode else "🎣 Aplicar Gancho Viral no Vídeo Atual"
+            if st.button(btn_label_hook, key=f"btn_apply_hook_{unique_key}", type="primary", use_container_width=True):
+                with st.spinner("Construindo e renderizando gancho viral com FFmpeg..."):
+                    out_target = None
+                    if "Salvar como um novo vídeo" in save_mode:
+                        v_dir = os.path.dirname(video_path)
+                        b_name, ext = os.path.splitext(os.path.basename(video_path))
+                        suf = custom_suffix if custom_suffix else "_com_gancho"
+                        out_target = os.path.join(v_dir, f"{b_name}{suf}{ext}")
+
+                    hook_res = add_viral_hook_to_video(
+                        video_path=video_path,
+                        hook_start_s=hook_start,
+                        hook_end_s=hook_end,
+                        hook_style=sel_style_key,
+                        badge_text=badge_text_input.strip() if badge_text_input else "",
+                        badge_style=badge_style_key,
+                        transition_type=sel_trans_key,
+                        hook_mode=hook_mode_param,
+                        output_path=out_target
+                    )
+                    if hook_res.get("error"):
+                        st.error(f"Erro ao aplicar gancho viral: {hook_res['error']}")
+                    else:
+                        if "Salvar como um novo vídeo" in save_mode and clean_previous and out_target:
+                            cleanup_all_edited_versions(video_path, keep_path=out_target)
+                        entry = record_quick_edit(
+                            video_path=video_path,
+                            action_name="🎣 Gancho Viral (Hook / Teaser)",
+                            details=f"Trecho: {hook_start:.1f}s a {hook_end:.1f}s ({hook_dur_calc:.1f}s) | Estilo: {sel_style_label} | Modo: {hook_mode_choice} | Nova Duração: {hook_res.get('new_duration', new_dur_est):.1f}s",
                             output_path=out_target
                         )
                         st.session_state[f"last_edit_status_{unique_key}"] = entry

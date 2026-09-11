@@ -161,13 +161,14 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 - **✂️ Ferramenta Integrada de Edição Rápida, Ajuste Fino & Histórico Persistente (`core/quick_editor.py`, `app.py`)**:
   - **Sinalização Persistente de Conclusão**: Card verde com carimbo de data/hora, ação realizada, detalhes dos parâmetros e arquivo gerado.
   - **Histórico Completo de Edições (`historico_edicoes.json`)**: Histórico JSON de todos os ajustes aplicados cronologicamente.
-  - **6 Abas de Pós-Corte**:
+  - **7 Abas de Pós-Corte**:
     1. *✂️ Cortar Início/Fim (Trim)*: Ajuste cirúrgico das pontas sem reprocessamento completo.
     2. *🗑️ Remover Trecho (Snip & Merge)*: Eliminação de silêncios, gagues ou trechos indesejados no meio do vídeo.
     3. *⚡ Acelerar Vídeo (Speed Up)*: Aumento de velocidade de reprodução de **1.00x até 1.50x em passos de 0.05x** (com presets rápidos `1.00x`, `1.10x`, `1.20x`, `1.30x`, `1.50x`), utilizando filtros `setpts` e `atempo` do FFmpeg para manter o tom da voz 100% natural sem distorção ("sem voz de esquilo").
-    4. *🖼️ Adicionar Banner / Tarja*: Inserção de tarjas gráficas e logos com alinhamento instantâneo.
-    5. *🏷️ Headline de Topo*: Título magnético estilizado em alta conversão.
-    6. *🎙️ Equalizador & Áudio*: Limiter, De-clipper e nivelador dinâmico de volume.
+    4. *🎣 Gancho Viral (Hook / Teaser / Cold Open)*: Extração de trecho marcante (ex: 3 a 6s) para iniciar o vídeo prendendo a atenção nos primeiros 3 segundos. Suporta **Modo Teaser** (duplicação no início com vídeo completo logo em seguida) e **Modo Deslocar**, diferenciação visual nítida (*Preto e Branco / Noir*, *Vinheta + Zoom 1.10x*, *Sépia Retrô*, *Flash-Forward*), etiqueta/badge flutuante estilizado (com presets como `🔥 VEJA O QUE ELE DISSE...`, `👀 ASSISTA ATÉ O FINAL`) e transição cinematográfica (*Flash Branco / Dip to White*, *Fade para Preto*, *Corte Seco*).
+    5. *🖼️ Adicionar Banner / Tarja*: Inserção de tarjas gráficas e logos com alinhamento instantâneo.
+    6. *🏷️ Headline de Topo*: Título magnético estilizado em alta conversão.
+    7. *🎙️ Equalizador & Áudio*: Limiter, De-clipper e nivelador dinâmico de volume.
   - **🧹 Gerenciamento & Limpeza Automática de Versões Editadas Sem Deixar Vestígios**:
     - Opção automática *"Deletar versões anteriores deste corte editado ao salvar novo vídeo"* (`cleanup_all_edited_versions` e `delete_edited_video_version`), excluindo versões intermediárias residuais sem poluir o diretório ou causar confusão no catálogo.
     - Exclusão seletiva e segura com retenção estrita do vídeo original e da versão recém-gerada.
