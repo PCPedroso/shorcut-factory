@@ -210,6 +210,135 @@ def inject_time_mask_js():
 
 inject_time_mask_js()
 
+def inject_video_time_sync_js():
+    """
+    Injeta JavaScript para sincronizar o momento atual / pausado do player de vídeo
+    diretamente com o campo de captura de tempo, permitindo definir Tempo Inicial
+    e Tempo Final na Seção 3 (Fábrica de Enquadramento) com precisão milimétrica.
+    """
+    sync_script = """
+    <script>
+    (function() {
+        function formatSecToHHMMSS(sec) {
+            if (isNaN(sec) || sec < 0) sec = 0;
+            const h = Math.floor(sec / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            const s = Math.floor(sec % 60);
+            let ms = Math.round((sec - Math.floor(sec)) * 100);
+            if (ms >= 100) ms = 99;
+            const hh = String(h).padStart(2, '0');
+            const mm = String(m).padStart(2, '0');
+            const ss = String(s).padStart(2, '0');
+            const mss = String(ms).padStart(2, '0');
+            return `${hh}:${mm}:${ss}.${mss}`;
+        }
+
+        function setNativeInputValue(inp, val) {
+            if (!inp) return;
+            try {
+                const valueSetter = Object.getOwnPropertyDescriptor(inp, 'value')?.set;
+                const prototype = Object.getPrototypeOf(inp);
+                const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+                if (prototypeValueSetter && valueSetter !== prototypeValueSetter) {
+                    prototypeValueSetter.call(inp, val);
+                } else if (valueSetter) {
+                    valueSetter.call(inp, val);
+                } else {
+                    inp.value = val;
+                }
+                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                inp.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch (e) {
+                inp.value = val;
+            }
+        }
+
+        function syncAllTargetInputs(val) {
+            try {
+                const pDoc = (window.parent && window.parent.document) || document;
+                if (!pDoc) return;
+                const inputs = pDoc.querySelectorAll('input[type="text"]');
+                inputs.forEach(inp => {
+                    const label = (inp.getAttribute('aria-label') || '').toLowerCase();
+                    if (label.includes('momento pausado no player') || label.includes('player_synced_time')) {
+                        if (inp.value !== val) {
+                            setNativeInputValue(inp, val);
+                        }
+                    }
+                });
+            } catch (e) {}
+        }
+
+        function scanAndBindVideo() {
+            try {
+                const pDoc = (window.parent && window.parent.document) || document;
+                if (!pDoc) return;
+
+                const videos = pDoc.querySelectorAll('video');
+                videos.forEach(v => {
+                    if (v.dataset.timeSyncBound) return;
+                    v.dataset.timeSyncBound = "true";
+
+                    const onUpdate = () => {
+                        try { window.__viralcutLastActiveVideo = v; } catch (e) {}
+                        const formatted = formatSecToHHMMSS(v.currentTime);
+                        syncAllTargetInputs(formatted);
+                    };
+
+                    v.addEventListener('play', () => { try { window.__viralcutLastActiveVideo = v; } catch (e) {} });
+                    v.addEventListener('pause', onUpdate);
+                    v.addEventListener('seeked', onUpdate);
+                    v.addEventListener('timeupdate', () => {
+                        try { window.__viralcutLastActiveVideo = v; } catch (e) {}
+                        if (v.paused) onUpdate();
+                    });
+                });
+
+                const buttons = pDoc.querySelectorAll('button');
+                buttons.forEach(btn => {
+                    if (btn.dataset.timeSyncClickBound) return;
+                    const txt = (btn.innerText || '').toLowerCase();
+                    if (txt.includes('setar tempo inicial') || txt.includes('setar tempo final')) {
+                        btn.dataset.timeSyncClickBound = "true";
+                        const syncAction = () => {
+                            let activeVid = null;
+                            try { activeVid = window.__viralcutLastActiveVideo; } catch (e) {}
+                            if (!activeVid || !activeVid.isConnected) {
+                                activeVid = pDoc.querySelector('video');
+                            }
+                            if (activeVid) {
+                                const formatted = formatSecToHHMMSS(activeVid.currentTime);
+                                syncAllTargetInputs(formatted);
+                            }
+                        };
+                        btn.addEventListener('mousedown', syncAction, true);
+                        btn.addEventListener('pointerdown', syncAction, true);
+                        btn.addEventListener('click', syncAction, true);
+                    }
+                });
+            } catch (e) {}
+        }
+
+        try {
+            const rootWin = window.parent || window;
+            if (rootWin && rootWin.__viralcutVideoSyncAttached) {
+                scanAndBindVideo();
+                return;
+            }
+            if (rootWin) {
+                rootWin.__viralcutVideoSyncAttached = true;
+                setInterval(scanAndBindVideo, 600);
+            }
+        } catch (e) {}
+
+        scanAndBindVideo();
+    })();
+    </script>
+    """
+    st.html(sync_script, unsafe_allow_javascript=True)
+
+inject_video_time_sync_js()
+
 def safe_display_image(img_source, caption=None, use_container_width=True):
     """
     Exibe imagens no Streamlit lendo diretamente os bytes em memória
@@ -1824,6 +1953,28 @@ if show_sec1:
                         if st.button("✂️ Recortar na Seção 3 ➔", key="btn_top_jump_sec3", type="primary", use_container_width=True):
                             navigate_to_step("3")
                             st.rerun()
+
+                        col_top_s, col_top_e = st.columns(2)
+                        with col_top_s:
+                            if st.button("⏱️ Setar Tempo Inicial", key="btn_top_set_start_time", use_container_width=True, help="Define o momento pausado do vídeo como Tempo Inicial na Fábrica de Enquadramento (Seção 3)"):
+                                cur_t = normalize_time_mask(st.session_state.get("player_synced_time", "00:00:00.00"))
+                                st.session_state.final_start_time = cur_t
+                                if st.session_state.get("final_end_time"):
+                                    st.session_state.cut_ready_banner = f"✅ Intervalo selecionado: [{cur_t} → {st.session_state.final_end_time}]"
+                                else:
+                                    st.session_state.cut_ready_banner = f"⏱️ Tempo Inicial definido: [{cur_t}]"
+                                st.toast(f"✅ Tempo Inicial definido para {cur_t} na Seção 3!")
+                                st.rerun()
+                        with col_top_e:
+                            if st.button("⏱️ Setar Tempo Final", key="btn_top_set_end_time", use_container_width=True, help="Define o momento pausado do vídeo como Tempo Final na Fábrica de Enquadramento (Seção 3)"):
+                                cur_t = normalize_time_mask(st.session_state.get("player_synced_time", "00:00:00.00"))
+                                st.session_state.final_end_time = cur_t
+                                if st.session_state.get("final_start_time"):
+                                    st.session_state.cut_ready_banner = f"✅ Intervalo selecionado: [{st.session_state.final_start_time} → {cur_t}]"
+                                else:
+                                    st.session_state.cut_ready_banner = f"⏱️ Tempo Final definido: [{cur_t}]"
+                                st.toast(f"✅ Tempo Final definido para {cur_t} na Seção 3!")
+                                st.rerun()
                         st.caption("Isso excluirá os arquivos locais deste vídeo e refará o processamento do zero.")
                         if st.button("Confirmar Limpeza Total", type="primary", key="btn_confirm_wipe_top"):
                             for _f_del in [target_tr_file, target_audio_file, target_vfull, os.path.join(target_data_dir, "pautas.json"), os.path.join(target_data_dir, "shorts.json"), os.path.join(target_data_dir, "series.json")]:
@@ -2858,6 +3009,43 @@ if st.session_state.transcription_done:
                     if st.button("✂️ Ir para Recortes 9:16 (Seção 3) ➔", key="btn_jump_to_s3_from_vcard", type="primary", use_container_width=True):
                         navigate_to_step("3")
                         st.rerun()
+
+                    st.markdown("---")
+                    st.caption("⏱️ **Capturar Momento Pausado no Player:**")
+
+                    st.text_input(
+                        "Momento Pausado no Player (HH:MM:SS.ms):",
+                        value=st.session_state.get("player_synced_time", "00:00:00.00"),
+                        key="player_synced_time",
+                        help="Atualizado instantaneamente ao pausar o vídeo ou mover a barra de tempo. Você também pode digitar manualmente."
+                    )
+
+                    col_set_s, col_set_e = st.columns(2)
+                    with col_set_s:
+                        if st.button("⏱️ Setar Tempo Inicial", key="btn_set_start_time_s1", use_container_width=True, help="Define o momento pausado do vídeo como Tempo Inicial na Fábrica de Enquadramento (Seção 3)"):
+                            cur_t = normalize_time_mask(st.session_state.get("player_synced_time", "00:00:00.00"))
+                            st.session_state.final_start_time = cur_t
+                            if st.session_state.get("final_end_time"):
+                                st.session_state.cut_ready_banner = f"✅ Intervalo selecionado: [{cur_t} → {st.session_state.final_end_time}]"
+                            else:
+                                st.session_state.cut_ready_banner = f"⏱️ Tempo Inicial definido: [{cur_t}]"
+                            st.toast(f"✅ Tempo Inicial definido para {cur_t} na Seção 3!")
+                            st.rerun()
+                    with col_set_e:
+                        if st.button("⏱️ Setar Tempo Final", key="btn_set_end_time_s1", use_container_width=True, help="Define o momento pausado do vídeo como Tempo Final na Fábrica de Enquadramento (Seção 3)"):
+                            cur_t = normalize_time_mask(st.session_state.get("player_synced_time", "00:00:00.00"))
+                            st.session_state.final_end_time = cur_t
+                            if st.session_state.get("final_start_time"):
+                                st.session_state.cut_ready_banner = f"✅ Intervalo selecionado: [{st.session_state.final_start_time} → {cur_t}]"
+                            else:
+                                st.session_state.cut_ready_banner = f"⏱️ Tempo Final definido: [{cur_t}]"
+                            st.toast(f"✅ Tempo Final definido para {cur_t} na Seção 3!")
+                            st.rerun()
+
+                    s_cur = st.session_state.get("final_start_time", "")
+                    e_cur = st.session_state.get("final_end_time", "")
+                    if s_cur or e_cur:
+                        st.caption(f"🎯 **Configurado na Seção 3**: `[{s_cur or '00:00:00.00'} → {e_cur or '...'}]`")
             else:
                 st.warning("⚠️ **Arquivo de vídeo MP4 ainda não baixado para esta pasta.** O áudio e a transcrição estão prontos.")
                 col_down_v1, col_down_v2 = st.columns([1.5, 1])

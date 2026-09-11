@@ -30,6 +30,29 @@ class TestSection1VideoAccess(unittest.TestCase):
             vid = get_current_active_video_id()
             self.assertEqual(vid, "test_active_123")
 
+    def test_set_initial_and_final_time_from_player(self):
+        # Testa a lógica de transferir o momento pausado do player para a Seção 3
+        from core.analyzer import normalize_time_mask
+
+        session = {}
+        # Simula o momento pausado no player em 01:23.45 (1 minuto, 23 segundos, 45 ms)
+        session["player_synced_time"] = "00:01:23.45"
+
+        # 1. Simula clique em "Setar Tempo Inicial"
+        cur_t = normalize_time_mask(session["player_synced_time"])
+        session["final_start_time"] = cur_t
+        self.assertEqual(session["final_start_time"], "00:01:23.45")
+
+        # 2. Simula avançar o player e pausar em 02:40.00
+        session["player_synced_time"] = "00:02:40.00"
+        cur_t2 = normalize_time_mask(session["player_synced_time"])
+        session["final_end_time"] = cur_t2
+        self.assertEqual(session["final_end_time"], "00:02:40.00")
+
+        # 3. Intervalo resultante para corte na Seção 3
+        self.assertTrue(session["final_start_time"] < session["final_end_time"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
