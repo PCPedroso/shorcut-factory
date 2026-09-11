@@ -194,6 +194,13 @@ input[placeholder*="00:00:00"] {
     max-width: 480px;
     margin: 0 auto;
 }
+
+/* 11. Limite de altura proporcional para vídeos 9:16 verticais */
+div[data-testid="stVideo"] video {
+    max-height: 520px !important;
+    border-radius: 8px !important;
+    object-fit: contain !important;
+}
 </style>
 """
 

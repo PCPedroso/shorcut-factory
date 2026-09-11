@@ -5831,15 +5831,33 @@ if st.session_state.transcription_done:
                             st.error("❌ Erros: " + " · ".join(_batch_errors))
                         st.rerun()
 
-                # ── Resultados do último processamento em massa ────────────
+                # ── Resultados do processamento em massa ────────────
                 _batch_results = st.session_state.get("_carrossel_batch_results", [])
-                _batch_ok_valid = [r for r in _batch_results if os.path.exists(r["path"])]
+                _batch_ok_valid = [r for r in _batch_results if os.path.exists(r.get("path", ""))]
+                # Auto-detecta partes já processadas na pasta se a sessão tiver sido reiniciada
+                if not _batch_ok_valid and _carrossel_dir and os.path.isdir(_carrossel_dir):
+                    for _f in sorted(os.listdir(_carrossel_dir)):
+                        if _f.startswith("parte_") and ("_9-16_" in _f or "_16-9" in _f) and _f.endswith(".mp4"):
+                            _fp = os.path.join(_carrossel_dir, _f)
+                            if os.path.exists(_fp) and os.path.getsize(_fp) > 10240:
+                                _batch_ok_valid.append({"filename": _f, "path": _fp})
+
                 if _batch_ok_valid:
-                    st.markdown("#### 🎬 Partes Processadas")
-                    _res_cols_per_row = 2
+                    st.markdown("---")
+                    col_b_title, col_b_cols = st.columns([3.5, 1.5])
+                    with col_b_title:
+                        st.markdown(f"#### 🎬 Partes Processadas ({len(_batch_ok_valid)} vídeos)")
+                    with col_b_cols:
+                        _num_cols_sel = st.selectbox(
+                            "Colunas por linha:",
+                            [3, 4, 5, 6],
+                            index=1,  # 4 colunas por padrão (ideal para 9:16)
+                            key="carrossel_cols_selector"
+                        )
+                    _res_cols_per_row = _num_cols_sel
                     _res_rows = [_batch_ok_valid[i:i+_res_cols_per_row] for i in range(0, len(_batch_ok_valid), _res_cols_per_row)]
                     for _res_row in _res_rows:
-                        _rcols = st.columns(len(_res_row))
+                        _rcols = st.columns(_res_cols_per_row)
                         for _ri, _rp in enumerate(_res_row):
                             with _rcols[_ri]:
                                 _rp_mb = os.path.getsize(_rp["path"]) / (1024*1024)
