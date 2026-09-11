@@ -5604,6 +5604,210 @@ if st.session_state.transcription_done:
             st.markdown(f"📁 **Pasta Local:** [{existing_inst.get('folder_name', 'Abrir Pasta')}](file:///{link_fol_c}) &nbsp; `📁 {abs_fol_c}`", unsafe_allow_html=True)
             render_quick_editor_component(existing_inst["video_path"], f"cached_{_vid_id_cat}_{start_time}_{end_time}_{selected_aspect}")
     
+        # ══════════════════════════════════════════════════════════════════════
+        # 🎞️ CARROSSEL INTELIGENTE — Processamento em Massa das Partes
+        # ══════════════════════════════════════════════════════════════════════
+        _carrossel_dir = os.path.join("data", _vid_id_cat, "carrossel") if _vid_id_cat else None
+        _carrossel_parts = []
+        if _carrossel_dir and os.path.isdir(_carrossel_dir):
+            for _fname in sorted(os.listdir(_carrossel_dir)):
+                if _fname.startswith("parte_") and _fname.endswith(".mp4"):
+                    _fpath = os.path.join(_carrossel_dir, _fname)
+                    if os.path.exists(_fpath) and os.path.getsize(_fpath) > 10240:
+                        _carrossel_parts.append({"filename": _fname, "path": _fpath})
+
+        if _carrossel_parts:
+            st.markdown("---")
+            with st.expander(
+                f"🎞️ Carrossel Inteligente — {len(_carrossel_parts)} parte(s) disponíveis para processamento em massa",
+                expanded=st.session_state.get("_carousel_expander_open", False)
+            ):
+                st.markdown(
+                    f"<div style='background:linear-gradient(135deg,rgba(99,102,241,0.15),rgba(139,92,246,0.1));border:1px solid rgba(139,92,246,0.35);border-radius:10px;padding:12px 16px;margin-bottom:12px;'>"
+                    f"<b>⚡ Aplique as configurações atuais da Seção 3</b> em todas ou em partes selecionadas do carrossel.<br>"
+                    f"<span style='font-size:13px;color:#94a3b8;'>Os vídeos processados serão salvos na pasta "
+                    f"<code>data/{_vid_id_cat}/carrossel/</code> com sufixo <code>_processado.mp4</code>.</span>"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
+
+                # ── Seleção das partes ─────────────────────────────────────
+                col_sel_all, col_sel_none = st.columns([1, 4])
+                with col_sel_all:
+                    if st.button("☑️ Selecionar Tudo", key="btn_carrossel_select_all", use_container_width=True):
+                        for _cp in _carrossel_parts:
+                            st.session_state[f"_carrossel_sel_{_cp['filename']}"] = True
+                        st.rerun()
+                with col_sel_none:
+                    if st.button("🔲 Desmarcar Tudo", key="btn_carrossel_desel_all", use_container_width=True):
+                        for _cp in _carrossel_parts:
+                            st.session_state[f"_carrossel_sel_{_cp['filename']}"] = False
+                        st.rerun()
+
+                st.caption("**Selecione as partes que deseja processar:**")
+                _selected_parts = []
+                _cols_per_row = 3
+                _rows = [_carrossel_parts[i:i+_cols_per_row] for i in range(0, len(_carrossel_parts), _cols_per_row)]
+                for _row in _rows:
+                    _row_cols = st.columns(len(_row))
+                    for _ci, _cp in enumerate(_row):
+                        with _row_cols[_ci]:
+                            _sz_mb = os.path.getsize(_cp["path"]) / (1024*1024)
+                            _default_sel = st.session_state.get(f"_carrossel_sel_{_cp['filename']}", True)
+                            _is_selected = st.checkbox(
+                                f"**{_cp['filename']}** ({_sz_mb:.1f} MB)",
+                                value=_default_sel,
+                                key=f"_carrossel_sel_{_cp['filename']}"
+                            )
+                            if _is_selected:
+                                _selected_parts.append(_cp)
+                            # Mostra se já tem versão processada
+                            _proc_name = _cp['filename'].replace(".mp4", f"_{selected_aspect.replace(':','-')}.mp4")
+                            _proc_path = os.path.join(_carrossel_dir, _proc_name)
+                            if os.path.exists(_proc_path):
+                                st.caption(f"✅ Já processado")
+
+                st.markdown("")
+                _n_selected = len(_selected_parts)
+
+                if _n_selected == 0:
+                    st.info("☝️ Selecione ao menos uma parte para habilitar o processamento em massa.")
+                else:
+                    _safe_asp = selected_aspect.replace(":", "-")
+                    st.info(
+                        f"🎯 **{_n_selected} parte(s) selecionada(s)** · Formato: `{selected_aspect}` · "
+                        f"Saída: `parte_NN_{_safe_asp}.mp4`"
+                    )
+                    if st.button(
+                        f"🚀 Processar {_n_selected} Parte(s) Selecionada(s) com as Configurações Atuais",
+                        key="btn_carrossel_batch_process",
+                        type="primary",
+                        use_container_width=True
+                    ):
+                        _vfull_path = os.path.join("data", _vid_id_cat, "video_full.mp4")
+                        _transcript_path_c = os.path.join("data", _vid_id_cat, "transcript.json")
+                        _batch_errors = []
+                        _batch_ok = []
+                        _progress_bar = st.progress(0, text="Iniciando processamento em massa...")
+
+                        for _bi, _cp in enumerate(_selected_parts):
+                            _out_proc_name = _cp['filename'].replace(".mp4", f"_{_safe_asp}.mp4")
+                            _out_proc_path = os.path.join(_carrossel_dir, _out_proc_name)
+                            _frac = _bi / _n_selected
+                            _progress_bar.progress(_frac, text=f"⚙️ Processando {_cp['filename']} ({_bi+1}/{_n_selected})...")
+
+                            try:
+                                # Determina duração real de cada parte para passar como end_time
+                                _part_dur = get_video_duration(_cp["path"])
+                                def _fmt_dur(s):
+                                    h, m, sec = int(s // 3600), int((s % 3600) // 60), s % 60
+                                    return f"{h:02d}:{m:02d}:{sec:06.3f}"
+                                _part_end_str = _fmt_dur(_part_dur) if _part_dur > 0 else "23:59:59.000"
+
+                                _cut_res_c = cut_video(
+                                    _cp["path"],
+                                    "00:00:00.00",
+                                    _part_end_str,  # duração real da parte
+                                    _out_proc_path,
+                                    aspect_ratio_mode=selected_aspect,
+                                    horizontal_zoom=horizontal_zoom_val,
+                                    blur_zoom=blur_zoom_val,
+                                    blur_pan=blur_pan_val,
+                                    blur_intensity=blur_int_val,
+                                    blur_auto_tracking=(mode_blur_ctrl == "🤖 Auto-Zoom Inteligente no Personagem (Recomendado)"),
+                                    face_auto_zoom=face_zoom_active,
+                                    face_margin_ratio=face_margin_val,
+                                    person_preference=person_pref_val,
+                                    split_top_pan=split_top_pan,
+                                    split_bottom_pan=split_bottom_pan,
+                                    split_top_pan_y=split_top_pan_y,
+                                    split_bottom_pan_y=split_bottom_pan_y,
+                                    split_zoom=split_zoom_val,
+                                    split_divider_color=split_div_color,
+                                    split_divider_width=split_div_w,
+                                    split_auto_switch=split_auto_switch,
+                                    split_source_type=split_source_type,
+                                    split_video_path=split_video_path,
+                                    split_image_paths=split_image_paths,
+                                    split_media_position=split_media_position,
+                                    split_blur_margin_pct=split_blur_margin_pct,
+                                    subtitle_enabled=subtitle_enabled,
+                                    subtitle_transcript_path=_transcript_path_c if os.path.exists(_transcript_path_c) else None,
+                                    subtitle_highlight_color=subtitle_highlight_color,
+                                    subtitle_base_color=subtitle_base_color,
+                                    subtitle_font_size=subtitle_font_size,
+                                    headline_enabled=headline_enabled,
+                                    headline_text=cut_headline_val or cut_title_val or _cp['filename'],
+                                    headline_preset=headline_preset,
+                                    headline_text_color=headline_text_color,
+                                    headline_bg_color=headline_bg_color,
+                                    headline_font_size=headline_font_size,
+                                    headline_margin_top=headline_margin_top,
+                                    emojis_enabled=emojis_enabled,
+                                    zoom_punch_enabled=zoom_punch_enabled,
+                                    bg_music_enabled=bg_music_enabled,
+                                    bg_music_track_path=bg_music_track_path,
+                                    bg_music_volume=bg_music_volume,
+                                    ducking_preset=ducking_preset,
+                                    progress_bar_enabled=progress_bar_enabled,
+                                    progress_bar_color=progress_bar_color,
+                                    progress_bar_height=progress_bar_height,
+                                    callout_enabled=callout_enabled,
+                                    callout_text=callout_text,
+                                    callout_duration=callout_duration,
+                                    climax_zoom_enabled=climax_zoom_enabled,
+                                    climax_zoom_factor=climax_zoom_factor,
+                                    thumbnail_enabled=False,
+                                )
+                                if _cut_res_c.get("error"):
+                                    _batch_errors.append(f"{_cp['filename']}: {_cut_res_c['error']}")
+                                elif os.path.exists(_out_proc_path) and os.path.getsize(_out_proc_path) > 1024:
+                                    _batch_ok.append({"filename": _out_proc_name, "path": _out_proc_path})
+                                else:
+                                    _batch_errors.append(f"{_cp['filename']}: arquivo de saída vazio ou inválido")
+                            except Exception as _exc_c:
+                                _batch_errors.append(f"{_cp['filename']}: {str(_exc_c)}")
+
+                        _progress_bar.progress(1.0, text="✅ Processamento concluído!")
+
+                        if _batch_ok:
+                            st.session_state["_carrossel_batch_results"] = _batch_ok
+                            st.session_state["_carousel_expander_open"] = True
+                            st.success(f"🎉 **{len(_batch_ok)}/{_n_selected}** parte(s) processada(s) com sucesso!")
+                        if _batch_errors:
+                            st.error("❌ Erros: " + " · ".join(_batch_errors))
+                        st.rerun()
+
+                # ── Resultados do último processamento em massa ────────────
+                _batch_results = st.session_state.get("_carrossel_batch_results", [])
+                _batch_ok_valid = [r for r in _batch_results if os.path.exists(r["path"])]
+                if _batch_ok_valid:
+                    st.markdown("#### 🎬 Partes Processadas")
+                    _res_cols_per_row = 2
+                    _res_rows = [_batch_ok_valid[i:i+_res_cols_per_row] for i in range(0, len(_batch_ok_valid), _res_cols_per_row)]
+                    for _res_row in _res_rows:
+                        _rcols = st.columns(len(_res_row))
+                        for _ri, _rp in enumerate(_res_row):
+                            with _rcols[_ri]:
+                                _rp_mb = os.path.getsize(_rp["path"]) / (1024*1024)
+                                st.caption(f"📹 **{_rp['filename']}** ({_rp_mb:.1f} MB)")
+                                safe_display_video(_rp["path"])
+                                col_dl_r, col_open_r = st.columns(2)
+                                with col_dl_r:
+                                    with open(_rp["path"], "rb") as _rf:
+                                        st.download_button(
+                                            label=f"📥 Baixar",
+                                            data=_rf,
+                                            file_name=_rp["filename"],
+                                            mime="video/mp4",
+                                            use_container_width=True,
+                                            key=f"dl_batch_res_{_rp['filename']}"
+                                        )
+                                with col_open_r:
+                                    if st.button("📂 Pasta", key=f"open_batch_res_{_rp['filename']}", use_container_width=True):
+                                        open_in_file_explorer(_rp["path"])
+                                        st.toast("Pasta aberta!")
+
         st.markdown("")
         render_button_label = "🔄 Forçar Re-renderização no Formato Escolhido" if existing_inst else "✂️ Gerar Corte no Formato Escolhido"
         if st.button(render_button_label, type="primary" if not existing_inst else "secondary", use_container_width=True):
