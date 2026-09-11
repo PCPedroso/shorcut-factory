@@ -183,7 +183,7 @@ def inject_time_mask_js():
                 inputs.forEach(inp => {
                     const label = (inp.getAttribute('aria-label') || '').toLowerCase();
                     const ph = (inp.getAttribute('placeholder') || '').toLowerCase();
-                    if (label.includes('(hh:mm:ss') || label.includes('tempo inicial') || label.includes('tempo final') || ph.includes('00:00:00') || ph.includes('00:10:00')) {
+                    if (!label.includes('player') && (label.includes('(hh:mm:ss') || label.includes('tempo inicial') || label.includes('tempo final') || ph.includes('00:00:00') || ph.includes('00:10:00'))) {
                         attachMask(inp);
                     }
                 });
@@ -233,39 +233,29 @@ def inject_video_time_sync_js():
             return `${hh}:${mm}:${ss}.${mss}`;
         }
 
-        function setNativeInputValue(inp, val) {
-            if (!inp) return;
-            try {
-                const valueSetter = Object.getOwnPropertyDescriptor(inp, 'value')?.set;
-                const prototype = Object.getPrototypeOf(inp);
-                const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
-                if (prototypeValueSetter && valueSetter !== prototypeValueSetter) {
-                    prototypeValueSetter.call(inp, val);
-                } else if (valueSetter) {
-                    valueSetter.call(inp, val);
-                } else {
-                    inp.value = val;
-                }
-                inp.dispatchEvent(new Event('input', { bubbles: true }));
-                inp.dispatchEvent(new Event('change', { bubbles: true }));
-            } catch (e) {
-                inp.value = val;
-            }
-        }
-
-        function syncAllTargetInputs(val) {
+        function updateTargetInputs(val) {
             try {
                 const pDoc = (window.parent && window.parent.document) || document;
                 if (!pDoc) return;
                 const inputs = pDoc.querySelectorAll('input[type="text"]');
                 inputs.forEach(inp => {
                     const label = (inp.getAttribute('aria-label') || '').toLowerCase();
-                    if (label.includes('momento pausado no player') || label.includes('player_synced_time')) {
+                    if (label.includes('momento pausado') || label.includes('player_synced')) {
                         if (inp.value !== val) {
-                            setNativeInputValue(inp, val);
+                            const lastVal = inp.value;
+                            inp.value = val;
+                            const tracker = inp._valueTracker;
+                            if (tracker) tracker.setValue(lastVal);
+                            inp.dispatchEvent(new Event('input', { bubbles: true }));
+                            inp.dispatchEvent(new Event('change', { bubbles: true }));
                         }
                     }
                 });
+
+                const badge = pDoc.getElementById('viralcut-player-time-badge');
+                if (badge) {
+                    badge.innerHTML = val;
+                }
             } catch (e) {}
         }
 
@@ -279,41 +269,81 @@ def inject_video_time_sync_js():
                     if (v.dataset.timeSyncBound) return;
                     v.dataset.timeSyncBound = "true";
 
-                    const onUpdate = () => {
-                        try { window.__viralcutLastActiveVideo = v; } catch (e) {}
+                    // Restaura posição prévia se existir
+                    try {
+                        const savedPos = window.sessionStorage.getItem('viralcut_saved_video_pos');
+                        if (savedPos && !isNaN(parseFloat(savedPos)) && parseFloat(savedPos) > 0) {
+                            if (Math.abs(v.currentTime - parseFloat(savedPos)) > 1) {
+                                v.currentTime = parseFloat(savedPos);
+                            }
+                        }
+                    } catch (e) {}
+
+                    // NOTA CRÍTICA: NUNCA escutar 'timeupdate' para permitir arraste suave de 60fps sem travar
+                    const onPauseOrSeeked = () => {
+                        window.__viralcutCurrentVideoTime = v.currentTime;
+                        try {
+                            window.sessionStorage.setItem('viralcut_saved_video_pos', String(v.currentTime));
+                        } catch (e) {}
                         const formatted = formatSecToHHMMSS(v.currentTime);
-                        syncAllTargetInputs(formatted);
+                        const badge = pDoc.getElementById('viralcut-player-time-badge');
+                        if (badge) {
+                            badge.innerHTML = formatted;
+                        }
                     };
 
-                    v.addEventListener('play', () => { try { window.__viralcutLastActiveVideo = v; } catch (e) {} });
-                    v.addEventListener('pause', onUpdate);
-                    v.addEventListener('seeked', onUpdate);
-                    v.addEventListener('timeupdate', () => {
-                        try { window.__viralcutLastActiveVideo = v; } catch (e) {}
-                        if (v.paused) onUpdate();
-                    });
+                    v.addEventListener('pause', onPauseOrSeeked);
+                    v.addEventListener('seeked', onPauseOrSeeked);
                 });
 
                 const buttons = pDoc.querySelectorAll('button');
                 buttons.forEach(btn => {
                     if (btn.dataset.timeSyncClickBound) return;
                     const txt = (btn.innerText || '').toLowerCase();
-                    if (txt.includes('setar tempo inicial') || txt.includes('setar tempo final')) {
+                    const isStart = txt.includes('setar tempo inicial');
+                    const isEnd = txt.includes('setar tempo final');
+
+                    if (isStart || isEnd) {
                         btn.dataset.timeSyncClickBound = "true";
-                        const syncAction = () => {
+                        const onSetTimeClick = () => {
                             let activeVid = null;
-                            try { activeVid = window.__viralcutLastActiveVideo; } catch (e) {}
-                            if (!activeVid || !activeVid.isConnected) {
-                                activeVid = pDoc.querySelector('video');
+                            const allVids = pDoc.querySelectorAll('video');
+                            if (allVids.length > 0) {
+                                activeVid = allVids[0];
                             }
-                            if (activeVid) {
-                                const formatted = formatSecToHHMMSS(activeVid.currentTime);
-                                syncAllTargetInputs(formatted);
+
+                            let sec = 0;
+                            if (window.__viralcutCurrentVideoTime !== undefined && !isNaN(window.__viralcutCurrentVideoTime)) {
+                                sec = window.__viralcutCurrentVideoTime;
+                            } else if (activeVid && !isNaN(activeVid.currentTime)) {
+                                sec = activeVid.currentTime;
                             }
+
+                            try {
+                                window.sessionStorage.setItem('viralcut_saved_video_pos', String(sec));
+                            } catch (e) {}
+
+                            const formatted = formatSecToHHMMSS(sec);
+
+                            // 1. Atualiza query param do Streamlit de forma síncrona
+                            try {
+                                const rootWin = window.parent || window;
+                                const u = new URL(rootWin.location.href);
+                                if (isStart) {
+                                    u.searchParams.set('sync_s1_start', formatted);
+                                } else {
+                                    u.searchParams.set('sync_s1_end', formatted);
+                                }
+                                rootWin.history.replaceState(null, '', u.toString());
+                            } catch (e) {}
+
+                            // 2. Atualiza inputs do Streamlit
+                            updateTargetInputs(formatted);
                         };
-                        btn.addEventListener('mousedown', syncAction, true);
-                        btn.addEventListener('pointerdown', syncAction, true);
-                        btn.addEventListener('click', syncAction, true);
+
+                        btn.addEventListener('mousedown', onSetTimeClick, true);
+                        btn.addEventListener('pointerdown', onSetTimeClick, true);
+                        btn.addEventListener('click', onSetTimeClick, true);
                     }
                 });
             } catch (e) {}
@@ -327,7 +357,7 @@ def inject_video_time_sync_js():
             }
             if (rootWin) {
                 rootWin.__viralcutVideoSyncAttached = true;
-                setInterval(scanAndBindVideo, 600);
+                setInterval(scanAndBindVideo, 800);
             }
         } catch (e) {}
 
@@ -368,7 +398,7 @@ def safe_display_image(img_source, caption=None, use_container_width=True):
         return True
     return False
 
-def safe_display_video(video_path: str):
+def safe_display_video(video_path: str, start_time: int = 0):
     """
     Garante reprodução e streaming progressivo de vídeo MP4 via HTTP nativo do Streamlit,
     evitando ler arquivos de 50-200MB inteiramente na memória RAM e sem sobrecarregar o WebSocket.
@@ -381,16 +411,18 @@ def safe_display_video(video_path: str):
         st.warning(f"Arquivo de vídeo não encontrado ou vazio: {video_path}")
         return
 
+    _st_time = int(start_time or 0)
+
     # 1. Tenta passar o caminho do arquivo direto (Streaming HTTP via MediaFileManager nativo)
     try:
-        st.video(norm_p)
+        st.video(norm_p, start_time=_st_time)
         return
     except Exception:
         pass
 
     # 2. Fallback com caminho normalizado com barras para frente
     try:
-        st.video(norm_p.replace('\\', '/'))
+        st.video(norm_p.replace('\\', '/'), start_time=_st_time)
         return
     except Exception:
         pass
@@ -398,7 +430,7 @@ def safe_display_video(video_path: str):
     # 3. Fallback abrindo como stream controlado (sem ler todo o arquivo em RAM com .read())
     try:
         with open(norm_p, "rb") as f_v:
-            st.video(f_v)
+            st.video(f_v, start_time=_st_time)
             return
     except Exception as e_vid:
         st.error(f"Erro ao reproduzir vídeo: {e_vid}")
@@ -1931,7 +1963,7 @@ if show_sec1:
                 with st.expander("🎬 Assistir Vídeo Original Identificado no Projeto", expanded=st.session_state.get("show_top_video_preview", False)):
                     _col_v1, _col_v2 = st.columns([2.2, 1.2])
                     with _col_v1:
-                        safe_display_video(target_vfull)
+                        safe_display_video(target_vfull, start_time=int(st.session_state.get("video_seek_time", 0) or 0))
                     with _col_v2:
                         _v_res = get_video_resolution(target_vfull)
                         _v_dur = get_video_duration(target_vfull)
@@ -1959,6 +1991,8 @@ if show_sec1:
                             if st.button("⏱️ Setar Tempo Inicial", key="btn_top_set_start_time", use_container_width=True, help="Define o momento pausado do vídeo como Tempo Inicial na Fábrica de Enquadramento (Seção 3)"):
                                 cur_t = normalize_time_mask(st.session_state.get("player_synced_time", "00:00:00.00"))
                                 st.session_state.final_start_time = cur_t
+                                st.session_state._pending_start_time = cur_t
+                                st.session_state.video_seek_time = parse_time_str(cur_t) or 0
                                 if st.session_state.get("final_end_time"):
                                     st.session_state.cut_ready_banner = f"✅ Intervalo selecionado: [{cur_t} → {st.session_state.final_end_time}]"
                                 else:
@@ -1969,6 +2003,8 @@ if show_sec1:
                             if st.button("⏱️ Setar Tempo Final", key="btn_top_set_end_time", use_container_width=True, help="Define o momento pausado do vídeo como Tempo Final na Fábrica de Enquadramento (Seção 3)"):
                                 cur_t = normalize_time_mask(st.session_state.get("player_synced_time", "00:00:00.00"))
                                 st.session_state.final_end_time = cur_t
+                                st.session_state._pending_end_time = cur_t
+                                st.session_state.video_seek_time = parse_time_str(cur_t) or 0
                                 if st.session_state.get("final_start_time"):
                                     st.session_state.cut_ready_banner = f"✅ Intervalo selecionado: [{st.session_state.final_start_time} → {cur_t}]"
                                 else:
@@ -2970,6 +3006,37 @@ if st.session_state.transcription_done:
     yt_blocks = build_youtube_transcript_blocks(st.session_state.segments)
 
     if show_sec1:
+        # Captura parâmetros de tempo síncronos enviados pelo JavaScript do player
+        if "sync_s1_start" in st.query_params:
+            _qs = st.query_params["sync_s1_start"]
+            if isinstance(_qs, list): _qs = _qs[0]
+            _ns = normalize_time_mask(_qs)
+            st.session_state.final_start_time = _ns
+            st.session_state._pending_start_time = _ns
+            st.session_state.player_synced_time = _ns
+            st.session_state.video_seek_time = parse_time_str(_ns) or 0
+            if st.session_state.get("final_end_time"):
+                st.session_state.cut_ready_banner = f"✅ Intervalo selecionado: [{_ns} → {st.session_state.final_end_time}]"
+            else:
+                st.session_state.cut_ready_banner = f"⏱️ Tempo Inicial definido: [{_ns}]"
+            st.toast(f"✅ Tempo Inicial definido para {_ns} na Seção 3!")
+            del st.query_params["sync_s1_start"]
+
+        if "sync_s1_end" in st.query_params:
+            _qe = st.query_params["sync_s1_end"]
+            if isinstance(_qe, list): _qe = _qe[0]
+            _ne = normalize_time_mask(_qe)
+            st.session_state.final_end_time = _ne
+            st.session_state._pending_end_time = _ne
+            st.session_state.player_synced_time = _ne
+            st.session_state.video_seek_time = parse_time_str(_ne) or 0
+            if st.session_state.get("final_start_time"):
+                st.session_state.cut_ready_banner = f"✅ Intervalo selecionado: [{st.session_state.final_start_time} → {_ne}]"
+            else:
+                st.session_state.cut_ready_banner = f"⏱️ Tempo Final definido: [{_ne}]"
+            st.toast(f"✅ Tempo Final definido para {_ne} na Seção 3!")
+            del st.query_params["sync_s1_end"]
+
         # 🎬 Acesso ao Vídeo Completo Processado na Primeira Fase (Seção 1)
         has_main_v = bool(main_video_path and os.path.exists(main_video_path) and os.path.getsize(main_video_path) > 10240)
 
@@ -2982,7 +3049,7 @@ if st.session_state.transcription_done:
                 col_v_left, col_v_right = st.columns([2.2, 1.2])
                 with col_v_left:
                     st.markdown(f"##### 🎥 Reprodução do Vídeo Original ({_v_res})")
-                    safe_display_video(main_video_path)
+                    safe_display_video(main_video_path, start_time=int(st.session_state.get("video_seek_time", 0) or 0))
                 with col_v_right:
                     st.markdown("##### 📊 Metadados do Arquivo")
                     st.markdown(f"""
@@ -3013,6 +3080,13 @@ if st.session_state.transcription_done:
                     st.markdown("---")
                     st.caption("⏱️ **Capturar Momento Pausado no Player:**")
 
+                    st.markdown(
+                        f'<div style="background: rgba(99, 102, 241, 0.12); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 8px; padding: 6px 12px; margin-bottom: 8px; font-size: 13px; color: #cbd5e1;">'
+                        f'⏱️ Momento Atual do Player: <strong id="viralcut-player-time-badge" style="color: #60a5fa;">{st.session_state.get("player_synced_time", "00:00:00.00")}</strong>'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
+
                     st.text_input(
                         "Momento Pausado no Player (HH:MM:SS.ms):",
                         value=st.session_state.get("player_synced_time", "00:00:00.00"),
@@ -3025,6 +3099,8 @@ if st.session_state.transcription_done:
                         if st.button("⏱️ Setar Tempo Inicial", key="btn_set_start_time_s1", use_container_width=True, help="Define o momento pausado do vídeo como Tempo Inicial na Fábrica de Enquadramento (Seção 3)"):
                             cur_t = normalize_time_mask(st.session_state.get("player_synced_time", "00:00:00.00"))
                             st.session_state.final_start_time = cur_t
+                            st.session_state._pending_start_time = cur_t
+                            st.session_state.video_seek_time = parse_time_str(cur_t) or 0
                             if st.session_state.get("final_end_time"):
                                 st.session_state.cut_ready_banner = f"✅ Intervalo selecionado: [{cur_t} → {st.session_state.final_end_time}]"
                             else:
@@ -3035,6 +3111,8 @@ if st.session_state.transcription_done:
                         if st.button("⏱️ Setar Tempo Final", key="btn_set_end_time_s1", use_container_width=True, help="Define o momento pausado do vídeo como Tempo Final na Fábrica de Enquadramento (Seção 3)"):
                             cur_t = normalize_time_mask(st.session_state.get("player_synced_time", "00:00:00.00"))
                             st.session_state.final_end_time = cur_t
+                            st.session_state._pending_end_time = cur_t
+                            st.session_state.video_seek_time = parse_time_str(cur_t) or 0
                             if st.session_state.get("final_start_time"):
                                 st.session_state.cut_ready_banner = f"✅ Intervalo selecionado: [{st.session_state.final_start_time} → {cur_t}]"
                             else:
