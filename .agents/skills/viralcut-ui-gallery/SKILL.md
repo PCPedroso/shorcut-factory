@@ -39,4 +39,9 @@ Este guia define as boas práticas de desenvolvimento de interface no `app.py` e
    - Utilizar `navigate_to_step("X")` ao encaminhar fluxos entre etapas automaticamente.
 6. **Acesso Imediato ao Vídeo na Ingestão (Seção 1)**:
    - Logo após o processamento inicial ou transcrição, disponibilizar card/expander de visualização do vídeo completo (`video_full.mp4`) com streaming nativo (`safe_display_video`), metadados (resolução, duração, tamanho) e botões diretos de download e abertura no Explorer, eliminando a necessidade de avançar para a Seção 3 apenas para conferir o material de origem.
+7. **Sincronização Atômica Player-to-Section3**:
+   - **Zero-Freeze Seek**: Nunca escutar `timeupdate` disparando eventos para React/Streamlit durante o playback ou arraste com mouse; o arraste deve ser 100% nativo.
+   - **Captura Precisa de Timestamp**: Escutar apenas `pause` e `seeked` para atualizar badge DOM leve (`#viralcut-player-time-badge`), e nos cliques de botão de setar tempo (`Setar Tempo Inicial` / `Setar Tempo Final`), injetar via URL query params (`sync_s1_start`/`sync_s1_end`) e limpar `_valueTracker` no React 18.
+   - **Manutenção de Posição (`start_time`)**: Passar `start_time` em `safe_display_video` com base no timestamp selecionado para evitar que o player resete para o início (`00:00`) após cliques e reruns.
+
 

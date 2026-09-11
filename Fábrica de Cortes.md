@@ -266,10 +266,14 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
     - `📂 Abrir Pasta no Windows Explorer`: Abertura instantânea da pasta do projeto no explorador de arquivos do Windows.
     - `✂️ Ir Direto para Recortes (Seção 3) ➔`: Atalho de transição rápida para enquadramento e cortes.
     - `⏱️ Setar Tempo Inicial` e `⏱️ Setar Tempo Final`: Botões inteligentes com sincronização JavaScript do player de vídeo (`inject_video_time_sync_js`), capturando o momento exato em que o vídeo estiver pausado ou avançado e preenchendo automaticamente `Tempo Inicial` e `Tempo Final` na **Fábrica de Enquadramento (Seção 3)** com precisão de milissegundos.
+      - **Arraste e Posicionamento Fluido a 60 FPS (Zero-Freeze Seek)**: Eliminação de listeners invasivos em `timeupdate` durante a reprodução ou arraste com mouse, garantindo que o stream nativo do navegador opere com fluidez total sem sobrecarregar o WebSocket do Streamlit nem desmontar o elemento `<video>`.
+      - **Sincronização Atômica via Query Params & ValueTracker**: Injeção direta e síncrona dos timestamps capturados nos parâmetros de estado (`sync_s1_start` / `sync_s1_end`) combinada com reset do `_valueTracker` do React 18, prevenindo perda de valores entre renders.
+      - **Preservação de Posição (`start_time` em `safe_display_video`)**: O player memoriza e mantém o segundo exato onde o vídeo foi posicionado, evitando que o player resete para o início (`00:00`) ao clicar nos botões de configuração de tempo.
+      - **Badge Visual em Tempo Real**: Exibição do momento atual pausado (`⏱️ Momento Atual do Player`) atualizado diretamente no DOM sem acionar re-renderizações desnecessárias da aplicação.
     - `⏬ Baixar Vídeo MP4 Completo Agora`: Botão em 1 clique para baixar o vídeo caso a ingestão inicial tenha focado apenas em áudio/transcrição (ex: lives longas).
-  - **Integração no Dashboard Modular de Topo**: Botão `🎬 Assistir Vídeo Local` no card de conteúdo existente do projeto para inspecionar vídeos já baixados imediatamente.
+  - **Integração no Dashboard Modular de Topo**: Botão `🎬 Assistir Vídeo Local` no card de conteúdo existente do projeto para inspecionar vídeos já baixados imediatamente com os mesmos botões de captura de tempo inicial e final.
 - **🧪 Suíte de 127 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (incluindo testes de quick editor, partial download, audio mixer, translator, face tracker, proportional split screen, headline drawer, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização de tempo do player).
+  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (incluindo testes de quick editor, partial download, audio mixer, translator, face tracker, proportional split screen, headline drawer, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
 
 ---
 
