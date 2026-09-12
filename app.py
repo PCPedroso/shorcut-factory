@@ -1630,9 +1630,30 @@ def render_quick_editor_component(video_path: str, unique_key: str):
             with col_hl_prev_btn:
                 btn_trig_hl = st.button("🔄", key=f"btn_refresh_hl_prev_{unique_key}", help="Aplicar ajustes na pré-visualização da Headline")
 
+            # Posicionamento inteligente da prévia: se a headline inicia após o gancho,
+            # posiciona a prévia em pelo menos +1.0s após o início da headline para exibir o texto na tela.
+            prev_sec_key = f"hl_post_prev_sec_{unique_key}"
+            if delay_hook_on and final_hl_start_offset > 0:
+                recommended_sec = min(float(dur), round(final_hl_start_offset + 1.0, 1))
+                cur_prev_sec = st.session_state.get(prev_sec_key)
+                last_offset = st.session_state.get(f"hl_last_offset_synced_{unique_key}")
+                if cur_prev_sec is None or cur_prev_sec < final_hl_start_offset or last_offset != final_hl_start_offset:
+                    st.session_state[prev_sec_key] = recommended_sec
+                    st.session_state[f"hl_last_offset_synced_{unique_key}"] = final_hl_start_offset
+                    st.session_state.pop(f"cached_hl_prev_{unique_key}", None)
+            else:
+                if prev_sec_key not in st.session_state:
+                    st.session_state[prev_sec_key] = min(1.5, float(dur / 2))
+
             col_hl_prev_ctrl, col_hl_prev_view = st.columns([1.5, 2.5])
             with col_hl_prev_ctrl:
-                hl_preview_sec = st.slider("Segundo para visualização:", 0.0, float(dur), min(1.5, float(dur/2)), 0.5, key=f"hl_post_prev_sec_{unique_key}")
+                hl_preview_sec = st.slider(
+                    "Segundo para visualização:",
+                    0.0,
+                    float(dur),
+                    step=0.5,
+                    key=prev_sec_key
+                )
                 st.caption("Faça os ajustes desejados e clique no botão 🔄 para atualizar a prévia.")
 
             # Gera ou atualiza a prévia automaticamente quando necessário
