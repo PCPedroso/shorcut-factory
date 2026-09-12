@@ -62,7 +62,11 @@ from core.video_processor import (
 from core.library_manager import get_library, add_or_update_video_in_library, remove_video_from_library
 from core.config_manager import load_settings, save_all_settings, save_setting
 from core.export_kit import build_cut_folder_name, create_viral_package
-from core.cuts_catalog import get_cut_entry, get_format_instance, register_cut_instance, update_cut_texts_only, delete_entire_cut, delete_format_instance, load_cuts_catalog, set_active_thumbnail_variation, update_cut_thumbnail_in_catalog
+from core.cuts_catalog import (
+    get_cut_entry, get_format_instance, register_cut_instance, update_cut_texts_only,
+    delete_entire_cut, delete_format_instance, load_cuts_catalog, set_active_thumbnail_variation,
+    update_cut_thumbnail_in_catalog, sync_carrossel_parts_to_catalog
+)
 from core.batch_processor import process_batch_cuts
 from core.headline_drawer import (
     HEADLINE_PRESETS, generate_headline_preview, apply_headline_to_video,
@@ -6219,7 +6223,7 @@ if _has_media_ready:
         _carrossel_parts = []
         if _carrossel_dir and os.path.isdir(_carrossel_dir):
             for _fname in sorted(os.listdir(_carrossel_dir)):
-                if _fname.startswith("parte_") and _fname.endswith(".mp4"):
+                if _fname.startswith("parte_") and _fname.endswith(".mp4") and not any(k in _fname for k in ["_9-16", "_16-9", "_editado", "_processado"]):
                     _fpath = os.path.join(_carrossel_dir, _fname)
                     if os.path.exists(_fpath) and os.path.getsize(_fpath) > 10240:
                         _carrossel_parts.append({"filename": _fname, "path": _fpath})
@@ -6396,7 +6400,8 @@ if _has_media_ready:
                         if _batch_ok:
                             st.session_state["_carrossel_batch_results"] = _batch_ok
                             st.session_state["_carousel_expander_open"] = True
-                            st.success(f"🎉 **{len(_batch_ok)}/{_n_selected}** parte(s) processada(s) com sucesso!")
+                            sync_carrossel_parts_to_catalog(_vid_id_cat)
+                            st.success(f"🎉 **{len(_batch_ok)}/{_n_selected}** parte(s) processada(s) e adicionadas à Galeria de Cortes & Pós!")
                         if _batch_errors:
                             st.error("❌ Erros: " + " · ".join(_batch_errors))
                         st.rerun()
@@ -6413,6 +6418,10 @@ if _has_media_ready:
                                 _batch_ok_valid.append({"filename": _f, "path": _fp})
 
                 if _batch_ok_valid:
+                    # Garante que o catálogo esteja sincronizado
+                    if _vid_id_cat:
+                        sync_carrossel_parts_to_catalog(_vid_id_cat)
+
                     st.markdown("---")
                     col_b_title, col_b_cols = st.columns([3.5, 1.5])
                     with col_b_title:
@@ -6448,6 +6457,16 @@ if _has_media_ready:
                                     if st.button("📂 Pasta", key=f"open_batch_res_{_rp['filename']}", use_container_width=True):
                                         open_in_file_explorer(_rp["path"])
                                         st.toast("Pasta aberta!")
+
+                                # Edição Rápida / Ajuste Fino integrado na própria parte
+                                render_quick_editor_component(_rp["path"], f"quick_batch_{_rp['filename']}")
+
+                    st.markdown("")
+                    col_b_gal_p, _ = st.columns([2.5, 1])
+                    with col_b_gal_p:
+                        if st.button("🎬 Ver e Gerenciar Partes na Galeria de Cortes & Pós (Seção 4) ➔", type="primary", use_container_width=True, key="btn_open_gal_from_batch_parts"):
+                            navigate_to_step("4")
+                            st.rerun()
 
         st.markdown("")
         render_button_label = "🔄 Forçar Re-renderização no Formato Escolhido" if existing_inst else "✂️ Gerar Corte no Formato Escolhido"
@@ -6867,12 +6886,12 @@ if _has_media_ready:
         # SEÇÃO 4: GALERIA DE CORTES PRODUZIDOS
         # ─────────────────────────────────────────────────────────────────
         _active_u_gal = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-        _vid_id_gal = get_current_active_video_id(_active_u_gal) or ""
+        _vid_id_gal = get_current_active_video_id(_active_u_gal) or st.session_state.get("active_video_id") or ""
     
         if _vid_id_gal:
             st.markdown("---")
-            st.header("4. 🎬 Galeria de Cortes Produzidos")
-            st.markdown("Visualize, reproduza e baixe todos os cortes finalizados para este vídeo.")
+            st.header("4. 🎬 Galeria de Cortes & Pós")
+            st.markdown("Visualize, reproduza, faça edições rápidas e baixe todos os cortes finalizados para este vídeo.")
     
             catalog_gal = load_cuts_catalog(_vid_id_gal)
             if not catalog_gal:

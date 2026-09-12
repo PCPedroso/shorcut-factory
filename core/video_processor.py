@@ -1509,6 +1509,19 @@ def split_video_smart(
         if not parts:
             return {"parts": [], "error": "Nenhuma parte foi gerada. " + "; ".join(errors)}
 
+        # Salva split_info.json na pasta de saída para rastreamento de minutagem das partes
+        try:
+            _info_file = os.path.join(output_dir, "split_info.json")
+            with open(_info_file, "w", encoding="utf-8") as _f_sp:
+                _json_mod.dump({
+                    "parts": parts,
+                    "total_duration": total_duration,
+                    "num_requested": num_parts,
+                    "num_generated": len(parts)
+                }, _f_sp, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
         return {
             "parts": parts,
             "total_duration": total_duration,
