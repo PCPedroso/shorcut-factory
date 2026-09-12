@@ -376,16 +376,23 @@ def inject_video_time_sync_js():
 
 inject_video_time_sync_js()
 
-def safe_display_image(img_source, caption=None, use_container_width=True):
+def safe_display_image(img_source, caption=None, use_container_width=True, width=None):
     """
     Exibe imagens no Streamlit lendo diretamente os bytes em memória
     para garantir 100% de estabilidade de renderização no Windows/Chrome.
     """
     if img_source is None:
         return False
+
+    img_kw = {}
+    if width is not None and int(width) > 0:
+        img_kw["width"] = int(width)
+    else:
+        img_kw["use_container_width"] = use_container_width
+
     if isinstance(img_source, np.ndarray):
         if img_source.size > 0:
-            st.image(img_source, caption=caption, use_container_width=use_container_width)
+            st.image(img_source, caption=caption, **img_kw)
             return True
         return False
     if isinstance(img_source, str) and os.path.exists(img_source):
@@ -393,15 +400,15 @@ def safe_display_image(img_source, caption=None, use_container_width=True):
             with open(img_source, "rb") as f:
                 data = f.read()
             if data:
-                st.image(data, caption=caption, use_container_width=use_container_width)
+                st.image(data, caption=caption, **img_kw)
                 return True
         except Exception:
             pass
     elif isinstance(img_source, (bytes, bytearray)):
-        st.image(img_source, caption=caption, use_container_width=use_container_width)
+        st.image(img_source, caption=caption, **img_kw)
         return True
     elif hasattr(img_source, "save") or hasattr(img_source, "convert"):
-        st.image(img_source, caption=caption, use_container_width=use_container_width)
+        st.image(img_source, caption=caption, **img_kw)
         return True
     return False
 
@@ -843,6 +850,15 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
                     step=0.5,
                     key=prev_sec_key
                 )
+                b_hl_preview_scale = st.slider(
+                    "🔍 Tamanho da Prévia (%):",
+                    min_value=10,
+                    max_value=100,
+                    value=int(st.session_state.get("batch_hl_prev_scale", 20)),
+                    step=5,
+                    key="batch_hl_prev_scale",
+                    help="Ajuste o tamanho visual da imagem de prévia (o padrão é 20% para caber de forma compacta e confortável)."
+                )
                 st.caption("Faça os ajustes desejados e clique no botão 🔄 para atualizar a prévia.")
 
             sample_p_text = b_hl_text.replace("{parte}", "01").replace("{num}", "1")
@@ -867,7 +883,13 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
 
                 prev_frame_hl = st.session_state.get("cached_batch_hl_prev")
                 if prev_frame_hl is not None:
-                    safe_display_image(prev_frame_hl, caption=f"Prévia com Headline em {b_hl_preview_sec:.1f}s", use_container_width=True)
+                    calc_b_w = int(720 * (b_hl_preview_scale / 100.0)) if b_hl_preview_scale < 95 else None
+                    safe_display_image(
+                        prev_frame_hl,
+                        caption=f"Prévia com Headline em {b_hl_preview_sec:.1f}s ({b_hl_preview_scale}%)",
+                        use_container_width=(calc_b_w is None),
+                        width=calc_b_w
+                    )
 
             if st.button(f"🚀 Queimar Headline em Todas as {n_parts} Partes", type="primary", use_container_width=True, key="btn_apply_batch_hl"):
                 p_bar = st.progress(0, text="Iniciando aplicação de Headline em lote...")
@@ -2216,6 +2238,15 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     step=0.5,
                     key=prev_sec_key
                 )
+                hl_preview_scale = st.slider(
+                    "🔍 Tamanho da Prévia (%):",
+                    min_value=10,
+                    max_value=100,
+                    value=int(st.session_state.get(f"hl_post_prev_scale_{unique_key}", 20)),
+                    step=5,
+                    key=f"hl_post_prev_scale_{unique_key}",
+                    help="Ajuste o tamanho visual da imagem de prévia (o padrão é 20% para caber de forma compacta e confortável)."
+                )
                 st.caption("Faça os ajustes desejados e clique no botão 🔄 para atualizar a prévia.")
 
             # Gera ou atualiza a prévia automaticamente quando necessário
@@ -2239,12 +2270,23 @@ def render_quick_editor_component(video_path: str, unique_key: str):
             prev_hl_frame = st.session_state.get(f"cached_hl_prev_{unique_key}")
             prev_hl_sec_shown = st.session_state.get(f"cached_hl_prev_sec_{unique_key}", hl_preview_sec)
             with col_hl_prev_view:
+                calc_hl_w = int(720 * (hl_preview_scale / 100.0)) if hl_preview_scale < 95 else None
                 if prev_hl_frame is not None:
                     if delay_hook_on and final_hl_start_offset > 0.05 and prev_hl_sec_shown < final_hl_start_offset:
-                        safe_display_image(prev_hl_frame, caption=f"Prévia aos {prev_hl_sec_shown:.1f}s (Gancho ativo — Headline oculta até {final_hl_start_offset:.1f}s)", use_container_width=True)
+                        safe_display_image(
+                            prev_hl_frame,
+                            caption=f"Prévia aos {prev_hl_sec_shown:.1f}s (Gancho ativo — Headline oculta até {final_hl_start_offset:.1f}s)",
+                            use_container_width=(calc_hl_w is None),
+                            width=calc_hl_w
+                        )
                         st.info(f"💡 **Gancho Viral em reprodução aos {prev_hl_sec_shown:.1f}s.** A Headline surgirá a partir dos **{final_hl_start_offset:.1f}s**. Deslize o slider para além de `{final_hl_start_offset:.1f}s` para vê-la!")
                     else:
-                        safe_display_image(prev_hl_frame, caption=f"Prévia com Headline aos {prev_hl_sec_shown:.1f}s", use_container_width=True)
+                        safe_display_image(
+                            prev_hl_frame,
+                            caption=f"Prévia com Headline aos {prev_hl_sec_shown:.1f}s ({hl_preview_scale}%)",
+                            use_container_width=(calc_hl_w is None),
+                            width=calc_hl_w
+                        )
                 else:
                     st.caption("ℹ️ Clique no botão 🔄 para gerar a prévia da headline.")
 
