@@ -513,13 +513,17 @@ def generate_headline_preview(
     video_path: str,
     text: str,
     config: dict = None,
-    timestamp_s: float = 0.0
+    timestamp_s: float = 0.0,
+    timestamp_sec: float = None
 ) -> np.ndarray:
     """
     Gera uma prévia visual instantânea (RGB) da Headline sobreposta no frame exato do vídeo.
     Se o vídeo tiver um gancho configurado e o timestamp_s estiver antes do término do gancho (start_offset_s),
     o frame é exibido sem headline para refletir com fidelidade o início do vídeo.
     """
+    if timestamp_sec is not None:
+        timestamp_s = timestamp_sec
+
     if not video_path or not os.path.exists(video_path):
         return None
 

@@ -668,7 +668,7 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
             with st.expander("👁️ Ver Prévia da Headline no 1º Vídeo", expanded=False):
                 prev_ts = min(b_hl_start_offset + 1.0, max(0.5, sample_dur - 0.5)) if sample_dur > 1.0 else 0.5
                 sample_p_text = b_hl_text.replace("{parte}", "01").replace("{num}", "1")
-                prev_frame_hl = generate_headline_preview(sample_video, sample_p_text, b_hl_cfg, timestamp_sec=prev_ts)
+                prev_frame_hl = generate_headline_preview(sample_video, sample_p_text, b_hl_cfg, timestamp_s=prev_ts)
                 if prev_frame_hl is not None:
                     safe_display_image(prev_frame_hl, caption=f"Prévia com Headline em {prev_ts:.1f}s", use_container_width=True)
 

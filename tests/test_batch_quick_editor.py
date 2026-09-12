@@ -75,6 +75,27 @@ class TestBatchQuickEditor(unittest.TestCase):
 
         self.assertEqual(mock_speed.call_count, 2)
 
+    @patch("cv2.VideoCapture")
+    def test_generate_headline_preview_timestamp_args(self, mock_cv):
+        """Valida que generate_headline_preview aceita tanto timestamp_s quanto timestamp_sec sem erro."""
+        from core.headline_drawer import generate_headline_preview
+        import numpy as np
+
+        mock_cap = MagicMock()
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.return_value = 30.0
+        mock_frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+        mock_cap.read.return_value = (True, mock_frame)
+        mock_cv.return_value = mock_cap
+
+        # Chamada com timestamp_s
+        res_s = generate_headline_preview(self.parts[0]["path"], "Título Teste", {}, timestamp_s=1.5)
+        self.assertIsNotNone(res_s)
+
+        # Chamada com timestamp_sec (compatibilidade / alias)
+        res_sec = generate_headline_preview(self.parts[0]["path"], "Título Teste", {}, timestamp_sec=1.5)
+        self.assertIsNotNone(res_sec)
+
 
 if __name__ == "__main__":
     unittest.main()
