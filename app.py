@@ -7080,6 +7080,30 @@ if _has_media_ready:
                         )
 
                     # ── ARQUITETURA DE PLAYER ÚNICO & GRADE LEVE (ESTILO WINDOWS EXPLORER) ──
+                    from core.quick_editor import get_video_duration, load_edit_history
+                    from core.video_processor import extract_thumbnail_from_video
+                    import re
+
+                    # Carrega mapa de minutagens originais (split_info.json)
+                    _sp_info_path = os.path.join(_carrossel_dir, "split_info.json") if _carrossel_dir else None
+                    _sp_timings_map = {}
+                    if _sp_info_path and os.path.exists(_sp_info_path):
+                        try:
+                            with open(_sp_info_path, "r", encoding="utf-8") as _f_sp:
+                                _sp_data = json.load(_f_sp)
+                                for _p_item in _sp_data.get("parts", []):
+                                    _sp_timings_map[int(_p_item.get("index", 0))] = float(_p_item.get("duration", 0.0))
+                        except Exception:
+                            pass
+
+                    def _fmt_dur_display(sec: float) -> str:
+                        s = max(0.0, float(sec))
+                        m = int(s // 60)
+                        rem = s % 60
+                        if m > 0:
+                            return f"{m}m {rem:04.1f}s"
+                        return f"{rem:.1f}s"
+
                     _cur_p_idx = st.session_state.get("active_carrossel_view_idx", 0)
                     if _cur_p_idx >= len(_batch_ok_valid):
                         _cur_p_idx = 0
@@ -7088,12 +7112,46 @@ if _has_media_ready:
                     _active_part = _batch_ok_valid[_cur_p_idx]
                     _active_part_mb = os.path.getsize(_active_part["path"]) / (1024 * 1024)
 
+                    # Métricas de tempo da parte ativa no player
+                    _act_m = re.match(r"^parte_(\d+)", _active_part["filename"])
+                    _act_idx = int(_act_m.group(1)) if _act_m else (_cur_p_idx + 1)
+                    _act_curr_dur = get_video_duration(_active_part["path"])
+                    _act_orig_dur = _sp_timings_map.get(_act_idx, 0.0)
+                    if _act_orig_dur <= 0.0:
+                        _act_raw_fp = os.path.join(os.path.dirname(_active_part["path"]), f"parte_{_act_idx:02d}.mp4")
+                        _act_orig_dur = get_video_duration(_act_raw_fp) if os.path.exists(_act_raw_fp) else _act_curr_dur
+
+                    _act_diff = _act_orig_dur - _act_curr_dur
+                    _act_ratio = (_act_orig_dur / _act_curr_dur) if (_act_curr_dur > 0 and _act_orig_dur > 0) else 1.0
+
+                    _act_speed_pill = ""
+                    if _act_diff >= 0.4 and _act_ratio >= 1.03:
+                        _act_speed_pill = (
+                            f"<span style='background:rgba(234,179,8,0.22);color:#facc15;border:1px solid rgba(234,179,8,0.45);padding:2px 8px;border-radius:6px;font-size:11px;font-weight:bold;margin-left:6px;'>"
+                            f"⚡ {_act_ratio:.2f}x Acelerado (Original: {_fmt_dur_display(_act_orig_dur)} ➔ Atual: {_fmt_dur_display(_act_curr_dur)} | Economia: {_act_diff:.1f}s)"
+                            f"</span>"
+                        )
+                    elif _act_diff <= -0.4 and _act_ratio <= 0.97:
+                        _act_speed_pill = (
+                            f"<span style='background:rgba(59,130,246,0.22);color:#60a5fa;border:1px solid rgba(59,130,246,0.45);padding:2px 8px;border-radius:6px;font-size:11px;font-weight:bold;margin-left:6px;'>"
+                            f"🐢 {_act_ratio:.2f}x Desacelerado (Original: {_fmt_dur_display(_act_orig_dur)} ➔ Atual: {_fmt_dur_display(_act_curr_dur)})"
+                            f"</span>"
+                        )
+                    else:
+                        _act_speed_pill = f"<span style='color:#38bdf8;font-size:12px;font-weight:600;margin-left:6px;'>⏱️ Duração: {_fmt_dur_display(_act_curr_dur)}</span>"
+
                     with st.container():
                         st.markdown(
-                            f"<div style='background:linear-gradient(135deg,rgba(30,41,59,0.7),rgba(15,23,42,0.8));border:1px solid rgba(139,92,246,0.35);border-radius:10px;padding:10px 14px;margin-bottom:12px;'>"
-                            f"<b>📺 Player Principal — Parte {_cur_p_idx + 1:02d} de {len(_batch_ok_valid):02d}:</b> <code>{_active_part['filename']}</code> "
-                            f"<span style='color:#a78bfa;'>({_active_part_mb:.1f} MB)</span><br>"
-                            f"<span style='font-size:12px;color:#94a3b8;'>Gerenciamento inteligente de recursos: apenas o vídeo ativo é decodificado, mantendo a memória leve e fluida como no Windows Explorer.</span>"
+                            f"<div style='background:linear-gradient(135deg,rgba(30,41,59,0.75),rgba(15,23,42,0.85));border:1px solid rgba(139,92,246,0.35);border-radius:10px;padding:12px 16px;margin-bottom:12px;'>"
+                            f"<div style='display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px;margin-bottom:4px;'>"
+                            f"<div>"
+                            f"<b style='font-size:15px;color:#f8fafc;'>📺 Player Principal — Parte {_cur_p_idx + 1:02d} de {len(_batch_ok_valid):02d}:</b> "
+                            f"<code style='color:#c4b5fd;font-size:13px;'>{_active_part['filename']}</code> "
+                            f"<span style='color:#94a3b8;font-size:12px;'>({_active_part_mb:.1f} MB)</span>"
+                            f"</div>"
+                            f"<div>{_act_speed_pill}</div>"
+                            f"</div>"
+                            f"<span style='font-size:12px;color:#94a3b8;'>Visualização focada e econômica: apenas o vídeo em reprodução consome memória, proporcionando navegação suave e instantânea.</span>"
                             f"</div>",
                             unsafe_allow_html=True
                         )
@@ -7103,7 +7161,7 @@ if _has_media_ready:
                             if st.button("⏮️ Parte Anterior", key="btn_prev_carrossel_part", use_container_width=True, disabled=(_cur_p_idx <= 0)):
                                 st.session_state["active_carrossel_view_idx"] = max(0, _cur_p_idx - 1)
                                 st.rerun()
-                            st.caption(f"Visualizando Parte {_cur_p_idx + 1} de {len(_batch_ok_valid)}")
+                            st.caption(f"Parte {_cur_p_idx + 1} de {len(_batch_ok_valid)} • ⏱️ {_fmt_dur_display(_act_curr_dur)}")
                             if st.button("📂 Abrir no Explorer", key="btn_open_active_part_folder", use_container_width=True):
                                 open_in_file_explorer(_active_part["path"])
                                 st.toast("Pasta aberta no Windows Explorer!")
@@ -7125,7 +7183,23 @@ if _has_media_ready:
                                 st.session_state["active_carrossel_view_idx"] = min(len(_batch_ok_valid) - 1, _cur_p_idx + 1)
                                 st.rerun()
 
-                            part_labels = [f"Parte {i+1:02d}: {p['filename']}" for i, p in enumerate(_batch_ok_valid)]
+                            # Dropdown informativo com duração e velocidade
+                            part_labels = []
+                            for i, p in enumerate(_batch_ok_valid):
+                                _mi = re.match(r"^parte_(\d+)", p["filename"])
+                                _idx_i = int(_mi.group(1)) if _mi else (i + 1)
+                                _cdur = get_video_duration(p["path"])
+                                _odur = _sp_timings_map.get(_idx_i, 0.0)
+                                if _odur <= 0.0:
+                                    _raw_p = os.path.join(os.path.dirname(p["path"]), f"parte_{_idx_i:02d}.mp4")
+                                    _odur = get_video_duration(_raw_p) if os.path.exists(_raw_p) else _cdur
+                                _df = _odur - _cdur
+                                if _df >= 0.4 and _cdur > 0 and (_odur / _cdur) >= 1.03:
+                                    _sp_lbl = f"⚡ {_odur/_cdur:.2f}x (Orig: {_fmt_dur_display(_odur)})"
+                                    part_labels.append(f"Parte {_idx_i:02d}: {_fmt_dur_display(_cdur)} [{_sp_lbl}] — {p['filename']}")
+                                else:
+                                    part_labels.append(f"Parte {_idx_i:02d}: {_fmt_dur_display(_cdur)} — {p['filename']}")
+
                             chosen_label = st.selectbox(
                                 "Mudar parte ativa:",
                                 part_labels,
@@ -7141,8 +7215,6 @@ if _has_media_ready:
                     _res_cols_per_row = _num_cols_sel
                     _res_rows = [_batch_ok_valid[i:i+_res_cols_per_row] for i in range(0, len(_batch_ok_valid), _res_cols_per_row)]
 
-                    from core.video_processor import extract_thumbnail_from_video
-
                     for _row_idx, _res_row in enumerate(_res_rows):
                         _rcols = st.columns(_res_cols_per_row)
                         for _ri, _rp in enumerate(_res_row):
@@ -7150,6 +7222,23 @@ if _has_media_ready:
                             is_active = (_global_idx == _cur_p_idx)
                             with _rcols[_ri]:
                                 _rp_mb = os.path.getsize(_rp["path"]) / (1024 * 1024)
+
+                                # Extração de índice e durações (atual vs original)
+                                _m_c = re.match(r"^parte_(\d+)", _rp["filename"])
+                                _p_num = int(_m_c.group(1)) if _m_c else (_global_idx + 1)
+                                _c_dur = get_video_duration(_rp["path"])
+                                _o_dur = _sp_timings_map.get(_p_num, 0.0)
+                                if _o_dur <= 0.0:
+                                    _c_raw_fp = os.path.join(os.path.dirname(_rp["path"]), f"parte_{_p_num:02d}.mp4")
+                                    _o_dur = get_video_duration(_c_raw_fp) if os.path.exists(_c_raw_fp) else _c_dur
+
+                                _c_diff = _o_dur - _c_dur
+                                _c_ratio = (_o_dur / _c_dur) if (_c_dur > 0 and _o_dur > 0) else 1.0
+                                _c_is_accel = (_c_diff >= 0.4 and _c_ratio >= 1.03)
+                                _c_is_slow = (_c_diff <= -0.4 and _c_ratio <= 0.97)
+
+                                # Formato / Proporção
+                                _fmt_badge = "9:16" if ("9-16" in _rp["filename"] or "9:16" in _rp["filename"]) else ("16:9" if "16-9" in _rp["filename"] else "HD")
 
                                 # Busca ou gera thumbnail leve de ~200KB
                                 _t_file = _rp['filename'].replace(".mp4", "_thumb.jpg")
@@ -7161,21 +7250,67 @@ if _has_media_ready:
                                         pass
 
                                 card_border = "border: 2px solid #8b5cf6;" if is_active else "border: 1px solid rgba(255,255,255,0.12);"
-                                badge_bg = "background:rgba(139,92,246,0.25);" if is_active else "background:rgba(15,23,42,0.5);"
-                                badge_text = "⭐ Ativo no Player" if is_active else f"Parte {_global_idx + 1:02d}"
+                                badge_bg = "background:rgba(139,92,246,0.25);" if is_active else "background:rgba(15,23,42,0.55);"
+                                badge_text = "⭐ Ativo no Player" if is_active else f"Parte {_p_num:02d}"
+
+                                # Cabeçalho superior do card
                                 st.markdown(
-                                    f"<div style='{card_border}{badge_bg}border-radius:8px;padding:5px 8px;margin-bottom:4px;text-align:center;'>"
-                                    f"<span style='font-size:12px;font-weight:bold;color:{'#c4b5fd' if is_active else '#cbd5e1'};'>{badge_text}</span> "
-                                    f"<span style='font-size:11px;color:#94a3b8;'>({_rp_mb:.1f} MB)</span>"
+                                    f"<div style='{card_border}{badge_bg}border-radius:8px 8px 0 0;padding:5px 8px;margin-bottom:0;text-align:center;'>"
+                                    f"<div style='display:flex;justify-content:space-between;align-items:center;'>"
+                                    f"<span style='font-size:12px;font-weight:bold;color:{'#c4b5fd' if is_active else '#f1f5f9'};'>{badge_text}</span> "
+                                    f"<span style='font-size:10px;background:rgba(255,255,255,0.1);padding:1px 5px;border-radius:4px;color:#94a3b8;'>{_fmt_badge}</span>"
+                                    f"<span style='font-size:11px;color:#94a3b8;'>{_rp_mb:.1f} MB</span>"
+                                    f"</div>"
                                     f"</div>",
                                     unsafe_allow_html=True
                                 )
 
+                                # Imagem da miniatura estática
                                 if os.path.exists(_t_path):
                                     safe_display_image(_t_path, use_container_width=True)
                                 else:
                                     st.caption(f"📹 {_rp['filename']}")
 
+                                # Painel informativo de duração e velocidade logo abaixo da miniatura
+                                if _c_is_accel:
+                                    st.markdown(
+                                        f"<div style='background:rgba(15,23,42,0.85);border:1px solid rgba(234,179,8,0.4);border-radius:0 0 6px 6px;padding:6px 8px;margin-top:-6px;margin-bottom:6px;'>"
+                                        f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;'>"
+                                        f"<span style='font-size:11px;font-weight:bold;color:#facc15;'>⚡ {_c_ratio:.2f}x Acelerado</span>"
+                                        f"<span style='font-size:12px;font-weight:bold;color:#4ade80;'>⏱️ {_fmt_dur_display(_c_dur)}</span>"
+                                        f"</div>"
+                                        f"<div style='display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#94a3b8;'>"
+                                        f"<span>Original: <span style='text-decoration:line-through;color:#cbd5e1;'>{_fmt_dur_display(_o_dur)}</span></span>"
+                                        f"<span style='color:#86efac;font-weight:600;'>-{_c_diff:.1f}s</span>"
+                                        f"</div>"
+                                        f"</div>",
+                                        unsafe_allow_html=True
+                                    )
+                                elif _c_is_slow:
+                                    st.markdown(
+                                        f"<div style='background:rgba(15,23,42,0.85);border:1px solid rgba(59,130,246,0.4);border-radius:0 0 6px 6px;padding:6px 8px;margin-top:-6px;margin-bottom:6px;'>"
+                                        f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;'>"
+                                        f"<span style='font-size:11px;font-weight:bold;color:#60a5fa;'>🐢 {_c_ratio:.2f}x Desacelerado</span>"
+                                        f"<span style='font-size:12px;font-weight:bold;color:#93c5fd;'>⏱️ {_fmt_dur_display(_c_dur)}</span>"
+                                        f"</div>"
+                                        f"<div style='font-size:10px;color:#94a3b8;text-align:right;'>"
+                                        f"Original: {_fmt_dur_display(_o_dur)} (+{abs(_c_diff):.1f}s)"
+                                        f"</div>"
+                                        f"</div>",
+                                        unsafe_allow_html=True
+                                    )
+                                else:
+                                    st.markdown(
+                                        f"<div style='background:rgba(15,23,42,0.75);border:1px solid rgba(255,255,255,0.12);border-radius:0 0 6px 6px;padding:5px 8px;margin-top:-6px;margin-bottom:6px;'>"
+                                        f"<div style='display:flex;justify-content:space-between;align-items:center;'>"
+                                        f"<span style='font-size:11px;color:#94a3b8;'>⏱️ Duração:</span>"
+                                        f"<span style='font-size:12px;font-weight:bold;color:#38bdf8;'>{_fmt_dur_display(_c_dur)}</span>"
+                                        f"</div>"
+                                        f"</div>",
+                                        unsafe_allow_html=True
+                                    )
+
+                                # Botões de Ação
                                 col_act_sel, col_act_exp = st.columns([1.5, 1.0])
                                 with col_act_sel:
                                     if st.button("▶️ Assistir", key=f"btn_sel_p_{_global_idx}", use_container_width=True, disabled=is_active, help="Exibir este vídeo no player principal"):
@@ -7184,7 +7319,7 @@ if _has_media_ready:
                                 with col_act_exp:
                                     if st.button("📂", key=f"btn_open_p_{_global_idx}", use_container_width=True, help="Abrir arquivo no Windows Explorer"):
                                         open_in_file_explorer(_rp["path"])
-                                        st.toast(f"Abrindo pasta do vídeo {_global_idx + 1}...")
+                                        st.toast(f"Abrindo pasta do vídeo {_p_num}...")
 
                                 with st.popover("📥 Baixar", use_container_width=True):
                                     st.caption(f"{_rp['filename']} ({_rp_mb:.1f} MB)")

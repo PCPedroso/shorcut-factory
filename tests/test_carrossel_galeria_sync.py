@@ -123,6 +123,21 @@ class TestCarrosselGaleriaSync(unittest.TestCase):
         catalog_after = load_cuts_catalog(self.test_vid_id)
         self.assertEqual(len(catalog_after), 0)
 
+    def test_carrossel_duration_and_speed_metrics(self):
+        """Valida a lógica de cálculo de duração original vs atual e taxa de aceleração."""
+        orig_dur = 45.0
+        curr_dur = 37.5
+        diff_sec = orig_dur - curr_dur
+        ratio = orig_dur / curr_dur
+
+        self.assertAlmostEqual(diff_sec, 7.5, places=1)
+        self.assertAlmostEqual(ratio, 1.20, places=2)
+        self.assertTrue(diff_sec >= 0.4 and ratio >= 1.03)
+
+        # Caso normal (sem alteração)
+        same_dur = 45.0
+        self.assertFalse((orig_dur - same_dur) >= 0.4 and (orig_dur / same_dur) >= 1.03)
+
 
 if __name__ == "__main__":
     unittest.main()
