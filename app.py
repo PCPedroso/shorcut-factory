@@ -7073,37 +7073,130 @@ if _has_media_ready:
                                 st.rerun()
                     with col_b_cols:
                         _num_cols_sel = st.selectbox(
-                            "Colunas por linha:",
+                            "Colunas da grade:",
                             [3, 4, 5, 6],
                             index=1,  # 4 colunas por padrão (ideal para 9:16)
                             key="carrossel_cols_selector"
                         )
+
+                    # ── ARQUITETURA DE PLAYER ÚNICO & GRADE LEVE (ESTILO WINDOWS EXPLORER) ──
+                    _cur_p_idx = st.session_state.get("active_carrossel_view_idx", 0)
+                    if _cur_p_idx >= len(_batch_ok_valid):
+                        _cur_p_idx = 0
+                        st.session_state["active_carrossel_view_idx"] = 0
+
+                    _active_part = _batch_ok_valid[_cur_p_idx]
+                    _active_part_mb = os.path.getsize(_active_part["path"]) / (1024 * 1024)
+
+                    with st.container():
+                        st.markdown(
+                            f"<div style='background:linear-gradient(135deg,rgba(30,41,59,0.7),rgba(15,23,42,0.8));border:1px solid rgba(139,92,246,0.35);border-radius:10px;padding:10px 14px;margin-bottom:12px;'>"
+                            f"<b>📺 Player Principal — Parte {_cur_p_idx + 1:02d} de {len(_batch_ok_valid):02d}:</b> <code>{_active_part['filename']}</code> "
+                            f"<span style='color:#a78bfa;'>({_active_part_mb:.1f} MB)</span><br>"
+                            f"<span style='font-size:12px;color:#94a3b8;'>Gerenciamento inteligente de recursos: apenas o vídeo ativo é decodificado, mantendo a memória leve e fluida como no Windows Explorer.</span>"
+                            f"</div>",
+                            unsafe_allow_html=True
+                        )
+
+                        col_p_left, col_p_center, col_p_right = st.columns([1.1, 2.0, 1.1])
+                        with col_p_left:
+                            if st.button("⏮️ Parte Anterior", key="btn_prev_carrossel_part", use_container_width=True, disabled=(_cur_p_idx <= 0)):
+                                st.session_state["active_carrossel_view_idx"] = max(0, _cur_p_idx - 1)
+                                st.rerun()
+                            st.caption(f"Visualizando Parte {_cur_p_idx + 1} de {len(_batch_ok_valid)}")
+                            if st.button("📂 Abrir no Explorer", key="btn_open_active_part_folder", use_container_width=True):
+                                open_in_file_explorer(_active_part["path"])
+                                st.toast("Pasta aberta no Windows Explorer!")
+                            with st.popover("📥 Baixar Vídeo Ativo", use_container_width=True):
+                                st.caption(f"Salvar {_active_part['filename']} ({_active_part_mb:.1f} MB)")
+                                with open(_active_part["path"], "rb") as _af:
+                                    st.download_button(
+                                        "Salvar no Computador",
+                                        data=_af,
+                                        file_name=_active_part["filename"],
+                                        mime="video/mp4",
+                                        use_container_width=True,
+                                        key=f"dl_active_part_{_active_part['filename']}"
+                                    )
+                        with col_p_center:
+                            safe_display_video(_active_part["path"])
+                        with col_p_right:
+                            if st.button("Próxima Parte ⏭️", key="btn_next_carrossel_part", use_container_width=True, disabled=(_cur_p_idx >= len(_batch_ok_valid) - 1)):
+                                st.session_state["active_carrossel_view_idx"] = min(len(_batch_ok_valid) - 1, _cur_p_idx + 1)
+                                st.rerun()
+
+                            part_labels = [f"Parte {i+1:02d}: {p['filename']}" for i, p in enumerate(_batch_ok_valid)]
+                            chosen_label = st.selectbox(
+                                "Mudar parte ativa:",
+                                part_labels,
+                                index=_cur_p_idx,
+                                key="sb_active_carrossel_part"
+                            )
+                            chosen_idx = part_labels.index(chosen_label)
+                            if chosen_idx != _cur_p_idx:
+                                st.session_state["active_carrossel_view_idx"] = chosen_idx
+                                st.rerun()
+
+                    st.markdown("##### 🗂️ Todas as Partes do Carrossel (Clique em '▶️ Assistir' para carregar no player acima):")
                     _res_cols_per_row = _num_cols_sel
                     _res_rows = [_batch_ok_valid[i:i+_res_cols_per_row] for i in range(0, len(_batch_ok_valid), _res_cols_per_row)]
-                    for _res_row in _res_rows:
+
+                    from core.video_processor import extract_thumbnail_from_video
+
+                    for _row_idx, _res_row in enumerate(_res_rows):
                         _rcols = st.columns(_res_cols_per_row)
                         for _ri, _rp in enumerate(_res_row):
+                            _global_idx = _row_idx * _res_cols_per_row + _ri
+                            is_active = (_global_idx == _cur_p_idx)
                             with _rcols[_ri]:
-                                _rp_mb = os.path.getsize(_rp["path"]) / (1024*1024)
-                                st.caption(f"📹 **{_rp['filename']}** ({_rp_mb:.1f} MB)")
-                                safe_display_video(_rp["path"])
-                                col_dl_r, col_open_r = st.columns(2)
-                                with col_dl_r:
+                                _rp_mb = os.path.getsize(_rp["path"]) / (1024 * 1024)
+
+                                # Busca ou gera thumbnail leve de ~200KB
+                                _t_file = _rp['filename'].replace(".mp4", "_thumb.jpg")
+                                _t_path = os.path.join(os.path.dirname(_rp["path"]), _t_file)
+                                if not os.path.exists(_t_path):
+                                    try:
+                                        extract_thumbnail_from_video(_rp["path"], _t_path, timestamp_sec=1.0)
+                                    except Exception:
+                                        pass
+
+                                card_border = "border: 2px solid #8b5cf6;" if is_active else "border: 1px solid rgba(255,255,255,0.12);"
+                                badge_bg = "background:rgba(139,92,246,0.25);" if is_active else "background:rgba(15,23,42,0.5);"
+                                badge_text = "⭐ Ativo no Player" if is_active else f"Parte {_global_idx + 1:02d}"
+                                st.markdown(
+                                    f"<div style='{card_border}{badge_bg}border-radius:8px;padding:5px 8px;margin-bottom:4px;text-align:center;'>"
+                                    f"<span style='font-size:12px;font-weight:bold;color:{'#c4b5fd' if is_active else '#cbd5e1'};'>{badge_text}</span> "
+                                    f"<span style='font-size:11px;color:#94a3b8;'>({_rp_mb:.1f} MB)</span>"
+                                    f"</div>",
+                                    unsafe_allow_html=True
+                                )
+
+                                if os.path.exists(_t_path):
+                                    safe_display_image(_t_path, use_container_width=True)
+                                else:
+                                    st.caption(f"📹 {_rp['filename']}")
+
+                                col_act_sel, col_act_exp = st.columns([1.5, 1.0])
+                                with col_act_sel:
+                                    if st.button("▶️ Assistir", key=f"btn_sel_p_{_global_idx}", use_container_width=True, disabled=is_active, help="Exibir este vídeo no player principal"):
+                                        st.session_state["active_carrossel_view_idx"] = _global_idx
+                                        st.rerun()
+                                with col_act_exp:
+                                    if st.button("📂", key=f"btn_open_p_{_global_idx}", use_container_width=True, help="Abrir arquivo no Windows Explorer"):
+                                        open_in_file_explorer(_rp["path"])
+                                        st.toast(f"Abrindo pasta do vídeo {_global_idx + 1}...")
+
+                                with st.popover("📥 Baixar", use_container_width=True):
+                                    st.caption(f"{_rp['filename']} ({_rp_mb:.1f} MB)")
                                     with open(_rp["path"], "rb") as _rf:
                                         st.download_button(
-                                            label=f"📥 Baixar",
+                                            label=f"Salvar {_rp['filename']}",
                                             data=_rf,
                                             file_name=_rp["filename"],
                                             mime="video/mp4",
                                             use_container_width=True,
-                                            key=f"dl_batch_res_{_rp['filename']}"
+                                            key=f"dl_grid_batch_{_global_idx}"
                                         )
-                                with col_open_r:
-                                    if st.button("📂 Pasta", key=f"open_batch_res_{_rp['filename']}", use_container_width=True):
-                                        open_in_file_explorer(_rp["path"])
-                                        st.toast("Pasta aberta!")
-
-                                st.caption("🔍 *Para edição individual com trim e pós, use a Galeria abaixo.*")
 
                     st.markdown("")
                     col_b_gal_p, _ = st.columns([2.5, 1])
@@ -7792,7 +7885,8 @@ if _has_media_ready:
                                         abs_fol_g = os.path.abspath(fmt_data.get("folder_path", ""))
                                         link_fol_g = abs_fol_g.replace('\\', '/')
                                         st.markdown(f"📁 **Pasta Local:** [{fmt_data.get('folder_name', 'Abrir Pasta')}](file:///{link_fol_g}) &nbsp; `📁 {abs_fol_g}`", unsafe_allow_html=True)
-                                        render_quick_editor_component(v_file, f"gal_{_vid_id_gal}_{c_idx}_{f_idx}")
+                                        with st.expander("🛠️ Editor Rápido & Ajustes Finos deste Corte (Headline, Gancho, Áudio...)", expanded=(len(catalog_gal) == 1)):
+                                            render_quick_editor_component(v_file, f"gal_{_vid_id_gal}_{c_idx}_{f_idx}")
                                     else:
                                         st.warning("Vídeo excluído / não encontrado.")
                                         if st.button("🗑️ Remover do Catálogo", key=f"btn_clean_fmt_{c_idx}_{f_idx}"):
