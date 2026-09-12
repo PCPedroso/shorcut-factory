@@ -64,7 +64,7 @@ from core.config_manager import load_settings, save_all_settings, save_setting
 from core.export_kit import build_cut_folder_name, create_viral_package
 from core.cuts_catalog import (
     get_cut_entry, get_format_instance, register_cut_instance, update_cut_texts_only,
-    delete_entire_cut, delete_format_instance, load_cuts_catalog, set_active_thumbnail_variation,
+    delete_entire_cut, delete_format_instance, delete_entire_carrossel, load_cuts_catalog, set_active_thumbnail_variation,
     update_cut_thumbnail_in_catalog, sync_carrossel_parts_to_catalog
 )
 from core.batch_processor import process_batch_cuts
@@ -6844,7 +6844,7 @@ if _has_media_ready:
                 )
 
                 # ── Seleção das partes ─────────────────────────────────────
-                col_sel_all, col_sel_none = st.columns([1, 4])
+                col_sel_all, col_sel_none, col_del_c_top = st.columns([1.2, 1.2, 2.6])
                 with col_sel_all:
                     if st.button("☑️ Selecionar Tudo", key="btn_carrossel_select_all", use_container_width=True):
                         for _cp in _carrossel_parts:
@@ -6855,6 +6855,28 @@ if _has_media_ready:
                         for _cp in _carrossel_parts:
                             st.session_state[f"_carrossel_sel_{_cp['filename']}"] = False
                         st.rerun()
+                with col_del_c_top:
+                    with st.popover("🗑️ Excluir Carrossel Completo", use_container_width=True, help="Exclui o carrossel completo deste vídeo."):
+                        st.markdown("⚠️ **Excluir Carrossel Completo?**")
+                        del_c_s3_choice = st.radio(
+                            "Opção de exclusão:",
+                            [
+                                "💥 Excluir Tudo (Apaga pasta inteira e remove do catálogo)",
+                                "🧹 Apenas Partes Processadas (Preserva partes brutas fatiadas)"
+                            ],
+                            key="rad_del_carrossel_s3_top"
+                        )
+                        if st.button("Confirmar Exclusão do Carrossel", key="btn_cnf_del_carrossel_s3_top", type="primary", use_container_width=True):
+                            is_full_c = "Excluir Tudo" in del_c_s3_choice
+                            res_del = delete_entire_carrossel(_vid_id_cat, delete_raw_splits=is_full_c)
+                            st.session_state.pop("_carrossel_batch_results", None)
+                            if is_full_c:
+                                st.session_state["_carousel_expander_open"] = False
+                            if res_del.get("success"):
+                                st.success("✅ Carrossel excluído com sucesso!")
+                            else:
+                                st.error(f"Erro: {res_del.get('error')}")
+                            st.rerun()
 
                 st.caption("**Selecione as partes que deseja processar:**")
                 _selected_parts = []
@@ -7028,9 +7050,27 @@ if _has_media_ready:
                     render_batch_quick_editor_component(_batch_ok_valid, _vid_id_cat)
 
                     st.markdown("")
-                    col_b_title, col_b_cols = st.columns([3.5, 1.5])
+                    col_b_title, col_b_del, col_b_cols = st.columns([2.4, 1.4, 1.2])
                     with col_b_title:
                         st.markdown(f"#### 🎬 Partes Processadas ({len(_batch_ok_valid)} vídeos)")
+                    with col_b_del:
+                        with st.popover("🗑️ Excluir Carrossel", use_container_width=True, help="Exclui o carrossel deste projeto"):
+                            st.markdown("⚠️ **Excluir Carrossel?**")
+                            del_proc_choice = st.radio(
+                                "Opção de exclusão:",
+                                [
+                                    "💥 Excluir Tudo (Pasta inteira e Catálogo)",
+                                    "🧹 Apenas Partes Processadas"
+                                ],
+                                key="rad_del_proc_carrossel_s3"
+                            )
+                            if st.button("Confirmar Exclusão", key="btn_cnf_del_proc_carrossel_s3", type="primary", use_container_width=True):
+                                is_full_del = "Excluir Tudo" in del_proc_choice
+                                delete_entire_carrossel(_vid_id_cat, delete_raw_splits=is_full_del)
+                                st.session_state.pop("_carrossel_batch_results", None)
+                                if is_full_del:
+                                    st.session_state["_carousel_expander_open"] = False
+                                st.rerun()
                     with col_b_cols:
                         _num_cols_sel = st.selectbox(
                             "Colunas por linha:",
@@ -7501,7 +7541,37 @@ if _has_media_ready:
             if not catalog_gal:
                 st.info("Nenhum corte registrado nesta galeria ainda. Gere cortes individuais na **Seção 3** ou use a **Renderização em Lote** na **Seção 2**!")
             else:
-                st.caption(f"📁 Total de **{len(catalog_gal)}** minutagens e instâncias registradas no catálogo.")
+                has_carrossel_parts = any(
+                    any(
+                        f_info.get("folder_name") == "carrossel" or "carrossel" in str(f_info.get("folder_path", "")).lower()
+                        for f_info in c_data.get("formats", {}).values()
+                    )
+                    for c_data in catalog_gal.values()
+                )
+                if has_carrossel_parts:
+                    col_gal_info, col_gal_del_c = st.columns([3.3, 1.7])
+                    with col_gal_info:
+                        st.caption(f"📁 Total de **{len(catalog_gal)}** minutagens e instâncias registradas no catálogo.")
+                    with col_gal_del_c:
+                        with st.popover("🗑️ Excluir Carrossel Completo", use_container_width=True, help="Exclui todas as partes do carrossel deste projeto."):
+                            st.markdown("⚠️ **Excluir Carrossel Completo?**")
+                            st.caption("Esta ação removerá todas as partes do carrossel registradas nesta galeria.")
+                            del_c_gal_choice = st.radio(
+                                "Opção de exclusão:",
+                                [
+                                    "💥 Excluir Tudo (Apaga pasta inteira e catálogo)",
+                                    "🧹 Apenas Partes Processadas (Preserva partes brutas fatiadas)"
+                                ],
+                                key="rad_del_carrossel_gal_header"
+                            )
+                            if st.button("Confirmar Exclusão do Carrossel", key="btn_cnf_del_carrossel_gal_header", type="primary", use_container_width=True):
+                                is_full_c = "Excluir Tudo" in del_c_gal_choice
+                                delete_entire_carrossel(_vid_id_gal, delete_raw_splits=is_full_c)
+                                st.session_state.pop("_carrossel_batch_results", None)
+                                st.success("Carrossel excluído com sucesso!")
+                                st.rerun()
+                else:
+                    st.caption(f"📁 Total de **{len(catalog_gal)}** minutagens e instâncias registradas no catálogo.")
                 for c_idx, (t_key, cut_item) in enumerate(catalog_gal.items()):
                     with st.container():
                         # Cabeçalho do corte com controle de trecho compacto na própria linha
@@ -7697,18 +7767,27 @@ if _has_media_ready:
                                         with col_b_del:
                                             with st.popover("🗑️", use_container_width=True, help=f"Excluir este vídeo ({fmt_key})"):
                                                 st.markdown(f"⚠️ **Excluir {fmt_badge}?**")
+                                                is_carrossel_fmt = fmt_data.get("folder_name") == "carrossel" or "carrossel" in str(fmt_data.get("folder_path", "")).lower()
+                                                del_opts = [
+                                                    "🎬 Apenas este Vídeo (.mp4)\n*(Preserva textos e kit)*",
+                                                    "💥 Pasta e Kit deste formato"
+                                                ]
+                                                if is_carrossel_fmt:
+                                                    del_opts.append("🎞️ Excluir Carrossel Completo (Todas as Partes)")
                                                 del_fmt_choice = st.radio(
                                                     "Opção de exclusão:",
-                                                    [
-                                                        "🎬 Apenas este Vídeo (.mp4)\n*(Preserva textos e kit)*",
-                                                        "💥 Pasta e Kit deste formato"
-                                                    ],
+                                                    del_opts,
                                                     key=f"rad_del_fmt_{c_idx}_{f_idx}"
                                                 )
                                                 if st.button("Confirmar", key=f"btn_cnf_fmt_del_{c_idx}_{f_idx}", type="primary", use_container_width=True):
-                                                    is_full = "Pasta e Kit" in del_fmt_choice
-                                                    delete_format_instance(_vid_id_gal, cut_item.get('start_time'), cut_item.get('end_time'), fmt_key, delete_publication_kit=is_full)
-                                                    st.success("Excluído com sucesso.")
+                                                    if "Carrossel Completo" in del_fmt_choice:
+                                                        delete_entire_carrossel(_vid_id_gal, delete_raw_splits=True)
+                                                        st.session_state.pop("_carrossel_batch_results", None)
+                                                        st.success("Carrossel completo excluído com sucesso.")
+                                                    else:
+                                                        is_full = "Pasta e Kit" in del_fmt_choice
+                                                        delete_format_instance(_vid_id_gal, cut_item.get('start_time'), cut_item.get('end_time'), fmt_key, delete_publication_kit=is_full)
+                                                        st.success("Excluído com sucesso.")
                                                     st.rerun()
                                         abs_fol_g = os.path.abspath(fmt_data.get("folder_path", ""))
                                         link_fol_g = abs_fol_g.replace('\\', '/')

@@ -579,3 +579,57 @@ def delete_entire_cut(
         save_cuts_catalog(video_id, catalog)
         return True
     return False
+
+
+def delete_entire_carrossel(
+    video_id: str,
+    delete_raw_splits: bool = True
+) -> dict:
+    """
+    Remove um carrossel completo de um projeto/vídeo:
+    - Se delete_raw_splits=True: remove toda a pasta data/<video_id>/carrossel/ e limpa as entradas no catálogo.
+    - Se delete_raw_splits=False: remove apenas as partes processadas e thumbnails, mantendo os fatiamentos originais (parte_01.mp4, etc.) para reprocessamento.
+    """
+    if not video_id:
+        return {"success": False, "error": "video_id não informado."}
+
+    carrossel_dir = os.path.join("data", video_id, "carrossel")
+    catalog = load_cuts_catalog(video_id)
+
+    # Limpa do catálogo todas as instâncias e entradas relacionadas ao carrossel
+    keys_to_remove = []
+    for key, entry in list(catalog.items()):
+        formats = entry.get("formats", {})
+        for fmt_k, inst in list(formats.items()):
+            folder_p = inst.get("folder_path", "")
+            video_p = inst.get("video_path", "")
+            f_norm = os.path.normpath(folder_p).lower().replace("\\", "/").split("/")
+            v_norm = os.path.normpath(video_p).lower().replace("\\", "/").split("/")
+            if inst.get("folder_name") == "carrossel" or "carrossel" in f_norm or "carrossel" in v_norm:
+                formats.pop(fmt_k, None)
+        if not formats:
+            keys_to_remove.append(key)
+
+    for k in keys_to_remove:
+        catalog.pop(k, None)
+
+    save_cuts_catalog(video_id, catalog)
+
+    if os.path.isdir(carrossel_dir):
+        if delete_raw_splits:
+            shutil.rmtree(carrossel_dir, ignore_errors=True)
+        else:
+            for f in os.listdir(carrossel_dir):
+                fp = os.path.join(carrossel_dir, f)
+                if re.match(r"^parte_\d+\.mp4$", f) or f == "split_info.json":
+                    continue
+                try:
+                    if os.path.isfile(fp):
+                        os.remove(fp)
+                    elif os.path.isdir(fp):
+                        shutil.rmtree(fp, ignore_errors=True)
+                except Exception:
+                    pass
+
+    return {"success": True, "error": None}
+

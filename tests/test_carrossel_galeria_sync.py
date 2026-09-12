@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from core.cuts_catalog import (
     load_cuts_catalog, sync_carrossel_parts_to_catalog,
-    delete_format_instance, delete_entire_cut, make_time_key
+    delete_format_instance, delete_entire_cut, delete_entire_carrossel, make_time_key
 )
 
 
@@ -81,6 +81,49 @@ class TestCarrosselGaleriaSync(unittest.TestCase):
         self.assertTrue(os.path.isdir(self.carrossel_dir))
         self.assertTrue(os.path.exists(self.proc_part2))
 
+    @patch("core.quick_editor.get_video_duration", return_value=60.0)
+    @patch("core.video_processor.extract_thumbnail_from_video", return_value={"error": None})
+    def test_delete_entire_carrossel_full(self, mock_thumb, mock_dur):
+        """Valida exclusão total do carrossel: apaga a pasta inteira e limpa o catálogo."""
+        sync_carrossel_parts_to_catalog(self.test_vid_id)
+        catalog_before = load_cuts_catalog(self.test_vid_id)
+        self.assertEqual(len(catalog_before), 2)
+
+        res = delete_entire_carrossel(self.test_vid_id, delete_raw_splits=True)
+        self.assertTrue(res.get("success"))
+
+        # Pasta inteira foi removida
+        self.assertFalse(os.path.exists(self.carrossel_dir))
+
+        # Catálogo não possui mais entradas do carrossel
+        catalog_after = load_cuts_catalog(self.test_vid_id)
+        self.assertEqual(len(catalog_after), 0)
+
+    @patch("core.quick_editor.get_video_duration", return_value=60.0)
+    @patch("core.video_processor.extract_thumbnail_from_video", return_value={"error": None})
+    def test_delete_entire_carrossel_processed_only(self, mock_thumb, mock_dur):
+        """Valida exclusão parcial: apaga partes processadas e catálogo, mas preserva fatiamentos brutos."""
+        sync_carrossel_parts_to_catalog(self.test_vid_id)
+        self.assertTrue(os.path.exists(self.raw_part1))
+        self.assertTrue(os.path.exists(self.proc_part1))
+
+        res = delete_entire_carrossel(self.test_vid_id, delete_raw_splits=False)
+        self.assertTrue(res.get("success"))
+
+        # Pasta e arquivos brutos ainda existem
+        self.assertTrue(os.path.isdir(self.carrossel_dir))
+        self.assertTrue(os.path.exists(self.raw_part1))
+        self.assertTrue(os.path.exists(self.raw_part2))
+
+        # Arquivos processados foram excluídos
+        self.assertFalse(os.path.exists(self.proc_part1))
+        self.assertFalse(os.path.exists(self.proc_part2))
+
+        # Catálogo não possui mais os processados
+        catalog_after = load_cuts_catalog(self.test_vid_id)
+        self.assertEqual(len(catalog_after), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
+
