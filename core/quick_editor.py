@@ -711,8 +711,8 @@ def add_viral_hook_to_video(
 
     has_audio = has_audio_stream(video_path)
 
-    hook_vf_list = [f"trim=start={hook_start_s:.3f}:end={hook_end_s:.3f}", "setpts=PTS-STARTPTS"]
-
+    # 1. Filtros visuais específicos do gancho
+    hook_vf_list = ["setpts=PTS-STARTPTS"]
     if hook_style == "noir":
         hook_vf_list.append("hue=s=0")
     elif hook_style == "vignette_zoom":
@@ -739,89 +739,119 @@ def add_viral_hook_to_video(
 
     hook_vf_str = ",".join(hook_vf_list)
     filter_parts = []
+    cmd_inputs = []
 
-    if badge_png and os.path.exists(badge_png):
-        filter_parts.append(f"[0:v]{hook_vf_str}[v_hook_raw]")
-        badge_y = max(20, min(v_h - 60, int(v_h * (float(badge_y_pct) / 100.0))))
-        filter_parts.append(f"[v_hook_raw][1:v]overlay=(W-w)/2:{badge_y}:enable='between(t,0,{hook_dur:.3f})'[v_hook]")
-    else:
-        filter_parts.append(f"[0:v]{hook_vf_str}[v_hook]")
-
-    if has_audio:
-        aud_fade_d = min(0.05, hook_dur * 0.05)
-        aud_fade_st = max(0.0, hook_dur - aud_fade_d)
-        filter_parts.append(f"[0:a]atrim=start={hook_start_s:.3f}:end={hook_end_s:.3f},asetpts=PTS-STARTPTS,afade=t=out:st={aud_fade_st:.3f}:d={aud_fade_d:.3f}[a_hook]")
+    # Input 0: Hook Teaser isolado (busca rápida via -ss e -t no nível do demuxer para evitar buffer queue overflow)
+    cmd_inputs.extend(["-ss", f"{hook_start_s:.3f}", "-t", f"{hook_dur:.3f}", "-i", video_path])
 
     if hook_mode == "move":
+        # Modo Mover: trecho do gancho é movido para o início e excluído de sua posição original
         p1_dur = hook_start_s
         p2_dur = total_dur - hook_end_s
 
         concat_v_tags = ["[v_hook]"]
         concat_a_tags = ["[a_hook]"] if has_audio else []
         concat_n = 1
+        cur_input_idx = 1
 
         if p1_dur > 0.1:
-            filter_parts.append(f"[0:v]trim=start=0:end={hook_start_s:.3f},setpts=PTS-STARTPTS[v_p1]")
+            cmd_inputs.extend(["-t", f"{hook_start_s:.3f}", "-i", video_path])
+            filter_parts.append(f"[{cur_input_idx}:v]setpts=PTS-STARTPTS[v_p1]")
             concat_v_tags.append("[v_p1]")
             if has_audio:
-                filter_parts.append(f"[0:a]atrim=start=0:end={hook_start_s:.3f},asetpts=PTS-STARTPTS[a_p1]")
+                filter_parts.append(f"[{cur_input_idx}:a]asetpts=PTS-STARTPTS[a_p1]")
                 concat_a_tags.append("[a_p1]")
             concat_n += 1
+            cur_input_idx += 1
 
         if p2_dur > 0.1:
-            filter_parts.append(f"[0:v]trim=start={hook_end_s:.3f}:end={total_dur:.3f},setpts=PTS-STARTPTS[v_p2]")
+            cmd_inputs.extend(["-ss", f"{hook_end_s:.3f}", "-i", video_path])
+            filter_parts.append(f"[{cur_input_idx}:v]setpts=PTS-STARTPTS[v_p2]")
             concat_v_tags.append("[v_p2]")
             if has_audio:
-                filter_parts.append(f"[0:a]atrim=start={hook_end_s:.3f}:end={total_dur:.3f},asetpts=PTS-STARTPTS[a_p2]")
+                filter_parts.append(f"[{cur_input_idx}:a]asetpts=PTS-STARTPTS[a_p2]")
                 concat_a_tags.append("[a_p2]")
             concat_n += 1
+            cur_input_idx += 1
 
+        badge_input_idx = cur_input_idx
+    else:
+        # Modo Teaser (Padrão): trecho duplicado no início seguido pelo vídeo principal
+        cmd_inputs.extend(["-i", video_path])
+        filter_parts.append("[1:v]setpts=PTS-STARTPTS[v_main]")
+        if has_audio:
+            filter_parts.append("[1:a]asetpts=PTS-STARTPTS[a_main]")
+        badge_input_idx = 2
+
+    # Se badge flutuante estiver configurada, adiciona como entrada de overlay
+    if badge_png and os.path.exists(badge_png):
+        cmd_inputs.extend(["-i", badge_png])
+        filter_parts.insert(0, f"[0:v]{hook_vf_str}[v_hook_raw]")
+        badge_y = max(20, min(v_h - 60, int(v_h * (float(badge_y_pct) / 100.0))))
+        filter_parts.insert(1, f"[v_hook_raw][{badge_input_idx}:v]overlay=(W-w)/2:{badge_y}:enable='between(t,0,{hook_dur:.3f})'[v_hook]")
+    else:
+        filter_parts.insert(0, f"[0:v]{hook_vf_str}[v_hook]")
+
+    if has_audio:
+        aud_fade_d = min(0.05, hook_dur * 0.05)
+        aud_fade_st = max(0.0, hook_dur - aud_fade_d)
+        insert_idx = 2 if (badge_png and os.path.exists(badge_png)) else 1
+        filter_parts.insert(insert_idx, f"[0:a]asetpts=PTS-STARTPTS,afade=t=out:st={aud_fade_st:.3f}:d={aud_fade_d:.3f}[a_hook]")
+
+    # Concatenação das partes
+    if hook_mode == "move":
         if has_audio:
             concat_inputs = "".join([f"{v}{a}" for v, a in zip(concat_v_tags, concat_a_tags)])
             filter_parts.append(f"{concat_inputs}concat=n={concat_n}:v=1:a=1[vout][aout]")
         else:
             concat_inputs = "".join(concat_v_tags)
             filter_parts.append(f"{concat_inputs}concat=n={concat_n}:v=1:a=0[vout]")
-
     else:
-        # Modo Teaser (Duplica trecho no início)
-        filter_parts.append(f"[0:v]trim=start=0:end={total_dur:.3f},setpts=PTS-STARTPTS[v_main]")
         if has_audio:
-            filter_parts.append(f"[0:a]atrim=start=0:end={total_dur:.3f},asetpts=PTS-STARTPTS[a_main]")
             filter_parts.append("[v_hook][a_hook][v_main][a_main]concat=n=2:v=1:a=1[vout][aout]")
         else:
             filter_parts.append("[v_hook][v_main]concat=n=2:v=1:a=0[vout]")
 
     full_filter_complex = ";".join(filter_parts)
 
-    cmd = [
+    cmd_base = [
         FFMPEG_EXE, "-y",
-        "-i", video_path
-    ]
-    if badge_png and os.path.exists(badge_png):
-        cmd.extend(["-i", badge_png])
-
-    cmd.extend([
+        *cmd_inputs,
         "-filter_complex", full_filter_complex,
         "-map", "[vout]"
-    ])
+    ]
     if has_audio:
-        cmd.extend([
+        cmd_base.extend([
             "-map", "[aout]",
             "-c:a", "aac",
             "-b:a", "192k"
         ])
 
-    cmd.extend([
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "20",
+    # 1. Tentativa com GPU NVENC (Ultra-rápido)
+    cmd_gpu = list(cmd_base)
+    cmd_gpu.extend([
+        "-c:v", "h264_nvenc",
+        "-preset", "p4",
+        "-b:v", "8M",
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
         tmp_out
     ])
 
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd_gpu, capture_output=True, text=True)
+
+    # 2. Fallback resiliente com CPU libx264 se GPU falhar
+    if res.returncode != 0 or not os.path.exists(tmp_out) or os.path.getsize(tmp_out) == 0:
+        cmd_cpu = list(cmd_base)
+        cmd_cpu.extend([
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "20",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            tmp_out
+        ])
+        res = subprocess.run(cmd_cpu, capture_output=True, text=True)
 
     if badge_png and os.path.exists(badge_png):
         try:

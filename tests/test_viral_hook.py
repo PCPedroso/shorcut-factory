@@ -142,6 +142,10 @@ class TestViralHook(unittest.TestCase):
         self.assertEqual(res.get("badge_y_pct"), 12.0)
         self.assertTrue(os.path.exists(out_path))
 
+        first_call_cmd = mock_run.call_args_list[0][0][0]
+        self.assertIn("-ss", first_call_cmd)
+        self.assertIn("-t", first_call_cmd)
+
     def test_overlay_badge_on_frame(self):
         dummy_frame = np.full((720, 1280, 3), 100, dtype=np.uint8)
         overlaid = overlay_badge_on_frame(
