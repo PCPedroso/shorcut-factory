@@ -1,6 +1,8 @@
 from faster_whisper import WhisperModel
 import os
 import sys
+import re
+import json
 
 # Tenta adicionar as DLLs do CUDA (baixadas via pip) no PATH do Windows
 try:
@@ -242,6 +244,132 @@ def transcribe_audio(audio_path: str, model_size: str = "small", device: str = "
         }
     except Exception as e:
         return {"transcript_segments": None, "full_text": None, "source": None, "error": str(e)}
+
+
+def ensure_cut_transcript(
+    video_id: str,
+    start_time_str: str,
+    end_time_str: str,
+    media_path: str = None,
+    model_size: str = "small",
+    device: str = "cuda",
+    language: str = "pt"
+) -> dict:
+    """
+    Garante que exista uma transcrição com timestamps sincronizados para o corte atual.
+    1. Se transcript.json global existir no diretório data/{video_id}, utiliza-o.
+    2. Se já existir um arquivo de transcrição pontual (_cut_tr_{start}_{end}.json), reutiliza-o (cache).
+    3. Caso contrário, extrai com FFmpeg apenas o trecho de áudio correspondente a [start_time_str, end_time_str],
+       transcreve pontualmente com Faster-Whisper (levando apenas 1 a 3 segundos),
+       aplica o offset temporal absoluto de start_time_str em todos os segmentos e palavras,
+       salva em cache e retorna o caminho do arquivo de transcrição.
+    Retorna:
+       {"transcript_path": str | None, "is_cut_slice": bool, "error": str | None}
+    """
+    if not video_id:
+        return {"transcript_path": None, "is_cut_slice": False, "error": "Video ID não informado."}
+
+    data_dir = os.path.join("data", video_id)
+    os.makedirs(data_dir, exist_ok=True)
+    global_tr = os.path.join(data_dir, "transcript.json")
+    if os.path.exists(global_tr) and os.path.getsize(global_tr) > 10:
+        return {"transcript_path": global_tr, "is_cut_slice": False, "error": None}
+
+    if not start_time_str or not end_time_str:
+        return {"transcript_path": None, "is_cut_slice": False, "error": "Intervalo de tempo não especificado."}
+
+    def _safe_str(t):
+        return re.sub(r'[^0-9A-Za-z_-]', '-', str(t)).strip('-')
+
+    slice_tag = f"_cut_tr_{_safe_str(start_time_str)}_{_safe_str(end_time_str)}.json"
+    slice_file = os.path.join(data_dir, slice_tag)
+    if os.path.exists(slice_file) and os.path.getsize(slice_file) > 10:
+        return {"transcript_path": slice_file, "is_cut_slice": True, "error": None}
+
+    # Procura arquivo de mídia se não foi passado ou não existe
+    resolved_media = media_path
+    if not resolved_media or not os.path.exists(resolved_media):
+        for candidate in ["video_full.mp4", "audio.mp3"]:
+            c_path = os.path.join(data_dir, candidate)
+            if os.path.exists(c_path) and os.path.getsize(c_path) > 0:
+                resolved_media = c_path
+                break
+
+    if not resolved_media or not os.path.exists(resolved_media):
+        # Tenta buscar qualquer vídeo ou áudio no diretório do projeto
+        if os.path.exists(data_dir):
+            for fname in os.listdir(data_dir):
+                if fname.lower().endswith((".mp4", ".mkv", ".mov", ".mp3", ".wav", ".m4a")) and not fname.startswith("_slice_"):
+                    f_full = os.path.join(data_dir, fname)
+                    if os.path.getsize(f_full) > 0:
+                        resolved_media = f_full
+                        break
+
+    if not resolved_media or not os.path.exists(resolved_media):
+        return {"transcript_path": None, "is_cut_slice": False, "error": "Mídia original não encontrada para transcrição pontual."}
+
+    from core.extractor import parse_time_str
+    s_sec = parse_time_str(start_time_str) or 0.0
+    e_sec = parse_time_str(end_time_str)
+    dur_sec = (e_sec - s_sec) if (e_sec is not None and e_sec > s_sec) else None
+
+    import subprocess
+    from core.video_processor import FFMPEG_EXE
+    ff = FFMPEG_EXE
+
+    slice_aud_tmp = os.path.join(data_dir, f"_slice_aud_{_safe_str(start_time_str)}_{_safe_str(end_time_str)}.mp3")
+
+    # Extração rápida com FFmpeg
+    ff_args = [ff, "-y", "-ss", str(start_time_str)]
+    if dur_sec and dur_sec > 0:
+        ff_args.extend(["-t", str(dur_sec)])
+    ff_args.extend(["-i", resolved_media, "-vn", "-acodec", "libmp3lame", "-q:a", "2", slice_aud_tmp])
+
+    try:
+        subprocess.run(ff_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        if not os.path.exists(slice_aud_tmp) or os.path.getsize(slice_aud_tmp) == 0:
+            # Fallback colocando -ss após -i
+            ff_args_fallback = [ff, "-y", "-i", resolved_media, "-ss", str(start_time_str)]
+            if dur_sec and dur_sec > 0:
+                ff_args_fallback.extend(["-t", str(dur_sec)])
+            ff_args_fallback.extend(["-vn", "-acodec", "libmp3lame", "-q:a", "2", slice_aud_tmp])
+            subprocess.run(ff_args_fallback, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    except Exception as e_ff:
+        return {"transcript_path": None, "is_cut_slice": False, "error": f"Erro no FFmpeg ao fatiar áudio: {e_ff}"}
+
+    if not os.path.exists(slice_aud_tmp) or os.path.getsize(slice_aud_tmp) == 0:
+        return {"transcript_path": None, "is_cut_slice": False, "error": "Não foi possível extrair o áudio do trecho para transcrição."}
+
+    # Transcreve o trecho com Faster-Whisper
+    try:
+        slice_res = transcribe_audio(slice_aud_tmp, model_size=model_size, device=device, language=language)
+    finally:
+        try:
+            if os.path.exists(slice_aud_tmp):
+                os.remove(slice_aud_tmp)
+        except Exception:
+            pass
+
+    if slice_res.get("error"):
+        return {"transcript_path": None, "is_cut_slice": False, "error": slice_res["error"]}
+
+    segments = slice_res.get("transcript_segments", [])
+    for sg in segments:
+        sg["start"] = round(sg.get("start", 0.0) + s_sec, 3)
+        sg["end"] = round(sg.get("end", 0.0) + s_sec, 3)
+        for w in sg.get("words", []):
+            w["start"] = round(w.get("start", 0.0) + s_sec, 3)
+            w["end"] = round(w.get("end", 0.0) + s_sec, 3)
+
+    import json
+    with open(slice_file, "w", encoding="utf-8") as f:
+        json.dump({
+            "full_text": slice_res.get("full_text", ""),
+            "segments": segments,
+            "source": f"Whisper Pontual ({model_size})"
+        }, f, ensure_ascii=False, indent=4)
+
+    return {"transcript_path": slice_file, "is_cut_slice": True, "error": None}
 
 
 def format_badge_time(seconds: float) -> str:

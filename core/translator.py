@@ -277,7 +277,8 @@ def translate_cut_subtitles(
     start_time_str: str,
     end_time_str: str,
     target_lang: str = "pt-BR",
-    model: str = "llama3"
+    model: str = "llama3",
+    transcript_path: str = None
 ) -> dict:
     """
     Traduz especificamente as frases de um trecho/corte delimitado por start_time e end_time,
@@ -285,20 +286,25 @@ def translate_cut_subtitles(
     """
     from core.extractor import parse_time_str
     
-    # Localiza o arquivo transcript.json correto (mesmo com sufixo _t_...)
-    t_path = os.path.join("data", video_id, "transcript.json")
-    target_vid_dir = os.path.join("data", video_id)
-    if not os.path.exists(t_path):
-        if os.path.exists("data"):
-            for d in os.listdir("data"):
-                if d.startswith(video_id) and os.path.exists(os.path.join("data", d, "transcript.json")):
-                    t_path = os.path.join("data", d, "transcript.json")
-                    target_vid_dir = os.path.join("data", d)
-                    video_id = d
-                    break
+    # Se um caminho de transcrição específico (ex: fatia pontual) for passado e existir
+    if transcript_path and os.path.exists(transcript_path):
+        t_path = transcript_path
+        target_vid_dir = os.path.dirname(transcript_path)
+    else:
+        # Localiza o arquivo transcript.json correto (mesmo com sufixo _t_...)
+        t_path = os.path.join("data", video_id, "transcript.json")
+        target_vid_dir = os.path.join("data", video_id)
+        if not os.path.exists(t_path):
+            if os.path.exists("data"):
+                for d in os.listdir("data"):
+                    if d.startswith(video_id) and os.path.exists(os.path.join("data", d, "transcript.json")):
+                        t_path = os.path.join("data", d, "transcript.json")
+                        target_vid_dir = os.path.join("data", d)
+                        video_id = d
+                        break
 
     if not os.path.exists(t_path):
-        return {"translated_segments": [], "translated_snippet": "", "count": 0, "error": "Arquivo transcript.json não encontrado."}
+        return {"translated_segments": [], "translated_snippet": "", "count": 0, "error": "Arquivo de transcrição não encontrado."}
 
     try:
         with open(t_path, "r", encoding="utf-8") as f:

@@ -144,8 +144,27 @@ def process_batch_cuts(
         if progress_callback:
             progress_callback(idx, total, f"[{idx+1}/{total}] Analisando trecho [{start_t} → {end_t}]...")
 
+        # Garante transcrição (global ou pontual deste corte sob demanda)
+        item_transcript_path = transcript_path
+        if not os.path.exists(transcript_path):
+            try:
+                from core.transcriber import ensure_cut_transcript
+                _tr_res = ensure_cut_transcript(
+                    video_id=video_id,
+                    start_time_str=start_t,
+                    end_time_str=end_t,
+                    media_path=video_full_path,
+                    model_size=params.get("model_size", "small"),
+                    device=params.get("device_option", "cuda"),
+                    language="pt"
+                )
+                if _tr_res.get("transcript_path"):
+                    item_transcript_path = _tr_res["transcript_path"]
+            except Exception as _ex_tr:
+                _log(f"Aviso na transcrição pontual do lote: {_ex_tr}")
+
         # 3. Geração de Metadados com IA
-        words_meta = core.subtitle_burner.extract_words_in_range(transcript_path, start_t, end_t)
+        words_meta = core.subtitle_burner.extract_words_in_range(item_transcript_path, start_t, end_t)
         if len(words_meta) > 180:
             snippet_text = " ".join(w["word"] for w in words_meta[:180]) + "..."
         else:
@@ -253,7 +272,7 @@ def process_batch_cuts(
             split_blur_margin_pct=params.get("split_blur_margin_pct", 5.0),
             # Legendas Dinâmicas
             subtitle_enabled=subtitle_enabled,
-            subtitle_transcript_path=transcript_path,
+            subtitle_transcript_path=item_transcript_path if subtitle_enabled else None,
             subtitle_highlight_color=subtitle_highlight_color,
             subtitle_base_color=subtitle_base_color,
             subtitle_font_size=subtitle_font_size,

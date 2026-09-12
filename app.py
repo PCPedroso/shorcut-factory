@@ -5312,8 +5312,7 @@ if _has_media_ready:
                 _has_transcript = os.path.exists(_transcript_path_sub)
     
                 if not _has_transcript:
-                    st.warning("⚠️ Transcrição não encontrada. Realize a transcrição na Seção 1 antes de ativar as legendas.")
-                    subtitle_enabled = False
+                    st.info("⚡ **Transcrição Inteligente sob Demanda Ativada:** A transcrição completa não foi feita na Seção 1. Ao clicar em **Gerar Corte**, o Faster-Whisper transcreverá cirurgicamente **apenas o áudio deste corte** (processo ultrarrápido de 1 a 3 segundos)!")
                 else:
                     # Verifica se há word_timestamps no transcript salvo
                     import json as _json_sub
@@ -5323,80 +5322,80 @@ if _has_media_ready:
                         _segs = _td.get("segments", [])
                         _has_words = any(s.get("words") for s in _segs[:5])
                         if not _has_words:
-                            st.info("ℹ️ Transcrição sem timestamps por palavra. As legendas usarão distribuição proporcional (recomenda-se retranscrever com Whisper para precisão máxima).")
+                            st.info("ℹ️ Transcrição sem timestamps por palavra. As legendas usarão distribuição proporcional.")
                     except Exception:
                         pass
-    
-                    col_sub1, col_sub2, col_sub3 = st.columns([2, 2, 1])
-                    with col_sub1:
-                        subtitle_highlight_color = st.color_picker(
-                            "🎨 Cor do Destaque (Palavra Atual)",
-                            value=subtitle_highlight_color,
-                            key="sub_highlight_color",
-                            help="Cor vibrante que pisca na palavra sendo falada."
-                        )
-                    with col_sub2:
-                        subtitle_base_color = st.color_picker(
-                            "💤 Cor das Demais Palavras",
-                            value=subtitle_base_color,
-                            key="sub_base_color",
-                            help="Cor das palavras da linha atual que ainda não foram ditas."
-                        )
-                    with col_sub3:
-                        subtitle_font_size = st.number_input(
-                            "🔤 Fonte",
-                            min_value=10,
-                            max_value=300,
-                            value=subtitle_font_size,
-                            step=5,
-                            key="sub_font_size",
-                            help="Tamanho da fonte das legendas (recomendado entre 75 e 110 para cortes 9:16 estilo Alex Hormozi)."
-                        )
-                    st.caption("📌 Legendas no terço inferior da tela • Fonte Montserrat Bold • Contorno preto para legibilidade em qualquer fundo")
-    
-                    # ── 🌐 TRADUÇÃO DE LEGENDAS ESPECÍFICA DESTE CORTE ──────────
-                    st.markdown("---")
-                    cut_trans_enabled = st.toggle(
-                        "🌐 Ativar Tradução Inteligente de Legendas (Deste Corte)",
-                        value=cut_trans_enabled,
-                        key="cut_trans_enabled_tgl",
-                        on_change=lambda: save_setting("cut_trans_enabled", st.session_state.cut_trans_enabled_tgl),
-                        help="Ao ativar, a aplicação traduz automaticamente as frases deste corte para o idioma escolhido com IA (Ollama) e queima a legenda traduzida no vídeo ao clicar em Gerar Corte."
+
+                col_sub1, col_sub2, col_sub3 = st.columns([2, 2, 1])
+                with col_sub1:
+                    subtitle_highlight_color = st.color_picker(
+                        "🎨 Cor do Destaque (Palavra Atual)",
+                        value=subtitle_highlight_color,
+                        key="sub_highlight_color",
+                        help="Cor vibrante que pisca na palavra sendo falada."
                     )
+                with col_sub2:
+                    subtitle_base_color = st.color_picker(
+                        "💤 Cor das Demais Palavras",
+                        value=subtitle_base_color,
+                        key="sub_base_color",
+                        help="Cor das palavras da linha atual que ainda não foram ditas."
+                    )
+                with col_sub3:
+                    subtitle_font_size = st.number_input(
+                        "🔤 Fonte",
+                        min_value=10,
+                        max_value=300,
+                        value=subtitle_font_size,
+                        step=5,
+                        key="sub_font_size",
+                        help="Tamanho da fonte das legendas (recomendado entre 75 e 110 para cortes 9:16 estilo Alex Hormozi)."
+                    )
+                st.caption("📌 Legendas no terço inferior da tela • Fonte Montserrat Bold • Contorno preto para legibilidade em qualquer fundo")
+
+                # ── 🌐 TRADUÇÃO DE LEGENDAS ESPECÍFICA DESTE CORTE ──────────
+                st.markdown("---")
+                cut_trans_enabled = st.toggle(
+                    "🌐 Ativar Tradução Inteligente de Legendas (Deste Corte)",
+                    value=cut_trans_enabled,
+                    key="cut_trans_enabled_tgl",
+                    on_change=lambda: save_setting("cut_trans_enabled", st.session_state.cut_trans_enabled_tgl),
+                    help="Ao ativar, a aplicação traduz automaticamente as frases deste corte para o idioma escolhido com IA (Ollama) e queima a legenda traduzida no vídeo ao clicar em Gerar Corte."
+                )
     
-                    if cut_trans_enabled:
-                        st.caption("✨ A tradução deste trecho será executada e aplicada automaticamente ao clicar em **Gerar Corte**, preservando 100% da sincronização de tempo.")
+                if cut_trans_enabled:
+                    st.caption("✨ A tradução deste trecho será executada e aplicada automaticamente ao clicar em **Gerar Corte**, preservando 100% da sincronização de tempo.")
     
-                        col_ct1, col_ct2 = st.columns([1.5, 1])
-                        with col_ct1:
-                            _cut_lang_opts = [
-                                ("pt-BR", "🇧🇷 Português (Brasil)"),
-                                ("en", "🇺🇸 Inglês (English)"),
-                                ("es", "🇪🇸 Espanhol (Español)")
-                            ]
-                            sel_cut_lang_code = st.selectbox(
-                                "Traduzir este corte para:",
-                                [c for c, _ in _cut_lang_opts],
-                                format_func=lambda c: dict(_cut_lang_opts).get(c, c),
-                                key="sel_cut_sub_trans_lang"
-                            )
-                        with col_ct2:
-                            sel_cut_trans_model = st.selectbox(
-                                "Modelo IA:",
-                                _ollama_models,
-                                index=_om_idx,
-                                key="sel_cut_trans_model"
-                            )
+                    col_ct1, col_ct2 = st.columns([1.5, 1])
+                    with col_ct1:
+                        _cut_lang_opts = [
+                            ("pt-BR", "🇧🇷 Português (Brasil)"),
+                            ("en", "🇺🇸 Inglês (English)"),
+                            ("es", "🇪🇸 Espanhol (Español)")
+                        ]
+                        sel_cut_lang_code = st.selectbox(
+                            "Traduzir este corte para:",
+                            [c for c, _ in _cut_lang_opts],
+                            format_func=lambda c: dict(_cut_lang_opts).get(c, c),
+                            key="sel_cut_sub_trans_lang"
+                        )
+                    with col_ct2:
+                        sel_cut_trans_model = st.selectbox(
+                            "Modelo IA:",
+                            _ollama_models,
+                            index=_om_idx,
+                            key="sel_cut_trans_model"
+                        )
     
-                        if _vid_id_sub and has_original_backup(_vid_id_sub):
-                            col_rev1, col_rev2 = st.columns([3, 1.2])
-                            with col_rev1:
-                                st.info("ℹ️ Este vídeo possui backup da legenda original.")
-                            with col_rev2:
-                                if st.button("⏪ Reverter Original", key="btn_revert_cut_sub_orig", use_container_width=True):
-                                    restore_original_transcript(_vid_id_sub)
-                                    st.success("✅ Legendas restauradas para a versão original!")
-                                    st.rerun()
+                    if _vid_id_sub and has_original_backup(_vid_id_sub):
+                        col_rev1, col_rev2 = st.columns([3, 1.2])
+                        with col_rev1:
+                            st.info("ℹ️ Este vídeo possui backup da legenda original.")
+                        with col_rev2:
+                            if st.button("⏪ Reverter Original", key="btn_revert_cut_sub_orig", use_container_width=True):
+                                restore_original_transcript(_vid_id_sub)
+                                st.success("✅ Legendas restauradas para a versão original!")
+                                st.rerun()
     
         # ─────────────────────────────────────────────────────────────────
         # 🏷️ Headline / Título Fixo de Retenção no Topo (Fase 3)
@@ -5758,47 +5757,22 @@ if _has_media_ready:
                 if st.button("✨ Gerar Título e Textos com IA", use_container_width=True, type="secondary", help="Analisa o trecho exato do corte e gera Título Viral específico, Descrição contextualizada com CTA e Hashtags estratégicas."):
                     _transcript_path_meta = os.path.join("data", _vid_id_cat, "transcript.json") if _vid_id_cat else ""
                     if not os.path.exists(_transcript_path_meta):
-                        # Transcrição pontual do trecho sob demanda se não houver transcrição global
-                        _slice_tr_cand = os.path.join("data", _vid_id_cat, f"_cut_tr_{start_time.replace(':','-')}_{end_time.replace(':','-')}.json")
-                        if os.path.exists(_slice_tr_cand):
-                            _transcript_path_meta = _slice_tr_cand
-                        elif _vid_id_cat and start_time and end_time:
+                        with st.spinner("🎙️ Transcrevendo áudio do trecho para IA (1 a 2 segundos)..."):
+                            from core.transcriber import ensure_cut_transcript
                             _v_src_meta = os.path.join("data", _vid_id_cat, "video_full.mp4")
                             _a_src_meta = os.path.join("data", _vid_id_cat, "audio.mp3")
                             _input_media = _v_src_meta if os.path.exists(_v_src_meta) else _a_src_meta
-                            if _input_media and os.path.exists(_input_media):
-                                with st.spinner("🎙️ Transcrevendo áudio do trecho para IA (1 a 2 segundos)..."):
-                                    _slice_aud_tmp = os.path.join("data", _vid_id_cat, f"_slice_aud_{start_time.replace(':','-')}_{end_time.replace(':','-')}.mp3")
-                                    try:
-                                        import subprocess
-                                        from core.video_processor import _get_ffmpeg_cmd
-                                        _ff = _get_ffmpeg_cmd()
-                                        _s_sec = parse_time_str(start_time) or 0.0
-                                        _e_sec = parse_time_str(end_time)
-                                        _dur_sec = (_e_sec - _s_sec) if _e_sec else None
-                                        _ff_args = [_ff, "-y", "-ss", start_time]
-                                        if _dur_sec and _dur_sec > 0:
-                                            _ff_args.extend(["-t", str(_dur_sec)])
-                                        _ff_args.extend(["-i", _input_media, "-vn", "-acodec", "libmp3lame", "-q:a", "2", _slice_aud_tmp])
-                                        subprocess.run(_ff_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                                        if os.path.exists(_slice_aud_tmp):
-                                            _slice_res = transcribe_audio(_slice_aud_tmp, model_size=model_size, device=device_option, language="pt")
-                                            if not _slice_res.get("error"):
-                                                for _sg in _slice_res.get("transcript_segments", []):
-                                                    _sg["start"] = _sg.get("start", 0.0) + _s_sec
-                                                    _sg["end"] = _sg.get("end", 0.0) + _s_sec
-                                                    for _w in _sg.get("words", []):
-                                                        _w["start"] = _w.get("start", 0.0) + _s_sec
-                                                        _w["end"] = _w.get("end", 0.0) + _s_sec
-                                                with open(_slice_tr_cand, "w", encoding="utf-8") as _stf:
-                                                    json.dump({
-                                                        "full_text": _slice_res["full_text"],
-                                                        "segments": _slice_res["transcript_segments"],
-                                                        "source": "Whisper Pontual (IA Meta)"
-                                                    }, _stf, ensure_ascii=False, indent=4)
-                                                _transcript_path_meta = _slice_tr_cand
-                                    except Exception:
-                                        pass
+                            _tr_meta_res = ensure_cut_transcript(
+                                video_id=_vid_id_cat,
+                                start_time_str=start_time,
+                                end_time_str=end_time,
+                                media_path=_input_media,
+                                model_size=model_size,
+                                device=device_option,
+                                language="pt"
+                            )
+                            if _tr_meta_res.get("transcript_path"):
+                                _transcript_path_meta = _tr_meta_res["transcript_path"]
 
                     if not start_time or not end_time:
                         st.warning("⚠️ Defina o tempo inicial e final do corte primeiro.")
@@ -5850,12 +5824,25 @@ if _has_media_ready:
             def _get_snippet_for_regen():
                 import core.analyzer
                 from core.subtitle_burner import extract_words_in_range
-                _tp = os.path.join("data", _vid_id_cat, "transcript.json") if _vid_id_cat else ""
-                if not os.path.exists(_tp):
-                    st.warning("⚠️ Transcrição não encontrada. Transcreva o vídeo na Seção 1 primeiro.")
-                    return None
+                from core.transcriber import ensure_cut_transcript
                 if not start_time or not end_time:
                     st.warning("⚠️ Defina o tempo inicial e final do corte primeiro.")
+                    return None
+                _v_src_m = os.path.join("data", _vid_id_cat, "video_full.mp4")
+                _a_src_m = os.path.join("data", _vid_id_cat, "audio.mp3")
+                _input_m = _v_src_m if os.path.exists(_v_src_m) else _a_src_m
+                _tr_res = ensure_cut_transcript(
+                    video_id=_vid_id_cat,
+                    start_time_str=start_time,
+                    end_time_str=end_time,
+                    media_path=_input_m,
+                    model_size=model_size,
+                    device=device_option,
+                    language="pt"
+                )
+                _tp = _tr_res.get("transcript_path")
+                if not _tp or not os.path.exists(_tp):
+                    st.warning(f"⚠️ Transcrição do corte não disponível: {_tr_res.get('error', 'Verifique o áudio do vídeo')}")
                     return None
                 _words = extract_words_in_range(_tp, start_time, end_time)
                 _snip = " ".join(w["word"] for w in _words)
@@ -6282,6 +6269,21 @@ if _has_media_ready:
                                     return f"{h:02d}:{m:02d}:{sec:06.3f}"
                                 _part_end_str = _fmt_dur(_part_dur) if _part_dur > 0 else "23:59:59.000"
 
+                                _carrossel_sub_tr = _transcript_path_c
+                                if subtitle_enabled and not os.path.exists(_transcript_path_c):
+                                    from core.transcriber import ensure_cut_transcript
+                                    _tr_c_res = ensure_cut_transcript(
+                                        video_id=_vid_id_cat,
+                                        start_time_str="00:00:00.00",
+                                        end_time_str=_part_end_str,
+                                        media_path=_cp["path"],
+                                        model_size=model_size,
+                                        device=device_option,
+                                        language="pt"
+                                    )
+                                    if _tr_c_res.get("transcript_path"):
+                                        _carrossel_sub_tr = _tr_c_res["transcript_path"]
+
                                 _cut_res_c = cut_video(
                                     _cp["path"],
                                     "00:00:00.00",
@@ -6310,7 +6312,7 @@ if _has_media_ready:
                                     split_media_position=split_media_position,
                                     split_blur_margin_pct=split_blur_margin_pct,
                                     subtitle_enabled=subtitle_enabled,
-                                    subtitle_transcript_path=_transcript_path_c if os.path.exists(_transcript_path_c) else None,
+                                    subtitle_transcript_path=_carrossel_sub_tr if _carrossel_sub_tr and os.path.exists(_carrossel_sub_tr) else None,
                                     subtitle_highlight_color=subtitle_highlight_color,
                                     subtitle_base_color=subtitle_base_color,
                                     subtitle_font_size=subtitle_font_size,
@@ -6496,8 +6498,29 @@ if _has_media_ready:
                         if bg_music_enabled:
                             extra_info += " + 🎵 Música/Ducking"
     
+                        _transcript_path_cut = os.path.join(data_dir, "transcript.json")
+                        # Se legendas estiverem ativas, garante transcrição pontual se não houver transcrição completa
+                        if subtitle_enabled:
+                            from core.transcriber import ensure_cut_transcript
+                            with st.spinner(f"🎙️ Verificando sincronia das legendas [{start_time} → {end_time}]..."):
+                                _tr_cut_res = ensure_cut_transcript(
+                                    video_id=video_id,
+                                    start_time_str=start_time,
+                                    end_time_str=end_time,
+                                    media_path=video_res.get("path") or video_full_path,
+                                    model_size=model_size,
+                                    device=device_option,
+                                    language="pt"
+                                )
+                                if _tr_cut_res.get("transcript_path"):
+                                    _transcript_path_cut = _tr_cut_res["transcript_path"]
+                                    if _tr_cut_res.get("is_cut_slice"):
+                                        st.toast("⚡ Transcrição pontual do corte sincronizada com sucesso!")
+                                elif _tr_cut_res.get("error"):
+                                    st.warning(f"⚠️ Aviso na transcrição do corte: {_tr_cut_res['error']}")
+
                         # Se a tradução de legendas deste corte estiver ativa, traduz automaticamente antes de queimar no vídeo
-                        if subtitle_enabled and st.session_state.get("cut_trans_enabled_tgl"):
+                        if subtitle_enabled and st.session_state.get("cut_trans_enabled_tgl") and os.path.exists(_transcript_path_cut):
                             _target_tr_lang = st.session_state.get("sel_cut_sub_trans_lang", "pt-BR")
                             _target_tr_model = st.session_state.get("sel_cut_trans_model", "llama3")
                             with st.spinner(f"🌐 Traduzindo legendas do corte para {_target_tr_lang} via IA ({_target_tr_model})..."):
@@ -6508,53 +6531,13 @@ if _has_media_ready:
                                     start_time_str=start_time,
                                     end_time_str=end_time,
                                     target_lang=_target_tr_lang,
-                                    model=_target_tr_model
+                                    model=_target_tr_model,
+                                    transcript_path=_transcript_path_cut
                                 )
                                 if res_cut_tr.get("error"):
                                     st.warning(f"⚠️ Não foi possível traduzir legendas do corte: {res_cut_tr['error']}. Usando original.")
                                 else:
                                     st.toast(f"✅ {res_cut_tr['count']} frase(s) traduzida(s) para {_target_tr_lang}!")
-    
-                        _transcript_path_cut = os.path.join(data_dir, "transcript.json")
-                        # Se legendas estiverem ativas e não houver transcrição completa, transcreve pontualmente apenas este corte
-                        if subtitle_enabled and not os.path.exists(_transcript_path_cut):
-                            _slice_tr_tag = f"_cut_tr_{start_time.replace(':','-')}_{end_time.replace(':','-')}.json"
-                            _cut_tr_file = os.path.join(data_dir, _slice_tr_tag)
-                            if os.path.exists(_cut_tr_file):
-                                _transcript_path_cut = _cut_tr_file
-                            else:
-                                _slice_aud_tmp = os.path.join(data_dir, f"_slice_aud_{start_time.replace(':','-')}_{end_time.replace(':','-')}.mp3")
-                                try:
-                                    import subprocess
-                                    from core.video_processor import _get_ffmpeg_cmd
-                                    _ff = _get_ffmpeg_cmd()
-                                    _s_sec = parse_time_str(start_time) or 0.0
-                                    _e_sec = parse_time_str(end_time)
-                                    _dur_sec = (_e_sec - _s_sec) if _e_sec else None
-                                    _ff_args = [_ff, "-y", "-ss", start_time]
-                                    if _dur_sec and _dur_sec > 0:
-                                        _ff_args.extend(["-t", str(_dur_sec)])
-                                    _ff_args.extend(["-i", video_res["path"], "-vn", "-acodec", "libmp3lame", "-q:a", "2", _slice_aud_tmp])
-                                    subprocess.run(_ff_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                                    if os.path.exists(_slice_aud_tmp):
-                                        with st.spinner(f"🎙️ Transcrevendo trecho do corte ({start_time} ➔ {end_time}) com Whisper (1 a 2s)..."):
-                                            _slice_res = transcribe_audio(_slice_aud_tmp, model_size=model_size, device=device_option, language="pt")
-                                        if not _slice_res.get("error"):
-                                            for _sg in _slice_res.get("transcript_segments", []):
-                                                _sg["start"] = _sg.get("start", 0.0) + _s_sec
-                                                _sg["end"] = _sg.get("end", 0.0) + _s_sec
-                                                for _w in _sg.get("words", []):
-                                                    _w["start"] = _w.get("start", 0.0) + _s_sec
-                                                    _w["end"] = _w.get("end", 0.0) + _s_sec
-                                            with open(_cut_tr_file, "w", encoding="utf-8") as _ctf:
-                                                json.dump({
-                                                    "full_text": _slice_res["full_text"],
-                                                    "segments": _slice_res["transcript_segments"],
-                                                    "source": "Whisper Pontual (Corte)"
-                                                }, _ctf, ensure_ascii=False, indent=4)
-                                            _transcript_path_cut = _cut_tr_file
-                                except Exception as _e_tr_c:
-                                    st.warning(f"Aviso na transcrição do corte: {_e_tr_c}")
 
                         with st.spinner(f"Renderizando corte [{start_time} → {end_time}] no formato {aspect_option}{extra_info}..."):
                             cut_res = cut_video(
