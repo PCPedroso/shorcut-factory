@@ -614,63 +614,260 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
                     except Exception:
                         pass
 
-            b_hl_text = st.text_input(
-                "Texto da Headline (suporta numeração dinâmica com `{parte}`):",
-                value=default_hl,
-                key="batch_hl_text_input",
-                help="Ex: 'Caso Dark Horse • Parte {parte}'. A tag {parte} será substituída automaticamente por 01, 02, etc."
+            col_b_htxt, col_b_hbtn = st.columns([4, 1.2])
+            with col_b_htxt:
+                b_hl_text = st.text_area(
+                    "Texto da Headline (suporta quebra manual com Enter e `{parte}`):",
+                    value=st.session_state.get("batch_hl_text_input", default_hl),
+                    height=80,
+                    key="batch_hl_text_input",
+                    help="Ex: 'Caso Dark Horse • Parte {parte}'. A tag {parte} será substituída automaticamente por 01, 02, etc. Linhas separadas por Enter viram caixas independentes!"
+                )
+            with col_b_hbtn:
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                if st.button("✨ Condensar", key="batch_hl_condense_btn", use_container_width=True, help="Ajusta o texto para caixa alta e quebra inteligente de 2 a 3 linhas"):
+                    cleaned_hl = clean_and_condense_headline(b_hl_text)
+                    if cleaned_hl:
+                        st.session_state["batch_hl_text_input"] = format_headline_text(cleaned_hl).replace(r"\N", "\n")
+                        st.rerun()
+
+            st.caption("💡 Se incluir `{parte}` ou `{num}` no texto, cada vídeo receberá sua numeração sequencial (ex: Parte 01, Parte 02). Sem `{parte}`, todas as partes terão o mesmo texto fixo.")
+
+            # 2. Preset de Estilo Rápido com Sincronização Reativa
+            hl_preset_keys = list(HEADLINE_PRESETS.keys())
+            hl_preset_labels = [HEADLINE_PRESETS[k]["name"] for k in hl_preset_keys]
+
+            def _on_batch_hl_preset_change():
+                selected_label = st.session_state.get("batch_hl_preset_sel")
+                if selected_label and selected_label in hl_preset_labels:
+                    pk = hl_preset_keys[hl_preset_labels.index(selected_label)]
+                    pd = HEADLINE_PRESETS[pk]
+                    st.session_state["batch_hl_tcolor"] = pd.get("text_color", "#FFFFFF")
+                    st.session_state["batch_hl_bgcolor"] = pd.get("bg_color", "#000000")
+                    if pk == "floating_bold":
+                        st.session_state["batch_hl_mode"] = "outline_only"
+                        st.session_state["batch_hl_bgalpha"] = 0
+                    else:
+                        if st.session_state.get("batch_hl_mode") == "outline_only":
+                            st.session_state["batch_hl_mode"] = "line_boxes"
+                        if st.session_state.get("batch_hl_bgalpha", 0) == 0:
+                            st.session_state["batch_hl_bgalpha"] = 95
+                    st.session_state["last_batch_hl_preset"] = pk
+                    st.session_state.pop("cached_batch_hl_prev", None)
+
+            sel_b_hl_lbl = st.selectbox(
+                "Preset de Estilo da Headline:",
+                hl_preset_labels,
+                index=0,
+                key="batch_hl_preset_sel",
+                on_change=_on_batch_hl_preset_change
             )
-            st.caption("💡 Se incluir `{parte}` no texto, cada vídeo receberá sua numeração sequencial (ex: Parte 01, Parte 02). Sem `{parte}`, todas as partes terão o mesmo texto fixo.")
+            sel_b_hl_key = hl_preset_keys[hl_preset_labels.index(sel_b_hl_lbl)]
+            last_b_pk = st.session_state.get("last_batch_hl_preset")
+            if last_b_pk != sel_b_hl_key:
+                pd = HEADLINE_PRESETS[sel_b_hl_key]
+                st.session_state["batch_hl_tcolor"] = pd.get("text_color", "#FFFFFF")
+                st.session_state["batch_hl_bgcolor"] = pd.get("bg_color", "#000000")
+                if sel_b_hl_key == "floating_bold":
+                    st.session_state["batch_hl_mode"] = "outline_only"
+                    st.session_state["batch_hl_bgalpha"] = 0
+                elif last_b_pk == "floating_bold":
+                    st.session_state["batch_hl_mode"] = "line_boxes"
+                    st.session_state["batch_hl_bgalpha"] = 95
+                st.session_state["last_batch_hl_preset"] = sel_b_hl_key
+                st.session_state.pop("cached_batch_hl_prev", None)
 
-            col_hl_p1, col_hl_p2 = st.columns([1.5, 1.5])
-            with col_hl_p1:
-                hl_preset_keys = list(HEADLINE_PRESETS.keys())
-                hl_preset_labels = [HEADLINE_PRESETS[k]["name"] for k in hl_preset_keys]
-                sel_b_hl_lbl = st.selectbox("Estilo Visual / Tema:", hl_preset_labels, index=0, key="batch_hl_preset_sel")
-                sel_b_hl_key = hl_preset_keys[hl_preset_labels.index(sel_b_hl_lbl)]
-                sel_b_hl_data = HEADLINE_PRESETS[sel_b_hl_key]
+            sel_b_hl_data = HEADLINE_PRESETS[sel_b_hl_key]
 
-            with col_hl_p2:
-                b_hl_margin_top = st.slider(
-                    "Posicionamento Vertical (Margem do Topo em px):",
-                    min_value=-50, max_value=400,
+            # 3. Controles Customizáveis e Modo de Container
+            col_b_hl_m1, col_b_hl_m2, col_b_hl_m3 = st.columns(3)
+            with col_b_hl_m1:
+                sel_b_hl_mode = st.selectbox(
+                    "Modo do Container:",
+                    ["line_boxes", "single_card", "outline_only"],
+                    index=0 if sel_b_hl_key != "floating_bold" else 2,
+                    format_func=lambda x: {
+                        "line_boxes": "📦 Caixa por Linha (TikTok/Reels)",
+                        "single_card": "🃏 Card Único (Bloco)",
+                        "outline_only": "✨ Sem Caixa (Contorno)"
+                    }[x],
+                    key="batch_hl_mode"
+                )
+            with col_b_hl_m2:
+                sel_b_hl_margin_top = st.number_input(
+                    "Margem do Topo Y (px):",
+                    min_value=0,
+                    max_value=1200,
                     value=int(sel_b_hl_data.get("margin_top", 120)),
                     step=10,
-                    key="batch_hl_margin_top"
+                    key="batch_hl_mtop",
+                    help="Distância em pixels a partir da borda superior."
+                )
+            with col_b_hl_m3:
+                sel_b_hl_font_size = st.number_input(
+                    "Tamanho da Fonte:",
+                    min_value=20,
+                    max_value=200,
+                    value=int(sel_b_hl_data.get("font_size", 70)),
+                    step=2,
+                    key="batch_hl_fsize"
                 )
 
-            col_hl_o1, col_hl_o2 = st.columns(2)
-            with col_hl_o1:
-                b_hl_start_offset = st.slider(
+            with st.expander("⚙️ Ajustes Finos de Cores, Padding, Cantos e Sombra", expanded=False):
+                col_b_c1, col_b_c2, col_b_c3, col_b_c4 = st.columns(4)
+                with col_b_c1:
+                    sel_b_hl_text_color = st.color_picker(
+                        "Cor do Texto:",
+                        value=st.session_state.get("batch_hl_tcolor", sel_b_hl_data.get("text_color", "#FFFFFF")),
+                        key="batch_hl_tcolor"
+                    )
+                with col_b_c2:
+                    sel_b_hl_bg_color = st.color_picker(
+                        "Cor do Fundo / Caixa:",
+                        value=st.session_state.get("batch_hl_bgcolor", sel_b_hl_data.get("bg_color", "#000000")),
+                        key="batch_hl_bgcolor"
+                    )
+                with col_b_c3:
+                    sel_b_hl_bg_alpha = st.slider(
+                        "Opacidade do Fundo (%):",
+                        min_value=0, max_value=100,
+                        value=st.session_state.get("batch_hl_bgalpha", 95 if sel_b_hl_key != "floating_bold" else 0),
+                        step=5,
+                        key="batch_hl_bgalpha"
+                    ) / 100.0
+                with col_b_c4:
+                    sel_b_hl_align = st.selectbox(
+                        "Alinhamento:",
+                        ["center", "left", "right"],
+                        index=0,
+                        format_func=lambda x: {"center": "Centralizado", "left": "Esquerda", "right": "Direita"}[x],
+                        key="batch_hl_align"
+                    )
+
+                col_b_p1, col_b_p2, col_b_p3, col_b_p4 = st.columns(4)
+                with col_b_p1:
+                    sel_b_hl_pad_h = st.slider("Padding Horizontal:", 10, 80, 28, 2, key="batch_hl_padh")
+                with col_b_p2:
+                    sel_b_hl_pad_v = st.slider("Padding Vertical:", 5, 50, 16, 2, key="batch_hl_padv")
+                with col_b_p3:
+                    sel_b_hl_line_spacing = st.slider("Espaçamento Linhas:", 0, 50, 14, 2, key="batch_hl_linesp")
+                with col_b_p4:
+                    sel_b_hl_corner = st.slider("Cantos Arredondados:", 0, 50, 12, 2, key="batch_hl_corner")
+
+                col_b_s1, col_b_s2 = st.columns(2)
+                with col_b_s1:
+                    sel_b_hl_max_w_pct = st.slider("Largura Máxima do Bloco (% da tela):", 50, 100, 90, 5, key="batch_hl_maxw") / 100.0
+                with col_b_s2:
+                    sel_b_hl_shadow = st.toggle("Sombra Projetada Suave (Drop Shadow)", value=True, key="batch_hl_shadow")
+
+            col_b_hldelay1, col_b_hldelay2 = st.columns([2.2, 1.8])
+            with col_b_hldelay1:
+                delay_b_hook_on = st.checkbox(
+                    "⏱️ Exibir Headline apenas após o Gancho Viral",
+                    value=st.session_state.get("batch_hl_delay_enabled", False),
+                    key="batch_hl_delay_check",
+                    help="Mantém a Headline oculta durante o teaser/gancho de abertura e exibe-a somente a partir do momento em que o vídeo principal começa."
+                )
+                st.session_state["batch_hl_delay_enabled"] = delay_b_hook_on
+
+            with col_b_hldelay2:
+                b_hl_start_offset = st.number_input(
                     "Iniciar Headline aos (segundos):",
-                    min_value=0.0, max_value=10.0,
-                    value=0.0, step=0.5,
-                    key="batch_hl_start_offset",
-                    help="Permite atrasar o surgimento da headline caso haja um gancho inicial."
+                    min_value=0.0,
+                    max_value=max(0.1, float(sample_dur)),
+                    value=float(st.session_state.get("batch_hl_start_offset_val", 3.0)),
+                    step=0.5,
+                    format="%.1f",
+                    key="batch_hl_start_offset_num",
+                    disabled=not delay_b_hook_on,
+                    help="Segundo exato do vídeo em que a Headline fará sua entrada na tela."
                 )
-            with col_hl_o2:
-                b_hl_mode = st.selectbox(
-                    "Modo de Exibição:",
-                    ["Caixa de Destaque por Linha (Padrão)", "Texto Direto com Borda e Sombra"],
-                    key="batch_hl_mode_sel"
-                )
+                st.session_state["batch_hl_start_offset_val"] = b_hl_start_offset
+
+            final_b_hl_start_offset = float(b_hl_start_offset) if delay_b_hook_on else 0.0
 
             b_hl_cfg = {
-                "font_size": int(sel_b_hl_data.get("font_size", 54)),
-                "font_color": sel_b_hl_data.get("font_color", "#FFFFFF"),
-                "bg_color": sel_b_hl_data.get("bg_color", "#E50914"),
-                "margin_top": b_hl_margin_top,
-                "max_words_per_line": int(sel_b_hl_data.get("max_words_per_line", 4)),
-                "mode": "clean_text" if "Direto" in b_hl_mode else "line_boxes"
+                "preset_key": sel_b_hl_key,
+                "container_mode": sel_b_hl_mode,
+                "mode": sel_b_hl_mode,
+                "margin_top": sel_b_hl_margin_top,
+                "font_size": sel_b_hl_font_size,
+                "text_color": sel_b_hl_text_color,
+                "font_color": sel_b_hl_text_color,
+                "bg_color": sel_b_hl_bg_color,
+                "bg_opacity": sel_b_hl_bg_alpha,
+                "bg_alpha": sel_b_hl_bg_alpha,
+                "alignment": sel_b_hl_align,
+                "box_padding_x": sel_b_hl_pad_h,
+                "box_padding_y": sel_b_hl_pad_v,
+                "padding_h": sel_b_hl_pad_h,
+                "padding_v": sel_b_hl_pad_v,
+                "line_spacing": sel_b_hl_line_spacing,
+                "corner_radius": sel_b_hl_corner,
+                "container_width_pct": sel_b_hl_max_w_pct * 100.0 if sel_b_hl_max_w_pct <= 1.0 else sel_b_hl_max_w_pct,
+                "max_width_pct": sel_b_hl_max_w_pct,
+                "shadow_enabled": sel_b_hl_shadow,
+                "shadow": sel_b_hl_shadow,
+                "stroke_color": "#000000",
+                "stroke_width": 2 if sel_b_hl_mode == "outline_only" else 0,
+                "start_offset_s": final_b_hl_start_offset
             }
 
-            # Prévia da Headline
-            with st.expander("👁️ Ver Prévia da Headline no 1º Vídeo", expanded=False):
-                prev_ts = min(b_hl_start_offset + 1.0, max(0.5, sample_dur - 0.5)) if sample_dur > 1.0 else 0.5
-                sample_p_text = b_hl_text.replace("{parte}", "01").replace("{num}", "1")
-                prev_frame_hl = generate_headline_preview(sample_video, sample_p_text, b_hl_cfg, timestamp_s=prev_ts)
+            # 4. Prévia Visual Instantânea do Frame da 1ª Parte
+            st.markdown("---")
+            col_b_hl_prev_hdr, col_b_hl_prev_btn = st.columns([4.2, 0.8])
+            with col_b_hl_prev_hdr:
+                st.markdown("##### 👁️ Prévia da Headline (1º Vídeo):")
+            with col_b_hl_prev_btn:
+                btn_trig_b_hl = st.button("🔄", key="btn_refresh_hl_prev_batch", help="Aplicar ajustes na pré-visualização da Headline")
+
+            prev_sec_key = "batch_hl_prev_sec"
+            if delay_b_hook_on and final_b_hl_start_offset > 0:
+                recommended_sec = min(float(sample_dur), round(final_b_hl_start_offset + 1.0, 1))
+                cur_prev_sec = st.session_state.get(prev_sec_key)
+                last_offset = st.session_state.get("batch_hl_last_offset_synced")
+                if cur_prev_sec is None or cur_prev_sec < final_b_hl_start_offset or last_offset != final_b_hl_start_offset:
+                    st.session_state[prev_sec_key] = recommended_sec
+                    st.session_state["batch_hl_last_offset_synced"] = final_b_hl_start_offset
+                    st.session_state.pop("cached_batch_hl_prev", None)
+            else:
+                if prev_sec_key not in st.session_state:
+                    st.session_state[prev_sec_key] = min(1.5, float(sample_dur / 2)) if sample_dur > 0 else 0.5
+
+            col_b_hl_prev_ctrl, col_b_hl_prev_view = st.columns([1.5, 2.5])
+            with col_b_hl_prev_ctrl:
+                b_hl_preview_sec = st.slider(
+                    "Segundo para visualização:",
+                    0.0,
+                    max(0.5, float(sample_dur)),
+                    step=0.5,
+                    key=prev_sec_key
+                )
+                st.caption("Faça os ajustes desejados e clique no botão 🔄 para atualizar a prévia.")
+
+            sample_p_text = b_hl_text.replace("{parte}", "01").replace("{num}", "1")
+            need_b_prev_update = (
+                btn_trig_b_hl
+                or ("cached_batch_hl_prev" not in st.session_state)
+                or (b_hl_preview_sec != st.session_state.get("cached_batch_hl_prev_sec"))
+                or (final_b_hl_start_offset != st.session_state.get("cached_batch_hl_offset"))
+            )
+
+            with col_b_hl_prev_view:
+                if need_b_prev_update:
+                    with st.spinner("Atualizando prévia da Headline em lote..."):
+                        st.session_state["cached_batch_hl_prev"] = generate_headline_preview(
+                            video_path=sample_video,
+                            text=sample_p_text,
+                            config=b_hl_cfg,
+                            timestamp_s=b_hl_preview_sec
+                        )
+                        st.session_state["cached_batch_hl_prev_sec"] = b_hl_preview_sec
+                        st.session_state["cached_batch_hl_offset"] = final_b_hl_start_offset
+
+                prev_frame_hl = st.session_state.get("cached_batch_hl_prev")
                 if prev_frame_hl is not None:
-                    safe_display_image(prev_frame_hl, caption=f"Prévia com Headline em {prev_ts:.1f}s", use_container_width=True)
+                    safe_display_image(prev_frame_hl, caption=f"Prévia com Headline em {b_hl_preview_sec:.1f}s", use_container_width=True)
 
             if st.button(f"🚀 Queimar Headline em Todas as {n_parts} Partes", type="primary", use_container_width=True, key="btn_apply_batch_hl"):
                 p_bar = st.progress(0, text="Iniciando aplicação de Headline em lote...")
@@ -682,7 +879,7 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
                         video_path=bp["path"],
                         text=p_text,
                         config=b_hl_cfg,
-                        start_offset_s=b_hl_start_offset
+                        start_offset_s=final_b_hl_start_offset
                     )
                     if res.get("error"):
                         b_errors.append(f"{bp['filename']}: {res['error']}")
@@ -690,7 +887,7 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
                         record_quick_edit(
                             video_path=bp["path"],
                             action_name="🏷️ Headline de Topo (Lote)",
-                            details=f"Texto: '{p_text}' | Estilo: {sel_b_hl_data['name']} | Início: {b_hl_start_offset:.1f}s"
+                            details=f"Texto: '{p_text}' | Estilo: {sel_b_hl_data['name']} | Início: {final_b_hl_start_offset:.1f}s"
                         )
                 p_bar.progress(1.0, text="✅ Concluído!")
                 if video_id:
