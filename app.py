@@ -567,6 +567,353 @@ def get_current_active_video_id(url: str = None) -> str:
 
     return base_vid
 
+
+@st.fragment
+def render_batch_quick_editor_component(parts_list: list, video_id: str):
+    """
+    Componente interativo de edição rápida em lote para aplicar a mesma configuração
+    (Headline, Gancho Viral, Velocidade, Banner ou Áudio) em todas as partes processadas simultaneamente.
+    """
+    if not parts_list:
+        return
+
+    n_parts = len(parts_list)
+    sample_video = parts_list[0]["path"]
+    sample_dur = get_video_duration(sample_video)
+
+    with st.expander(f"⚡ Edição Rápida em Lote — Aplicar Mesma Configuração em Todas as {n_parts} Partes", expanded=True):
+        st.markdown(
+            f"<div style='background:linear-gradient(135deg,rgba(99,102,241,0.12),rgba(168,85,247,0.1));border:1px solid rgba(139,92,246,0.35);border-radius:10px;padding:12px 16px;margin-bottom:14px;'>"
+            f"<b>🚀 Configuração Única para a Série Completa ({n_parts} vídeos):</b><br>"
+            f"<span style='font-size:13px;color:#94a3b8;'>Defina as propriedades abaixo para aplicar o mesmo visual e estilo em todas as partes de uma só vez.<br>"
+            f"Caso prefira ajustes finos exclusivos em cada corte (como aparar trechos ou ganchos diferentes), use a aba <b>4. 🎬 Galeria de Cortes & Pós</b>.</span>"
+            f"</div>",
+            unsafe_allow_html=True
+        )
+
+        tab_b_hl, tab_b_hook, tab_b_speed, tab_b_ov, tab_b_audio = st.tabs([
+            "🏷️ Headline de Topo",
+            "🎣 Gancho Viral (Hook)",
+            "⚡ Velocidade",
+            "🎨 Banner (Overlay)",
+            "🎙️ Áudio & Equalizador"
+        ])
+
+        # ── 1. HEADLINE DE TOPO EM LOTE ──────────────────────────────────────────
+        with tab_b_hl:
+            st.markdown("##### 🏷️ Aplicar Headline de Topo em Todas as Partes")
+            st.caption("Adicione títulos chamativos estilizados no topo de todos os vídeos da série.")
+
+            default_hl = st.session_state.get("final_corte_title") or ""
+            if not default_hl and video_id:
+                meta_p = os.path.join("data", video_id, "metadata.json")
+                if os.path.exists(meta_p):
+                    try:
+                        with open(meta_p, "r", encoding="utf-8") as f_m:
+                            default_hl = json.load(f_m).get("title", "")
+                    except Exception:
+                        pass
+
+            b_hl_text = st.text_input(
+                "Texto da Headline (suporta numeração dinâmica com `{parte}`):",
+                value=default_hl,
+                key="batch_hl_text_input",
+                help="Ex: 'Caso Dark Horse • Parte {parte}'. A tag {parte} será substituída automaticamente por 01, 02, etc."
+            )
+            st.caption("💡 Se incluir `{parte}` no texto, cada vídeo receberá sua numeração sequencial (ex: Parte 01, Parte 02). Sem `{parte}`, todas as partes terão o mesmo texto fixo.")
+
+            col_hl_p1, col_hl_p2 = st.columns([1.5, 1.5])
+            with col_hl_p1:
+                hl_preset_keys = list(HEADLINE_PRESETS.keys())
+                hl_preset_labels = [HEADLINE_PRESETS[k]["name"] for k in hl_preset_keys]
+                sel_b_hl_lbl = st.selectbox("Estilo Visual / Tema:", hl_preset_labels, index=0, key="batch_hl_preset_sel")
+                sel_b_hl_key = hl_preset_keys[hl_preset_labels.index(sel_b_hl_lbl)]
+                sel_b_hl_data = HEADLINE_PRESETS[sel_b_hl_key]
+
+            with col_hl_p2:
+                b_hl_margin_top = st.slider(
+                    "Posicionamento Vertical (Margem do Topo em px):",
+                    min_value=-50, max_value=400,
+                    value=int(sel_b_hl_data.get("margin_top", 120)),
+                    step=10,
+                    key="batch_hl_margin_top"
+                )
+
+            col_hl_o1, col_hl_o2 = st.columns(2)
+            with col_hl_o1:
+                b_hl_start_offset = st.slider(
+                    "Iniciar Headline aos (segundos):",
+                    min_value=0.0, max_value=10.0,
+                    value=0.0, step=0.5,
+                    key="batch_hl_start_offset",
+                    help="Permite atrasar o surgimento da headline caso haja um gancho inicial."
+                )
+            with col_hl_o2:
+                b_hl_mode = st.selectbox(
+                    "Modo de Exibição:",
+                    ["Caixa de Destaque por Linha (Padrão)", "Texto Direto com Borda e Sombra"],
+                    key="batch_hl_mode_sel"
+                )
+
+            b_hl_cfg = {
+                "font_size": int(sel_b_hl_data.get("font_size", 54)),
+                "font_color": sel_b_hl_data.get("font_color", "#FFFFFF"),
+                "bg_color": sel_b_hl_data.get("bg_color", "#E50914"),
+                "margin_top": b_hl_margin_top,
+                "max_words_per_line": int(sel_b_hl_data.get("max_words_per_line", 4)),
+                "mode": "clean_text" if "Direto" in b_hl_mode else "line_boxes"
+            }
+
+            # Prévia da Headline
+            with st.expander("👁️ Ver Prévia da Headline no 1º Vídeo", expanded=False):
+                prev_ts = min(b_hl_start_offset + 1.0, max(0.5, sample_dur - 0.5)) if sample_dur > 1.0 else 0.5
+                sample_p_text = b_hl_text.replace("{parte}", "01").replace("{num}", "1")
+                prev_frame_hl = generate_headline_preview(sample_video, sample_p_text, b_hl_cfg, timestamp_sec=prev_ts)
+                if prev_frame_hl is not None:
+                    safe_display_image(prev_frame_hl, caption=f"Prévia com Headline em {prev_ts:.1f}s", use_container_width=True)
+
+            if st.button(f"🚀 Queimar Headline em Todas as {n_parts} Partes", type="primary", use_container_width=True, key="btn_apply_batch_hl"):
+                p_bar = st.progress(0, text="Iniciando aplicação de Headline em lote...")
+                b_errors = []
+                for bi, bp in enumerate(parts_list, start=1):
+                    p_text = b_hl_text.replace("{parte}", f"{bi:02d}").replace("{num}", str(bi))
+                    p_bar.progress((bi - 1) / n_parts, text=f"Aplicando na parte {bi}/{n_parts} ({bp['filename']})...")
+                    res = apply_headline_to_video(
+                        video_path=bp["path"],
+                        text=p_text,
+                        config=b_hl_cfg,
+                        start_offset_s=b_hl_start_offset
+                    )
+                    if res.get("error"):
+                        b_errors.append(f"{bp['filename']}: {res['error']}")
+                    else:
+                        record_quick_edit(
+                            video_path=bp["path"],
+                            action_name="🏷️ Headline de Topo (Lote)",
+                            details=f"Texto: '{p_text}' | Estilo: {sel_b_hl_data['name']} | Início: {b_hl_start_offset:.1f}s"
+                        )
+                p_bar.progress(1.0, text="✅ Concluído!")
+                if video_id:
+                    sync_carrossel_parts_to_catalog(video_id)
+                if b_errors:
+                    st.error("Erros: " + " · ".join(b_errors))
+                else:
+                    st.success(f"🎉 Headline aplicada com sucesso em todas as {n_parts} partes!")
+                st.rerun(scope="app")
+
+        # ── 2. GANCHO VIRAL EM LOTE ──────────────────────────────────────────────
+        with tab_b_hook:
+            st.markdown("##### 🎣 Aplicar Gancho Viral (Hook) em Todas as Partes")
+            st.caption("Crie uma abertura dinâmica com Teaser Cold Open, zoom ou efeitos para reter os primeiros segundos de cada parte.")
+
+            b_hook_mode_choice = st.radio(
+                "Modo do Gancho:",
+                ["Modo Teaser / Cold Open (Recomendado & Padrão)", "Modo Apenas Estilizar os Primeiros Segundos"],
+                index=0,
+                key="batch_hook_mode_choice"
+            )
+
+            col_hk1, col_hk2 = st.columns(2)
+            with col_hk1:
+                b_hook_dur = st.slider(
+                    "Duração do Gancho em cada parte (segundos):",
+                    min_value=1.5, max_value=6.0,
+                    value=3.0, step=0.5,
+                    key="batch_hook_duration_slider"
+                )
+            with col_hk2:
+                style_keys = list(HOOK_STYLES.keys())
+                style_labels = [HOOK_STYLES[k]["name"] for k in style_keys]
+                sel_b_style_lbl = st.selectbox("Efeito Visual do Gancho:", style_labels, index=0, key="batch_hook_style_sel")
+                sel_b_style_key = style_keys[style_labels.index(sel_b_style_lbl)]
+
+            col_hk3, col_hk4 = st.columns(2)
+            with col_hk3:
+                trans_keys = list(HOOK_TRANSITIONS.keys())
+                trans_labels = [HOOK_TRANSITIONS[k]["name"] for k in trans_keys]
+                sel_b_trans_lbl = st.selectbox("Transição do Gancho para o Vídeo:", trans_labels, index=0, key="batch_hook_trans_sel")
+                sel_b_trans_key = trans_keys[trans_labels.index(sel_b_trans_lbl)]
+            with col_hk4:
+                badge_keys = list(HOOK_BADGE_PRESETS.keys())
+                badge_labels = [HOOK_BADGE_PRESETS[k]["name"] for k in badge_keys]
+                sel_b_badge_lbl = st.selectbox("Estilo do Badge Flutuante:", badge_labels, index=0, key="batch_hook_badge_sel")
+                sel_b_badge_key = badge_keys[badge_labels.index(sel_b_badge_lbl)]
+
+            b_badge_text = st.text_input(
+                "Texto do Badge Flutuante:",
+                value="ASSISTA ATÉ O FINAL 😱",
+                key="batch_hook_badge_text_input"
+            )
+            b_badge_y_pct = st.slider("Posição Vertical do Badge (% da tela):", 10, 80, 28, 2, key="batch_hook_badge_y_pct")
+
+            if st.button(f"🚀 Aplicar Gancho Viral em Todas as {n_parts} Partes", type="primary", use_container_width=True, key="btn_apply_batch_hook"):
+                p_bar = st.progress(0, text="Iniciando aplicação de Gancho Viral em lote...")
+                b_errors = []
+                hook_mode_param = "teaser" if "Teaser" in b_hook_mode_choice else "style_intro"
+                for bi, bp in enumerate(parts_list, start=1):
+                    p_bar.progress((bi - 1) / n_parts, text=f"Renderizando gancho na parte {bi}/{n_parts} ({bp['filename']})...")
+                    res = add_viral_hook_to_video(
+                        video_path=bp["path"],
+                        hook_start_s=0.0,
+                        hook_end_s=b_hook_dur,
+                        hook_style=sel_b_style_key,
+                        badge_text=b_badge_text.strip() if b_badge_text else "",
+                        badge_style=sel_b_badge_key,
+                        badge_y_pct=b_badge_y_pct,
+                        transition_type=sel_b_trans_key,
+                        hook_mode=hook_mode_param
+                    )
+                    if res.get("error"):
+                        b_errors.append(f"{bp['filename']}: {res['error']}")
+                    else:
+                        record_quick_edit(
+                            video_path=bp["path"],
+                            action_name="🎣 Gancho Viral (Lote)",
+                            details=f"Duração: {b_hook_dur:.1f}s | Estilo: {sel_b_style_lbl} | Badge: '{b_badge_text}'"
+                        )
+                p_bar.progress(1.0, text="✅ Concluído!")
+                if video_id:
+                    sync_carrossel_parts_to_catalog(video_id)
+                if b_errors:
+                    st.error("Erros: " + " · ".join(b_errors))
+                else:
+                    st.success(f"🎉 Gancho viral aplicado em todas as {n_parts} partes com sucesso!")
+                st.rerun(scope="app")
+
+        # ── 3. VELOCIDADE EM LOTE ────────────────────────────────────────────────
+        with tab_b_speed:
+            st.markdown("##### ⚡ Acelerar Todas as Partes da Série")
+            st.caption("Aumenta a velocidade de todos os vídeos preservando o tom de voz e dicção natural (Pitch Compensation).")
+
+            col_sp1, col_sp2 = st.columns([1.5, 1.5])
+            with col_sp1:
+                b_sel_speed = st.slider("Velocidade Desejada:", 1.00, 1.50, 1.15, 0.05, key="batch_speed_slider")
+            with col_sp2:
+                pct = (b_sel_speed - 1.0) * 100.0
+                st.info(f"⏱️ **Velocidade:** **`{b_sel_speed:.2f}x`** (+{pct:.0f}% mais rápido) em todas as {n_parts} partes.")
+
+            if st.button(f"🚀 Aplicar Velocidade {b_sel_speed:.2f}x em Todas as {n_parts} Partes", type="primary", use_container_width=True, key="btn_apply_batch_speed"):
+                p_bar = st.progress(0, text="Acelerando partes em lote...")
+                b_errors = []
+                for bi, bp in enumerate(parts_list, start=1):
+                    p_bar.progress((bi - 1) / n_parts, text=f"Acelerando parte {bi}/{n_parts} ({bp['filename']})...")
+                    res = change_video_speed(bp["path"], speed=b_sel_speed)
+                    if res.get("error"):
+                        b_errors.append(f"{bp['filename']}: {res['error']}")
+                    else:
+                        record_quick_edit(
+                            video_path=bp["path"],
+                            action_name=f"⚡ Velocidade {b_sel_speed:.2f}x (Lote)",
+                            details=f"Acelerado para {b_sel_speed:.2f}x (+{pct:.0f}%)"
+                        )
+                p_bar.progress(1.0, text="✅ Concluído!")
+                if video_id:
+                    sync_carrossel_parts_to_catalog(video_id)
+                if b_errors:
+                    st.error("Erros: " + " · ".join(b_errors))
+                else:
+                    st.success(f"🎉 Velocidade {b_sel_speed:.2f}x aplicada em todas as {n_parts} partes!")
+                st.rerun(scope="app")
+
+        # ── 4. BANNER / OVERLAY EM LOTE ──────────────────────────────────────────
+        with tab_b_ov:
+            st.markdown("##### 🎨 Aplicar Tarja / Banner (Overlay) em Todas as Partes")
+            st.caption("Queime uma moldura ou faixa informativa consistente em toda a série.")
+
+            ov_keys = list(OVERLAY_PRESETS.keys())
+            ov_labels = [OVERLAY_PRESETS[k]["name"] for k in ov_keys]
+            sel_b_ov_lbl = st.selectbox("Banner Pré-Configurado:", ov_labels, index=0, key="batch_ov_preset_sel")
+            sel_b_ov_key = ov_keys[ov_labels.index(sel_b_ov_lbl)]
+            sel_b_ov_data = OVERLAY_PRESETS[sel_b_ov_key]
+
+            b_ov_pos = st.selectbox("Posicionamento:", ["Rodapé (Inferior)", "Topo (Superior)", "Centro"], key="batch_ov_pos_sel")
+            b_ov_valign = "bottom" if "Rodapé" in b_ov_pos else ("top" if "Topo" in b_ov_pos else "center")
+
+            b_ov_cfg = {
+                "valign": b_ov_valign,
+                "scale_mode": "fill",
+                "margin_bottom": int(sel_b_ov_data.get("margin_bottom", 60)),
+                "margin_top": int(sel_b_ov_data.get("margin_top", 60)),
+                "opacity": 1.0
+            }
+            b_banner_path = sel_b_ov_data.get("banner_path")
+
+            if st.button(f"🚀 Aplicar Banner em Todas as {n_parts} Partes", type="primary", use_container_width=True, key="btn_apply_batch_ov"):
+                p_bar = st.progress(0, text="Aplicando banner em lote...")
+                b_errors = []
+                for bi, bp in enumerate(parts_list, start=1):
+                    p_bar.progress((bi - 1) / n_parts, text=f"Aplicando banner na parte {bi}/{n_parts} ({bp['filename']})...")
+                    res = apply_overlay_to_video(
+                        video_path=bp["path"],
+                        banner_path=b_banner_path,
+                        config=b_ov_cfg
+                    )
+                    if res.get("error"):
+                        b_errors.append(f"{bp['filename']}: {res['error']}")
+                    else:
+                        record_quick_edit(
+                            video_path=bp["path"],
+                            action_name="🎨 Banner (Lote)",
+                            details=f"Banner: {sel_b_ov_lbl} | Posição: {b_ov_valign}"
+                        )
+                p_bar.progress(1.0, text="✅ Concluído!")
+                if video_id:
+                    sync_carrossel_parts_to_catalog(video_id)
+                if b_errors:
+                    st.error("Erros: " + " · ".join(b_errors))
+                else:
+                    st.success(f"🎉 Banner aplicado em todas as {n_parts} partes!")
+                st.rerun(scope="app")
+
+        # ── 5. ÁUDIO & EQUALIZADOR EM LOTE ───────────────────────────────────────
+        with tab_b_audio:
+            st.markdown("##### 🎙️ Tratamento de Áudio & Anti-Estouro em Todas as Partes")
+            st.caption("Nivele o volume da voz, elimine chiados e proteja contra estouros em toda a série.")
+
+            eq_keys = list(AUDIO_EQUALIZER_PRESETS.keys())
+            eq_labels = [AUDIO_EQUALIZER_PRESETS[k]["name"] for k in eq_keys]
+            sel_b_eq_lbl = st.selectbox("Perfil de Tratamento de Áudio:", eq_labels, index=0, key="batch_eq_preset_sel")
+            sel_b_eq_key = eq_keys[eq_labels.index(sel_b_eq_lbl)]
+            sel_b_eq_data = AUDIO_EQUALIZER_PRESETS[sel_b_eq_key]
+            st.info(f"💡 **Perfil:** {sel_b_eq_data['description']}")
+
+            b_eq_gain = st.slider("Ganho Geral de Volume (dB):", -6.0, 6.0, float(sel_b_eq_data.get("volume_gain_db", 0.0)), 0.5, key="batch_eq_gain_slider")
+
+            b_eq_cfg = dict(sel_b_eq_data)
+            b_eq_cfg["volume_gain_db"] = b_eq_gain
+
+            if st.button(f"🚀 Aplicar Tratamento de Áudio em Todas as {n_parts} Partes", type="primary", use_container_width=True, key="btn_apply_batch_audio"):
+                p_bar = st.progress(0, text="Equalizando áudio em lote...")
+                b_errors = []
+                for bi, bp in enumerate(parts_list, start=1):
+                    p_bar.progress((bi - 1) / n_parts, text=f"Equalizando parte {bi}/{n_parts} ({bp['filename']})...")
+                    res = equalize_video_audio(video_path=bp["path"], config=b_eq_cfg)
+                    if res.get("error"):
+                        b_errors.append(f"{bp['filename']}: {res['error']}")
+                    else:
+                        record_quick_edit(
+                            video_path=bp["path"],
+                            action_name="🎙️ Equalizador (Lote)",
+                            details=f"Perfil: {sel_b_eq_lbl} | Ganho: {b_eq_gain:+.1f}dB"
+                        )
+                p_bar.progress(1.0, text="✅ Concluído!")
+                if video_id:
+                    sync_carrossel_parts_to_catalog(video_id)
+                if b_errors:
+                    st.error("Erros: " + " · ".join(b_errors))
+                else:
+                    st.success(f"🎉 Tratamento de áudio aplicado em todas as {n_parts} partes!")
+                st.rerun(scope="app")
+
+        st.markdown(
+            f"<div style='background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.25);border-radius:8px;padding:10px 14px;margin-top:14px;font-size:13px;color:#93c5fd;'>"
+            f"💡 <b>Precisa de edições individuais em apenas uma das partes?</b> "
+            f"Vá para a aba <b>4. 🎬 Galeria de Cortes & Pós</b> — lá você encontra cada corte com seu painel de ajuste fino exclusivo (trim milimétrico, hook customizado, etc.)."
+            f"</div>",
+            unsafe_allow_html=True
+        )
+
+
 @st.fragment
 def render_quick_editor_component(video_path: str, unique_key: str):
     """
@@ -6423,6 +6770,11 @@ if _has_media_ready:
                         sync_carrossel_parts_to_catalog(_vid_id_cat)
 
                     st.markdown("---")
+
+                    # ⚡ Edição Rápida em Lote (Mesma configuração para todas as partes)
+                    render_batch_quick_editor_component(_batch_ok_valid, _vid_id_cat)
+
+                    st.markdown("")
                     col_b_title, col_b_cols = st.columns([3.5, 1.5])
                     with col_b_title:
                         st.markdown(f"#### 🎬 Partes Processadas ({len(_batch_ok_valid)} vídeos)")
@@ -6458,8 +6810,7 @@ if _has_media_ready:
                                         open_in_file_explorer(_rp["path"])
                                         st.toast("Pasta aberta!")
 
-                                # Edição Rápida / Ajuste Fino integrado na própria parte
-                                render_quick_editor_component(_rp["path"], f"quick_batch_{_rp['filename']}")
+                                st.caption("🔍 *Para edição individual com trim e pós, use a Galeria abaixo.*")
 
                     st.markdown("")
                     col_b_gal_p, _ = st.columns([2.5, 1])
