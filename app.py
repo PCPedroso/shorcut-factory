@@ -4609,59 +4609,96 @@ if _has_media_ready:
         if 'final_end_time' not in st.session_state:
             st.session_state.final_end_time = ""
     
+        # Resolução da duração total caso o usuário não defina tempo final
+        _active_url_sec3 = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+        _vid_id_sec3 = get_current_active_video_id(_active_url_sec3) or ""
+        _v_full_sec3 = os.path.join("data", _vid_id_sec3, "video_full.mp4") if _vid_id_sec3 else ""
+        _a_full_sec3 = os.path.join("data", _vid_id_sec3, "audio.mp3") if _vid_id_sec3 else ""
+        _meta_sec3 = os.path.join("data", _vid_id_sec3, "metadata.json") if _vid_id_sec3 else ""
+
+        _known_total_dur = None
+        if _v_full_sec3 and os.path.exists(_v_full_sec3) and os.path.getsize(_v_full_sec3) > 10240:
+            _known_total_dur = get_video_duration(_v_full_sec3)
+        elif _a_full_sec3 and os.path.exists(_a_full_sec3) and os.path.getsize(_a_full_sec3) > 10240:
+            _known_total_dur = get_video_duration(_a_full_sec3)
+        elif _meta_sec3 and os.path.exists(_meta_sec3):
+            try:
+                with open(_meta_sec3, "r", encoding="utf-8") as _mf_dur:
+                    _m_dat = json.load(_mf_dur)
+                    _known_total_dur = float(_m_dat.get("duration") or _m_dat.get("duration_sec") or 0.0)
+            except Exception:
+                pass
+
+        def _format_dur_str(s):
+            if not s or s <= 0:
+                return "23:59:59.00"
+            h, m, sec = int(s // 3600), int((s % 3600) // 60), s % 60
+            return f"{h:02d}:{m:02d}:{sec:05.2f}"
+
         # ── Botões de atalho de tempo ──────────────────────────────────────
         _btn_col_full, _btn_col_clear, _btn_col_spacer = st.columns([1.4, 1, 3])
         with _btn_col_full:
-            if st.button("📺 Vídeo Inteiro", key="btn_use_full_video", use_container_width=True,
-                         help="Preenche automaticamente o tempo inicial (00:00:00) e o tempo final com a duração total do vídeo"):
-                _active_url_full = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-                _vid_id_full = get_current_active_video_id(_active_url_full)
-                _vid_path_full = os.path.join("data", _vid_id_full, "video_full.mp4") if _vid_id_full else None
-                if _vid_path_full and os.path.exists(_vid_path_full):
-                    _total_dur = get_video_duration(_vid_path_full)
-                    def _fmt(s):
-                        h, m, sec = int(s // 3600), int((s % 3600) // 60), int(s % 60)
-                        return f"{h:02d}:{m:02d}:{sec:02d}.00"
+            if st.button("📺 Preencher Vídeo Inteiro", key="btn_use_full_video", use_container_width=True,
+                         help="Preenche explicitamente o tempo inicial (00:00:00.00) e final com a duração total do vídeo"):
+                if _known_total_dur and _known_total_dur > 0:
                     st.session_state.final_start_time = "00:00:00.00"
-                    st.session_state.final_end_time = _fmt(_total_dur)
-                    st.session_state.cut_ready_banner = f"✅ Vídeo inteiro selecionado: [00:00:00.00 → {_fmt(_total_dur)}]"
+                    st.session_state.final_end_time = _format_dur_str(_known_total_dur)
+                    st.session_state.cut_ready_banner = f"✅ Vídeo inteiro selecionado: [00:00:00.00 → {_format_dur_str(_known_total_dur)}]"
                     st.rerun()
                 else:
-                    st.warning("⚠️ Vídeo ainda não baixado. Gere o corte uma vez para baixar o vídeo completo.")
+                    st.info("ℹ️ Deixe os campos em branco: a aplicação considerará e processará o vídeo inteiro automaticamente ao gerar!")
         with _btn_col_clear:
             if st.button("🗑️ Limpar", key="btn_clear_times", use_container_width=True,
-                         help="Limpa os campos de tempo inicial e final"):
+                         help="Limpa os campos de tempo para considerar o vídeo inteiro"):
                 st.session_state.final_start_time = ""
                 st.session_state.final_end_time = ""
                 st.session_state.cut_ready_banner = ""
                 st.rerun()
-    
+
         def _on_start_time_change():
             val = st.session_state.get("final_start_time", "")
             if val:
                 st.session_state.final_start_time = normalize_time_mask(val)
-    
+
         def _on_end_time_change():
             val = st.session_state.get("final_end_time", "")
             if val:
                 st.session_state.final_end_time = normalize_time_mask(val)
-    
+
+        _end_placeholder = f"{_format_dur_str(_known_total_dur)} (Vídeo Inteiro)" if (_known_total_dur and _known_total_dur > 0) else "Fim do vídeo (Vídeo Inteiro)"
+
         col_start, col_end = st.columns(2)
-        start_time = col_start.text_input(
+        _raw_start = col_start.text_input(
             "Tempo Inicial (HH:MM:SS.ms)",
             key="final_start_time",
-            placeholder="00:00:00.00",
+            placeholder="00:00:00.00 (Início do vídeo)",
             on_change=_on_start_time_change,
-            help="Máscara automática (HH:MM:SS.ms) com 2 dígitos de milissegundos — digite os números ou use o formato HH:MM:SS.ms"
+            help="Deixe em branco para considerar desde o início (00:00:00.00) ou informe o tempo desejado."
         )
-        end_time = col_end.text_input(
+        _raw_end = col_end.text_input(
             "Tempo Final (HH:MM:SS.ms)",
             key="final_end_time",
-            placeholder="00:10:00.00",
+            placeholder=_end_placeholder,
             on_change=_on_end_time_change,
-            help="Máscara automática (HH:MM:SS.ms) com 2 dígitos de milissegundos — digite os números ou use o formato HH:MM:SS.ms"
+            help="Deixe em branco para considerar até o fim do vídeo (duração total) ou informe o tempo desejado."
         )
-    
+
+        # Regra de negócio: caso não preenchido, considera o vídeo inteiro
+        is_full_video_mode = not (_raw_start and _raw_start.strip()) and not (_raw_end and _raw_end.strip())
+        start_time = _raw_start.strip() if (_raw_start and _raw_start.strip()) else "00:00:00.00"
+        if _raw_end and _raw_end.strip():
+            end_time = _raw_end.strip()
+        elif _known_total_dur and _known_total_dur > 0:
+            end_time = _format_dur_str(_known_total_dur)
+        else:
+            end_time = ""
+
+        if is_full_video_mode:
+            if end_time:
+                st.info(f"📺 **Modo Vídeo Inteiro:** Minutagem não informada — a aplicação considerará o vídeo completo `[00:00:00.00 → {end_time}]`.")
+            else:
+                st.info("📺 **Modo Vídeo Inteiro:** Minutagem não informada — a aplicação processará o vídeo completo automaticamente.")
+
         _aspect_list = [
             "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen - Estilo Podpah & Flow)",
             "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)",
@@ -5774,8 +5811,12 @@ if _has_media_ready:
                             if _tr_meta_res.get("transcript_path"):
                                 _transcript_path_meta = _tr_meta_res["transcript_path"]
 
+                    if not end_time:
+                        if _known_total_dur and _known_total_dur > 0:
+                            end_time = _format_dur_str(_known_total_dur)
+
                     if not start_time or not end_time:
-                        st.warning("⚠️ Defina o tempo inicial e final do corte primeiro.")
+                        st.warning("⚠️ Duração total do vídeo não identificada. Baixe o vídeo gerando o corte primeiro ou informe a minutagem.")
                     elif not os.path.exists(_transcript_path_meta):
                         st.warning("⚠️ Transcrição do trecho não pôde ser gerada. Verifique se o vídeo possui áudio.")
                     else:
@@ -5825,16 +5866,18 @@ if _has_media_ready:
                 import core.analyzer
                 from core.subtitle_burner import extract_words_in_range
                 from core.transcriber import ensure_cut_transcript
-                if not start_time or not end_time:
-                    st.warning("⚠️ Defina o tempo inicial e final do corte primeiro.")
+                eff_s = start_time or "00:00:00.00"
+                eff_e = end_time or (_format_dur_str(_known_total_dur) if (_known_total_dur and _known_total_dur > 0) else "")
+                if not eff_s or not eff_e:
+                    st.warning("⚠️ Duração total do vídeo não identificada. Baixe o vídeo gerando o corte primeiro ou informe a minutagem.")
                     return None
                 _v_src_m = os.path.join("data", _vid_id_cat, "video_full.mp4")
                 _a_src_m = os.path.join("data", _vid_id_cat, "audio.mp3")
                 _input_m = _v_src_m if os.path.exists(_v_src_m) else _a_src_m
                 _tr_res = ensure_cut_transcript(
                     video_id=_vid_id_cat,
-                    start_time_str=start_time,
-                    end_time_str=end_time,
+                    start_time_str=eff_s,
+                    end_time_str=eff_e,
                     media_path=_input_m,
                     model_size=model_size,
                     device=device_option,
@@ -5844,7 +5887,7 @@ if _has_media_ready:
                 if not _tp or not os.path.exists(_tp):
                     st.warning(f"⚠️ Transcrição do corte não disponível: {_tr_res.get('error', 'Verifique o áudio do vídeo')}")
                     return None
-                _words = extract_words_in_range(_tp, start_time, end_time)
+                _words = extract_words_in_range(_tp, eff_s, eff_e)
                 _snip = " ".join(w["word"] for w in _words)
                 if not _snip:
                     st.warning("Nenhuma fala encontrada no intervalo selecionado.")
@@ -6409,399 +6452,406 @@ if _has_media_ready:
         st.markdown("")
         render_button_label = "🔄 Forçar Re-renderização no Formato Escolhido" if existing_inst else "✂️ Gerar Corte no Formato Escolhido"
         if st.button(render_button_label, type="primary" if not existing_inst else "secondary", use_container_width=True):
-            if not start_time or not end_time:
-                st.warning("Preencha o tempo inicial e final.")
+            import importlib
+            import core.video_processor
+            importlib.reload(core.video_processor)
+            from core.video_processor import download_full_video, cut_video, get_video_resolution
+            
+            active_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+            video_id = get_current_active_video_id(active_url)
+            
+            if not video_id:
+                st.error("URL do vídeo do YouTube não identificada. Por favor, confirme a URL na Seção 1.")
             else:
-                import importlib
-                import core.video_processor
-                importlib.reload(core.video_processor)
-                from core.video_processor import download_full_video, cut_video, get_video_resolution
+                data_dir = os.path.join("data", video_id)
+                os.makedirs(data_dir, exist_ok=True)
+                video_full_path = os.path.join(data_dir, "video_full.mp4")
+                # Normaliza o aspect ratio para nome de arquivo temporário seguro
+                safe_aspect_name = selected_aspect.replace(":", "-")
+                corte_output_path = os.path.join(data_dir, f"corte_{safe_aspect_name}.mp4")
                 
-                active_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-                video_id = get_current_active_video_id(active_url)
-                
-                if not video_id:
-                    st.error("URL do vídeo do YouTube não identificada. Por favor, confirme a URL na Seção 1.")
+                # Verifica se o vídeo já existe no cache local com tamanho válido (> 10KB)
+                need_download = not (os.path.exists(video_full_path) and os.path.getsize(video_full_path) > 10240)
+
+                if need_download:
+                    import time
+                    _t_vsec3_start = time.time()
+                    _meta_local = os.path.join(data_dir, "metadata.json")
+                    _is_live_corte = False
+                    if os.path.exists(_meta_local):
+                        try:
+                            with open(_meta_local, "r", encoding="utf-8") as _mf:
+                                _is_live_corte = bool(json.load(_mf).get("is_live"))
+                        except Exception:
+                            pass
+                    if not _is_live_corte:
+                        _lib_entry = next((item for item in get_library() if item.get("id") == video_id), {})
+                        _is_live_corte = bool(_lib_entry.get("is_live"))
+
+                    _sp_v3_msg = "🔴 Capturando vídeo da live em alta velocidade..." if _is_live_corte else "Baixando vídeo original na máxima resolução disponível..."
+                    with st.spinner(_sp_v3_msg):
+    
+                        # Extrai intervalo de slice caso o vídeo seja fatiado (_t_start_end)
+                        _slice_s = None
+                        _slice_e = None
+                        _m_slice = re.search(r'_t_(\d+)_(\d+|end)$', video_id)
+                        if _m_slice:
+                            _slice_s = float(_m_slice.group(1))
+                            if _m_slice.group(2) != 'end':
+                                _slice_e = float(_m_slice.group(2))
+                        else:
+                            _slice_s = parse_time_str(st.session_state.get("input_yt_slice_start", ""))
+                            _slice_e = parse_time_str(st.session_state.get("input_yt_slice_end", ""))
+    
+                        video_res = download_full_video(
+                            active_url,
+                            video_full_path,
+                            is_live=_is_live_corte,
+                            start_sec=_slice_s,
+                            end_sec=_slice_e
+                        )
+                    _t_vsec3_elapsed = time.time() - _t_vsec3_start
+                    if os.path.exists(video_full_path):
+                        _sz_mb = os.path.getsize(video_full_path) / (1024 * 1024)
+                        st.info(f"⏱️ Download concluído em **{format_elapsed_time(_t_vsec3_elapsed)}** ({_sz_mb:.1f} MB)")
                 else:
-                    data_dir = os.path.join("data", video_id)
-                    os.makedirs(data_dir, exist_ok=True)
-                    video_full_path = os.path.join(data_dir, "video_full.mp4")
-                    # Normaliza o aspect ratio para nome de arquivo temporário seguro
-                    safe_aspect_name = selected_aspect.replace(":", "-")
-                    corte_output_path = os.path.join(data_dir, f"corte_{safe_aspect_name}.mp4")
+                    current_res = get_video_resolution(video_full_path)
+                    st.success(f"Vídeo em alta qualidade encontrado no cache ({current_res})!")
+                    video_res = {"path": video_full_path, "error": None}
                     
-                    # Verifica se o vídeo já existe no cache local com tamanho válido (> 10KB)
-                    need_download = not (os.path.exists(video_full_path) and os.path.getsize(video_full_path) > 10240)
-
-                    if need_download:
-                        import time
-                        _t_vsec3_start = time.time()
-                        _meta_local = os.path.join(data_dir, "metadata.json")
-                        _is_live_corte = False
-                        if os.path.exists(_meta_local):
-                            try:
-                                with open(_meta_local, "r", encoding="utf-8") as _mf:
-                                    _is_live_corte = bool(json.load(_mf).get("is_live"))
-                            except Exception:
-                                pass
-                        if not _is_live_corte:
-                            _lib_entry = next((item for item in get_library() if item.get("id") == video_id), {})
-                            _is_live_corte = bool(_lib_entry.get("is_live"))
-
-                        _sp_v3_msg = "🔴 Capturando vídeo da live em alta velocidade..." if _is_live_corte else "Baixando vídeo original na máxima resolução disponível..."
-                        with st.spinner(_sp_v3_msg):
+                if video_res.get("error"):
+                    st.error(f"Erro ao baixar vídeo: {video_res['error']}")
+                else:
+                    # Se end_time não estava definido, calcula a duração total do vídeo completo
+                    if not end_time or not end_time.strip():
+                        _real_v_dur = get_video_duration(video_full_path)
+                        if _real_v_dur and _real_v_dur > 0:
+                            h, m, sec = int(_real_v_dur // 3600), int((_real_v_dur % 3600) // 60), _real_v_dur % 60
+                            end_time = f"{h:02d}:{m:02d}:{sec:05.2f}"
+                        else:
+                            end_time = "23:59:59.00"
+                        st.session_state.final_end_time = end_time
+                        st.toast(f"📺 Vídeo inteiro: [00:00:00.00 → {end_time}]")
+                    extra_info = ""
+                    if selected_aspect == "16:9" and horizontal_zoom_val > 1.00:
+                        extra_info = f" (Zoom: {horizontal_zoom_val:.2f}x)"
+                    elif selected_aspect == "9:16_blur":
+                        extra_info = f" (Zoom: {blur_zoom_val:.2f}x)"
+                    elif selected_aspect == "9:16_smart_face" and face_zoom_active:
+                        extra_info = f" (Auto-Zoom Inteligente)"
+                    elif selected_aspect == "9:16_split":
+                        extra_info = f" (Split Screen + Auto-Switch)" if split_auto_switch else " (Split Screen Fixo)"
+                    if subtitle_enabled:
+                        extra_info += " + 📝 Legendas"
+                    if headline_enabled:
+                        extra_info += " + 🏷️ Headline"
+                    if bg_music_enabled:
+                        extra_info += " + 🎵 Música/Ducking"
     
-                            # Extrai intervalo de slice caso o vídeo seja fatiado (_t_start_end)
-                            _slice_s = None
-                            _slice_e = None
-                            _m_slice = re.search(r'_t_(\d+)_(\d+|end)$', video_id)
-                            if _m_slice:
-                                _slice_s = float(_m_slice.group(1))
-                                if _m_slice.group(2) != 'end':
-                                    _slice_e = float(_m_slice.group(2))
-                            else:
-                                _slice_s = parse_time_str(st.session_state.get("input_yt_slice_start", ""))
-                                _slice_e = parse_time_str(st.session_state.get("input_yt_slice_end", ""))
-    
-                            video_res = download_full_video(
-                                active_url,
-                                video_full_path,
-                                is_live=_is_live_corte,
-                                start_sec=_slice_s,
-                                end_sec=_slice_e
+                    _transcript_path_cut = os.path.join(data_dir, "transcript.json")
+                    # Se legendas estiverem ativas, garante transcrição pontual se não houver transcrição completa
+                    if subtitle_enabled:
+                        from core.transcriber import ensure_cut_transcript
+                        with st.spinner(f"🎙️ Verificando sincronia das legendas [{start_time} → {end_time}]..."):
+                            _tr_cut_res = ensure_cut_transcript(
+                                video_id=video_id,
+                                start_time_str=start_time,
+                                end_time_str=end_time,
+                                media_path=video_res.get("path") or video_full_path,
+                                model_size=model_size,
+                                device=device_option,
+                                language="pt"
                             )
-                        _t_vsec3_elapsed = time.time() - _t_vsec3_start
-                        if os.path.exists(video_full_path):
-                            _sz_mb = os.path.getsize(video_full_path) / (1024 * 1024)
-                            st.info(f"⏱️ Download concluído em **{format_elapsed_time(_t_vsec3_elapsed)}** ({_sz_mb:.1f} MB)")
-                    else:
-                        current_res = get_video_resolution(video_full_path)
-                        st.success(f"Vídeo em alta qualidade encontrado no cache ({current_res})!")
-                        video_res = {"path": video_full_path, "error": None}
-                        
-                    if video_res.get("error"):
-                        st.error(f"Erro ao baixar vídeo: {video_res['error']}")
-                    else:
-                        extra_info = ""
-                        if selected_aspect == "16:9" and horizontal_zoom_val > 1.00:
-                            extra_info = f" (Zoom: {horizontal_zoom_val:.2f}x)"
-                        elif selected_aspect == "9:16_blur":
-                            extra_info = f" (Zoom: {blur_zoom_val:.2f}x)"
-                        elif selected_aspect == "9:16_smart_face" and face_zoom_active:
-                            extra_info = f" (Auto-Zoom Inteligente)"
-                        elif selected_aspect == "9:16_split":
-                            extra_info = f" (Split Screen + Auto-Switch)" if split_auto_switch else " (Split Screen Fixo)"
-                        if subtitle_enabled:
-                            extra_info += " + 📝 Legendas"
-                        if headline_enabled:
-                            extra_info += " + 🏷️ Headline"
-                        if bg_music_enabled:
-                            extra_info += " + 🎵 Música/Ducking"
-    
-                        _transcript_path_cut = os.path.join(data_dir, "transcript.json")
-                        # Se legendas estiverem ativas, garante transcrição pontual se não houver transcrição completa
-                        if subtitle_enabled:
-                            from core.transcriber import ensure_cut_transcript
-                            with st.spinner(f"🎙️ Verificando sincronia das legendas [{start_time} → {end_time}]..."):
-                                _tr_cut_res = ensure_cut_transcript(
-                                    video_id=video_id,
-                                    start_time_str=start_time,
-                                    end_time_str=end_time,
-                                    media_path=video_res.get("path") or video_full_path,
-                                    model_size=model_size,
-                                    device=device_option,
-                                    language="pt"
-                                )
-                                if _tr_cut_res.get("transcript_path"):
-                                    _transcript_path_cut = _tr_cut_res["transcript_path"]
-                                    if _tr_cut_res.get("is_cut_slice"):
-                                        st.toast("⚡ Transcrição pontual do corte sincronizada com sucesso!")
-                                elif _tr_cut_res.get("error"):
-                                    st.warning(f"⚠️ Aviso na transcrição do corte: {_tr_cut_res['error']}")
+                            if _tr_cut_res.get("transcript_path"):
+                                _transcript_path_cut = _tr_cut_res["transcript_path"]
+                                if _tr_cut_res.get("is_cut_slice"):
+                                    st.toast("⚡ Transcrição pontual do corte sincronizada com sucesso!")
+                            elif _tr_cut_res.get("error"):
+                                st.warning(f"⚠️ Aviso na transcrição do corte: {_tr_cut_res['error']}")
 
-                        # Se a tradução de legendas deste corte estiver ativa, traduz automaticamente antes de queimar no vídeo
-                        if subtitle_enabled and st.session_state.get("cut_trans_enabled_tgl") and os.path.exists(_transcript_path_cut):
-                            _target_tr_lang = st.session_state.get("sel_cut_sub_trans_lang", "pt-BR")
-                            _target_tr_model = st.session_state.get("sel_cut_trans_model", "llama3")
-                            with st.spinner(f"🌐 Traduzindo legendas do corte para {_target_tr_lang} via IA ({_target_tr_model})..."):
-                                import core.translator
-                                importlib.reload(core.translator)
-                                res_cut_tr = core.translator.translate_cut_subtitles(
-                                    video_id=video_id,
-                                    start_time_str=start_time,
-                                    end_time_str=end_time,
-                                    target_lang=_target_tr_lang,
-                                    model=_target_tr_model,
-                                    transcript_path=_transcript_path_cut
-                                )
-                                if res_cut_tr.get("error"):
-                                    st.warning(f"⚠️ Não foi possível traduzir legendas do corte: {res_cut_tr['error']}. Usando original.")
-                                else:
-                                    st.toast(f"✅ {res_cut_tr['count']} frase(s) traduzida(s) para {_target_tr_lang}!")
-
-                        with st.spinner(f"Renderizando corte [{start_time} → {end_time}] no formato {aspect_option}{extra_info}..."):
-                            cut_res = cut_video(
-                                video_res["path"],
-                                start_time,
-                                end_time,
-                                corte_output_path,
-                                aspect_ratio_mode=selected_aspect,
-                                horizontal_zoom=horizontal_zoom_val,
-                                blur_zoom=blur_zoom_val,
-                                blur_pan=blur_pan_val,
-                                blur_intensity=blur_int_val,
-                                blur_auto_tracking=(mode_blur_ctrl == "🤖 Auto-Zoom Inteligente no Personagem (Recomendado)"),
-                                face_auto_zoom=face_zoom_active,
-                                face_margin_ratio=face_margin_val,
-                                person_preference=person_pref_val,
-                                split_top_pan=split_top_pan,
-                                split_bottom_pan=split_bottom_pan,
-                                split_top_pan_y=split_top_pan_y,
-                                split_bottom_pan_y=split_bottom_pan_y,
-                                split_zoom=split_zoom_val,
-                                split_divider_color=split_div_color,
-                                split_divider_width=split_div_w,
-                                split_auto_switch=split_auto_switch,
-                                split_source_type=split_source_type,
-                                split_video_path=split_video_path,
-                                split_image_paths=split_image_paths,
-                                split_media_position=split_media_position,
-                                split_blur_margin_pct=split_blur_margin_pct,
-                                # Legendas Dinâmicas (Fase 2)
-                                subtitle_enabled=subtitle_enabled,
-                                subtitle_transcript_path=_transcript_path_cut,
-                                subtitle_highlight_color=subtitle_highlight_color,
-                                subtitle_base_color=subtitle_base_color,
-                                subtitle_font_size=subtitle_font_size,
-                                # Fase 3: Retenção & Áudio
-                                headline_enabled=headline_enabled,
-                                headline_text=cut_headline_val or cut_title_val or st.session_state.get("input_cut_headline") or st.session_state.get("input_cut_title", "Corte Selecionado"),
-                                headline_preset=headline_preset,
-                                headline_text_color=headline_text_color,
-                                headline_bg_color=headline_bg_color,
-                                headline_font_size=headline_font_size,
-                                headline_margin_top=headline_margin_top,
-                                emojis_enabled=emojis_enabled,
-                                zoom_punch_enabled=zoom_punch_enabled,
-                                bg_music_enabled=bg_music_enabled,
-                                bg_music_track_path=bg_music_track_path,
-                                bg_music_volume=bg_music_volume,
-                                ducking_preset=ducking_preset,
-                                # Fase 4: Retenção Dinâmica & Thumbnails
-                                progress_bar_enabled=progress_bar_enabled,
-                                progress_bar_color=progress_bar_color,
-                                progress_bar_height=progress_bar_height,
-                                callout_enabled=callout_enabled,
-                                callout_text=callout_text,
-                                callout_duration=callout_duration,
-                                climax_zoom_enabled=climax_zoom_enabled,
-                                climax_zoom_factor=climax_zoom_factor,
-                                thumbnail_enabled=thumbnail_enabled,
+                    # Se a tradução de legendas deste corte estiver ativa, traduz automaticamente antes de queimar no vídeo
+                    if subtitle_enabled and st.session_state.get("cut_trans_enabled_tgl") and os.path.exists(_transcript_path_cut):
+                        _target_tr_lang = st.session_state.get("sel_cut_sub_trans_lang", "pt-BR")
+                        _target_tr_model = st.session_state.get("sel_cut_trans_model", "llama3")
+                        with st.spinner(f"🌐 Traduzindo legendas do corte para {_target_tr_lang} via IA ({_target_tr_model})..."):
+                            import core.translator
+                            importlib.reload(core.translator)
+                            res_cut_tr = core.translator.translate_cut_subtitles(
+                                video_id=video_id,
+                                start_time_str=start_time,
+                                end_time_str=end_time,
+                                target_lang=_target_tr_lang,
+                                model=_target_tr_model,
+                                transcript_path=_transcript_path_cut
                             )
-                            if cut_res.get("error"):
-                                st.error(f"Erro ao cortar: {cut_res['error']}")
+                            if res_cut_tr.get("error"):
+                                st.warning(f"⚠️ Não foi possível traduzir legendas do corte: {res_cut_tr['error']}. Usando original.")
                             else:
-                                out_res = get_video_resolution(corte_output_path)
-                                _sub_badge = " 📝 Legendas" if subtitle_enabled and not cut_res.get("subtitle_error") and not cut_res.get("subtitle_warning") else ""
-                                _hl_badge = " 🏷️ Headline" if headline_enabled else ""
-                                _mus_badge = " 🎵 Ducking" if bg_music_enabled else ""
-                                _pb_badge = " ⏳ Barra" if progress_bar_enabled else ""
-                                _cz_badge = " 🎯 Clímax" if climax_zoom_enabled else ""
-                                _th_badge = " 🖼️ Thumbnail" if thumbnail_enabled and cut_res.get("thumbnail_path") else ""
-                                st.success(f"🎉 Corte gerado com sucesso! Resolução: **{out_res}** | Formato: **{aspect_option}**{_sub_badge}{_hl_badge}{_mus_badge}{_pb_badge}{_cz_badge}{_th_badge}")
-                                
-                                # Avisos de legendas / áudio
-                                if cut_res.get("subtitle_error"):
-                                    st.warning(f"⚠️ Legendas não aplicadas: {cut_res['subtitle_error']}")
-                                elif cut_res.get("subtitle_warning"):
-                                    st.info(f"ℹ️ {cut_res['subtitle_warning']}")
-                                if cut_res.get("audio_warning"):
-                                    st.info(f"ℹ️ {cut_res['audio_warning']}")
-                                
-                                gen_thumb_path = cut_res.get("thumbnail_path")
-                                has_gen_thumb = gen_thumb_path and os.path.exists(gen_thumb_path)
+                                st.toast(f"✅ {res_cut_tr['count']} frase(s) traduzida(s) para {_target_tr_lang}!")
+
+                    with st.spinner(f"Renderizando corte [{start_time} → {end_time}] no formato {aspect_option}{extra_info}..."):
+                        cut_res = cut_video(
+                            video_res["path"],
+                            start_time,
+                            end_time,
+                            corte_output_path,
+                            aspect_ratio_mode=selected_aspect,
+                            horizontal_zoom=horizontal_zoom_val,
+                            blur_zoom=blur_zoom_val,
+                            blur_pan=blur_pan_val,
+                            blur_intensity=blur_int_val,
+                            blur_auto_tracking=(mode_blur_ctrl == "🤖 Auto-Zoom Inteligente no Personagem (Recomendado)"),
+                            face_auto_zoom=face_zoom_active,
+                            face_margin_ratio=face_margin_val,
+                            person_preference=person_pref_val,
+                            split_top_pan=split_top_pan,
+                            split_bottom_pan=split_bottom_pan,
+                            split_top_pan_y=split_top_pan_y,
+                            split_bottom_pan_y=split_bottom_pan_y,
+                            split_zoom=split_zoom_val,
+                            split_divider_color=split_div_color,
+                            split_divider_width=split_div_w,
+                            split_auto_switch=split_auto_switch,
+                            split_source_type=split_source_type,
+                            split_video_path=split_video_path,
+                            split_image_paths=split_image_paths,
+                            split_media_position=split_media_position,
+                            split_blur_margin_pct=split_blur_margin_pct,
+                            # Legendas Dinâmicas (Fase 2)
+                            subtitle_enabled=subtitle_enabled,
+                            subtitle_transcript_path=_transcript_path_cut,
+                            subtitle_highlight_color=subtitle_highlight_color,
+                            subtitle_base_color=subtitle_base_color,
+                            subtitle_font_size=subtitle_font_size,
+                            # Fase 3: Retenção & Áudio
+                            headline_enabled=headline_enabled,
+                            headline_text=cut_headline_val or cut_title_val or st.session_state.get("input_cut_headline") or st.session_state.get("input_cut_title", "Corte Selecionado"),
+                            headline_preset=headline_preset,
+                            headline_text_color=headline_text_color,
+                            headline_bg_color=headline_bg_color,
+                            headline_font_size=headline_font_size,
+                            headline_margin_top=headline_margin_top,
+                            emojis_enabled=emojis_enabled,
+                            zoom_punch_enabled=zoom_punch_enabled,
+                            bg_music_enabled=bg_music_enabled,
+                            bg_music_track_path=bg_music_track_path,
+                            bg_music_volume=bg_music_volume,
+                            ducking_preset=ducking_preset,
+                            # Fase 4: Retenção Dinâmica & Thumbnails
+                            progress_bar_enabled=progress_bar_enabled,
+                            progress_bar_color=progress_bar_color,
+                            progress_bar_height=progress_bar_height,
+                            callout_enabled=callout_enabled,
+                            callout_text=callout_text,
+                            callout_duration=callout_duration,
+                            climax_zoom_enabled=climax_zoom_enabled,
+                            climax_zoom_factor=climax_zoom_factor,
+                            thumbnail_enabled=thumbnail_enabled,
+                        )
+                        if cut_res.get("error"):
+                            st.error(f"Erro ao cortar: {cut_res['error']}")
+                        else:
+                            out_res = get_video_resolution(corte_output_path)
+                            _sub_badge = " 📝 Legendas" if subtitle_enabled and not cut_res.get("subtitle_error") and not cut_res.get("subtitle_warning") else ""
+                            _hl_badge = " 🏷️ Headline" if headline_enabled else ""
+                            _mus_badge = " 🎵 Ducking" if bg_music_enabled else ""
+                            _pb_badge = " ⏳ Barra" if progress_bar_enabled else ""
+                            _cz_badge = " 🎯 Clímax" if climax_zoom_enabled else ""
+                            _th_badge = " 🖼️ Thumbnail" if thumbnail_enabled and cut_res.get("thumbnail_path") else ""
+                            st.success(f"🎉 Corte gerado com sucesso! Resolução: **{out_res}** | Formato: **{aspect_option}**{_sub_badge}{_hl_badge}{_mus_badge}{_pb_badge}{_cz_badge}{_th_badge}")
+                            
+                            # Avisos de legendas / áudio
+                            if cut_res.get("subtitle_error"):
+                                st.warning(f"⚠️ Legendas não aplicadas: {cut_res['subtitle_error']}")
+                            elif cut_res.get("subtitle_warning"):
+                                st.info(f"ℹ️ {cut_res['subtitle_warning']}")
+                            if cut_res.get("audio_warning"):
+                                st.info(f"ℹ️ {cut_res['audio_warning']}")
+                            
+                            gen_thumb_path = cut_res.get("thumbnail_path")
+                            has_gen_thumb = gen_thumb_path and os.path.exists(gen_thumb_path)
     
-                                if "9:16" in selected_aspect:
-                                    if has_gen_thumb:
-                                        col_v1, col_v2, col_v3, col_v4 = st.columns([1.0, 1.2, 1.2, 1.0])
-                                        with col_v2:
-                                            st.caption("🎬 **Vídeo Renderizado:**")
-                                            safe_display_video(corte_output_path)
-                                        with col_v3:
-                                            st.caption("🖼️ **Capa / Thumbnail Principal:**")
-                                            safe_display_image(gen_thumb_path, use_container_width=True)
-                                    else:
-                                        col_v1, col_v2, col_v3 = st.columns([1.6, 1.2, 1.6])
-                                        with col_v2:
-                                            safe_display_video(corte_output_path)
+                            if "9:16" in selected_aspect:
+                                if has_gen_thumb:
+                                    col_v1, col_v2, col_v3, col_v4 = st.columns([1.0, 1.2, 1.2, 1.0])
+                                    with col_v2:
+                                        st.caption("🎬 **Vídeo Renderizado:**")
+                                        safe_display_video(corte_output_path)
+                                    with col_v3:
+                                        st.caption("🖼️ **Capa / Thumbnail Principal:**")
+                                        safe_display_image(gen_thumb_path, use_container_width=True)
                                 else:
-                                    if has_gen_thumb:
-                                        col_v1, col_v2 = st.columns(2)
-                                        with col_v1:
-                                            st.caption("🎬 **Vídeo 16:9 Full HD:**")
-                                            safe_display_video(corte_output_path)
-                                        with col_v2:
-                                            st.caption("🖼️ **Capa / Thumbnail Principal (16:9):**")
-                                            safe_display_image(gen_thumb_path, use_container_width=True)
-                                    else:
-                                        col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
-                                        with col_v2:
-                                            safe_display_video(corte_output_path)
-                                
-                                # Carrega metadados do vídeo original
-                                _meta_file = os.path.join(data_dir, "metadata.json")
-                                orig_info = {}
-                                if os.path.exists(_meta_file):
-                                    try:
-                                        with open(_meta_file, "r", encoding="utf-8") as _mf:
-                                            orig_info = json.load(_mf)
-                                    except Exception:
-                                        pass
-                                if not orig_info:
-                                    orig_info = {
-                                        "title": f"Vídeo {video_id}",
-                                        "channel": "Canal Oficial",
-                                        "upload_date": "N/D",
-                                        "url": active_url
-                                    }
+                                    col_v1, col_v2, col_v3 = st.columns([1.6, 1.2, 1.6])
+                                    with col_v2:
+                                        safe_display_video(corte_output_path)
+                            else:
+                                if has_gen_thumb:
+                                    col_v1, col_v2 = st.columns(2)
+                                    with col_v1:
+                                        st.caption("🎬 **Vídeo 16:9 Full HD:**")
+                                        safe_display_video(corte_output_path)
+                                    with col_v2:
+                                        st.caption("🖼️ **Capa / Thumbnail Principal (16:9):**")
+                                        safe_display_image(gen_thumb_path, use_container_width=True)
+                                else:
+                                    col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
+                                    with col_v2:
+                                        safe_display_video(corte_output_path)
+                            
+                            # Carrega metadados do vídeo original
+                            _meta_file = os.path.join(data_dir, "metadata.json")
+                            orig_info = {}
+                            if os.path.exists(_meta_file):
+                                try:
+                                    with open(_meta_file, "r", encoding="utf-8") as _mf:
+                                        orig_info = json.load(_mf)
+                                except Exception:
+                                    pass
+                            if not orig_info:
+                                orig_info = {
+                                    "title": f"Vídeo {video_id}",
+                                    "channel": "Canal Oficial",
+                                    "upload_date": "N/D",
+                                    "url": active_url
+                                }
     
-                                # Criação da Pasta Estruturada do Corte (incluindo legendas .SRT e thumbnails)
-                                import core.export_kit
-                                package_res = core.export_kit.create_viral_package(
-                                    video_path=corte_output_path,
-                                    title=cut_title_val,
-                                    description=cut_desc_val,
-                                    hashtags=cut_hashtags_val.split(),
-                                    tags_seo=cut_tags_seo_val,
-                                    aspect_mode=selected_aspect,
-                                    output_base_dir=data_dir,
-                                    orig_video_info=orig_info,
-                                    thumbnail_path=gen_thumb_path,
-                                    transcript_path=_transcript_path_cut,
-                                    start_time_str=start_time,
-                                    end_time_str=end_time
+                            # Criação da Pasta Estruturada do Corte (incluindo legendas .SRT e thumbnails)
+                            import core.export_kit
+                            package_res = core.export_kit.create_viral_package(
+                                video_path=corte_output_path,
+                                title=cut_title_val,
+                                description=cut_desc_val,
+                                hashtags=cut_hashtags_val.split(),
+                                tags_seo=cut_tags_seo_val,
+                                aspect_mode=selected_aspect,
+                                output_base_dir=data_dir,
+                                orig_video_info=orig_info,
+                                thumbnail_path=gen_thumb_path,
+                                transcript_path=_transcript_path_cut,
+                                start_time_str=start_time,
+                                end_time_str=end_time
+                            )
+    
+                            # Registra no Catálogo de Cortes
+                            register_cut_instance(
+                                video_id=video_id,
+                                start_time=start_time,
+                                end_time=end_time,
+                                title=cut_title_val,
+                                description=cut_desc_val,
+                                hashtags=cut_hashtags_val.split(),
+                                tags_seo=cut_tags_seo_val,
+                                aspect_mode=selected_aspect,
+                                folder_name=package_res["folder_name"],
+                                folder_path=package_res["package_dir"],
+                                video_path=package_res["video_dest_path"],
+                                resolution=out_res,
+                                thumbnail_path=package_res.get("thumbnail_dest_path")
+                            )
+    
+                            # Botões de Ação do Corte Renderizado
+                            saved_thumb = package_res.get("thumbnail_dest_path")
+                            has_saved_thumb = saved_thumb and os.path.exists(saved_thumb)
+    
+                            if has_saved_thumb:
+                                col_b1, col_b_fol, col_b_th, col_b2, col_b3 = st.columns([1.5, 1.2, 1.2, 1.2, 1.2])
+                            else:
+                                col_b1, col_b_fol, col_b2, col_b3 = st.columns([1.5, 1.2, 1.2, 1.2])
+    
+                            with col_b1:
+                                st.download_button(
+                                    label=f"💾 Baixar Vídeo ({package_res['video_filename']})",
+                                    data=get_file_bytes_loader(package_res["video_dest_path"]),
+                                    file_name=package_res["video_filename"],
+                                    mime="video/mp4",
+                                    type="primary",
+                                    use_container_width=True,
+                                    key="btn_dl_rendered_cut_direct"
                                 )
     
-                                # Registra no Catálogo de Cortes
-                                register_cut_instance(
-                                    video_id=video_id,
-                                    start_time=start_time,
-                                    end_time=end_time,
-                                    title=cut_title_val,
-                                    description=cut_desc_val,
-                                    hashtags=cut_hashtags_val.split(),
-                                    tags_seo=cut_tags_seo_val,
-                                    aspect_mode=selected_aspect,
-                                    folder_name=package_res["folder_name"],
-                                    folder_path=package_res["package_dir"],
-                                    video_path=package_res["video_dest_path"],
-                                    resolution=out_res,
-                                    thumbnail_path=package_res.get("thumbnail_dest_path")
-                                )
+                            with col_b_fol:
+                                if st.button("📂 Abrir Pasta", key="btn_open_fol_rendered", use_container_width=True, help="Abre a pasta deste corte no Explorador de Arquivos do Windows"):
+                                    open_in_file_explorer(package_res.get("package_dir"))
     
-                                # Botões de Ação do Corte Renderizado
-                                saved_thumb = package_res.get("thumbnail_dest_path")
-                                has_saved_thumb = saved_thumb and os.path.exists(saved_thumb)
-    
-                                if has_saved_thumb:
-                                    col_b1, col_b_fol, col_b_th, col_b2, col_b3 = st.columns([1.5, 1.2, 1.2, 1.2, 1.2])
-                                else:
-                                    col_b1, col_b_fol, col_b2, col_b3 = st.columns([1.5, 1.2, 1.2, 1.2])
-    
-                                with col_b1:
+                            if has_saved_thumb:
+                                with col_b_th:
                                     st.download_button(
-                                        label=f"💾 Baixar Vídeo ({package_res['video_filename']})",
-                                        data=get_file_bytes_loader(package_res["video_dest_path"]),
-                                        file_name=package_res["video_filename"],
-                                        mime="video/mp4",
-                                        type="primary",
+                                        label="🖼️ Baixar Thumbnail",
+                                        data=get_file_bytes_loader(saved_thumb),
+                                        file_name="thumbnail.jpg",
+                                        mime="image/jpeg",
+                                        type="secondary",
                                         use_container_width=True,
-                                        key="btn_dl_rendered_cut_direct"
+                                        key="btn_dl_thumb_rendered_direct"
                                     )
+                            with col_b2:
+                                with st.popover("🔴 Publicar no Shorts", use_container_width=True):
+                                    st.markdown("##### 🚀 Enviar para o YouTube Shorts")
+                                    yt_priv = st.selectbox(
+                                        "Privacidade:",
+                                        ["unlisted", "private", "public"],
+                                        format_func=lambda x: {"unlisted": "🔗 Não Listado (Recomendado)", "private": "🔒 Privado / Rascunho", "public": "🌍 Público"}[x],
+                                        key="yt_priv_single"
+                                    )
+                                    if st.button("Confirmar Upload", key="btn_conf_yt_single", type="primary", use_container_width=True):
+                                        with st.spinner("Enviando vídeo para o canal do YouTube..."):
+                                            yt_res = upload_to_youtube_shorts(
+                                                video_path=package_res["video_dest_path"],
+                                                title=cut_title_val,
+                                                description=cut_desc_val,
+                                                tags=cut_hashtags_val.split(),
+                                                privacy_status=yt_priv,
+                                                client_secrets_path=_cfg.get("youtube_client_secrets_path")
+                                            )
+                                            if yt_res.get("success"):
+                                                st.success(f"🎉 Publicado com sucesso! [Ver no Shorts]({yt_res.get('url')})")
+                                            else:
+                                                st.error(f"Erro no upload: {yt_res.get('error')}")
+                            with col_b3:
+                                if st.button("📡 Disparar Webhook", key="btn_send_wh_single", use_container_width=True, help="Envia o pacote com vídeo e metadados para seu webhook configurado (n8n, Make, Zapier)"):
+                                    wh_url = _cfg.get("webhook_url", "")
+                                    if not wh_url:
+                                        st.warning("Configure a URL do Webhook na barra lateral primeiro.")
+                                    else:
+                                        with st.spinner("Despachando para o Webhook..."):
+                                            wh_payload = {
+                                                "event": "cut_ready",
+                                                "video_id": video_id,
+                                                "title": cut_title_val,
+                                                "description": cut_desc_val,
+                                                "hashtags": cut_hashtags_val.split(),
+                                                "tags_seo": cut_tags_seo_val,
+                                                "start_time": start_time,
+                                                "end_time": end_time,
+                                                "aspect_mode": selected_aspect,
+                                                "video_path": package_res["video_dest_path"],
+                                                "video_filename": package_res["video_filename"],
+                                                "folder_path": package_res["package_dir"],
+                                                "original_video": orig_info
+                                            }
+                                            wh_res = send_to_webhook(wh_url, wh_payload, auth_header=_cfg.get("webhook_auth_header", ""))
+                                            if wh_res.get("success"):
+                                                st.success(f"✅ Webhook acionado! HTTP {wh_res.get('status_code')}")
+                                            else:
+                                                st.error(f"Falha no webhook: {wh_res.get('error')}")
     
-                                with col_b_fol:
-                                    if st.button("📂 Abrir Pasta", key="btn_open_fol_rendered", use_container_width=True, help="Abre a pasta deste corte no Explorador de Arquivos do Windows"):
-                                        open_in_file_explorer(package_res.get("package_dir"))
+                            # Ferramenta de Edição Rápida / Ajuste Fino
+                            render_quick_editor_component(package_res["video_dest_path"], f"newly_rendered_{video_id}_{start_time}_{end_time}_{selected_aspect}")
     
-                                if has_saved_thumb:
-                                    with col_b_th:
-                                        st.download_button(
-                                            label="🖼️ Baixar Thumbnail",
-                                            data=get_file_bytes_loader(saved_thumb),
-                                            file_name="thumbnail.jpg",
-                                            mime="image/jpeg",
-                                            type="secondary",
-                                            use_container_width=True,
-                                            key="btn_dl_thumb_rendered_direct"
-                                        )
-                                with col_b2:
-                                    with st.popover("🔴 Publicar no Shorts", use_container_width=True):
-                                        st.markdown("##### 🚀 Enviar para o YouTube Shorts")
-                                        yt_priv = st.selectbox(
-                                            "Privacidade:",
-                                            ["unlisted", "private", "public"],
-                                            format_func=lambda x: {"unlisted": "🔗 Não Listado (Recomendado)", "private": "🔒 Privado / Rascunho", "public": "🌍 Público"}[x],
-                                            key="yt_priv_single"
-                                        )
-                                        if st.button("Confirmar Upload", key="btn_conf_yt_single", type="primary", use_container_width=True):
-                                            with st.spinner("Enviando vídeo para o canal do YouTube..."):
-                                                yt_res = upload_to_youtube_shorts(
-                                                    video_path=package_res["video_dest_path"],
-                                                    title=cut_title_val,
-                                                    description=cut_desc_val,
-                                                    tags=cut_hashtags_val.split(),
-                                                    privacy_status=yt_priv,
-                                                    client_secrets_path=_cfg.get("youtube_client_secrets_path")
-                                                )
-                                                if yt_res.get("success"):
-                                                    st.success(f"🎉 Publicado com sucesso! [Ver no Shorts]({yt_res.get('url')})")
-                                                else:
-                                                    st.error(f"Erro no upload: {yt_res.get('error')}")
-                                with col_b3:
-                                    if st.button("📡 Disparar Webhook", key="btn_send_wh_single", use_container_width=True, help="Envia o pacote com vídeo e metadados para seu webhook configurado (n8n, Make, Zapier)"):
-                                        wh_url = _cfg.get("webhook_url", "")
-                                        if not wh_url:
-                                            st.warning("Configure a URL do Webhook na barra lateral primeiro.")
-                                        else:
-                                            with st.spinner("Despachando para o Webhook..."):
-                                                wh_payload = {
-                                                    "event": "cut_ready",
-                                                    "video_id": video_id,
-                                                    "title": cut_title_val,
-                                                    "description": cut_desc_val,
-                                                    "hashtags": cut_hashtags_val.split(),
-                                                    "tags_seo": cut_tags_seo_val,
-                                                    "start_time": start_time,
-                                                    "end_time": end_time,
-                                                    "aspect_mode": selected_aspect,
-                                                    "video_path": package_res["video_dest_path"],
-                                                    "video_filename": package_res["video_filename"],
-                                                    "folder_path": package_res["package_dir"],
-                                                    "original_video": orig_info
-                                                }
-                                                wh_res = send_to_webhook(wh_url, wh_payload, auth_header=_cfg.get("webhook_auth_header", ""))
-                                                if wh_res.get("success"):
-                                                    st.success(f"✅ Webhook acionado! HTTP {wh_res.get('status_code')}")
-                                                else:
-                                                    st.error(f"Falha no webhook: {wh_res.get('error')}")
-    
-                                # Ferramenta de Edição Rápida / Ajuste Fino
-                                render_quick_editor_component(package_res["video_dest_path"], f"newly_rendered_{video_id}_{start_time}_{end_time}_{selected_aspect}")
-    
-                                abs_pkg_p = os.path.abspath(package_res['package_dir'])
-                                link_pkg_p = abs_pkg_p.replace('\\', '/')
-                                with st.expander(f"📁 Pasta de Publicação Criada em: {package_res['folder_name']}", expanded=True):
-                                    st.markdown(f"📂 **Caminho da Pasta:** [{package_res['folder_name']}](file:///{link_pkg_p}) &nbsp; `📁 {abs_pkg_p}`", unsafe_allow_html=True)
-                                    st.markdown(f"**🎬 Arquivo de Vídeo:** `{package_res['video_filename']}`")
-                                    if package_res.get("subtitle_srt_path"):
-                                        st.markdown(f"**📝 Legenda (.SRT):** `{os.path.basename(package_res['subtitle_srt_path'])}` &nbsp; | &nbsp; **📄 Transcrição de Fala (.TXT):** `transcricao_corte.txt`")
-                                    st.markdown(f"**📌 Título:** `{cut_title_val}`")
-                                    st.markdown(f"**📝 Legenda para Redes:**\n```\n{cut_desc_val}\n```")
-                                    st.markdown(f"**🏷️ Hashtags:** `{cut_hashtags_val}`")
-                                    st.markdown(f"**🔍 Tags SEO:** `{cut_tags_seo_val}`")
-                                    st.divider()
-                                    st.markdown("##### 📺 Dados do Vídeo Original Salvos no `info_publicacao.txt`:")
-                                    st.markdown(f"• **Título Original:** {orig_info.get('title')}\n• **Canal:** {orig_info.get('channel')}\n• **Lançamento:** {orig_info.get('upload_date')}\n• **Link:** {orig_info.get('url')}")
+                            abs_pkg_p = os.path.abspath(package_res['package_dir'])
+                            link_pkg_p = abs_pkg_p.replace('\\', '/')
+                            with st.expander(f"📁 Pasta de Publicação Criada em: {package_res['folder_name']}", expanded=True):
+                                st.markdown(f"📂 **Caminho da Pasta:** [{package_res['folder_name']}](file:///{link_pkg_p}) &nbsp; `📁 {abs_pkg_p}`", unsafe_allow_html=True)
+                                st.markdown(f"**🎬 Arquivo de Vídeo:** `{package_res['video_filename']}`")
+                                if package_res.get("subtitle_srt_path"):
+                                    st.markdown(f"**📝 Legenda (.SRT):** `{os.path.basename(package_res['subtitle_srt_path'])}` &nbsp; | &nbsp; **📄 Transcrição de Fala (.TXT):** `transcricao_corte.txt`")
+                                st.markdown(f"**📌 Título:** `{cut_title_val}`")
+                                st.markdown(f"**📝 Legenda para Redes:**\n```\n{cut_desc_val}\n```")
+                                st.markdown(f"**🏷️ Hashtags:** `{cut_hashtags_val}`")
+                                st.markdown(f"**🔍 Tags SEO:** `{cut_tags_seo_val}`")
+                                st.divider()
+                                st.markdown("##### 📺 Dados do Vídeo Original Salvos no `info_publicacao.txt`:")
+                                st.markdown(f"• **Título Original:** {orig_info.get('title')}\n• **Canal:** {orig_info.get('channel')}\n• **Lançamento:** {orig_info.get('upload_date')}\n• **Link:** {orig_info.get('url')}")
     
     
         # ─────────────────────────────────────────────────────────────────
