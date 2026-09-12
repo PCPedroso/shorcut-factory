@@ -723,21 +723,35 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
                 )
             with col_hk2:
                 style_keys = list(HOOK_STYLES.keys())
-                style_labels = [HOOK_STYLES[k]["name"] for k in style_keys]
+                style_labels = list(HOOK_STYLES.values())
                 sel_b_style_lbl = st.selectbox("Efeito Visual do Gancho:", style_labels, index=0, key="batch_hook_style_sel")
                 sel_b_style_key = style_keys[style_labels.index(sel_b_style_lbl)]
 
             col_hk3, col_hk4 = st.columns(2)
             with col_hk3:
                 trans_keys = list(HOOK_TRANSITIONS.keys())
-                trans_labels = [HOOK_TRANSITIONS[k]["name"] for k in trans_keys]
+                trans_labels = list(HOOK_TRANSITIONS.values())
                 sel_b_trans_lbl = st.selectbox("Transição do Gancho para o Vídeo:", trans_labels, index=0, key="batch_hook_trans_sel")
                 sel_b_trans_key = trans_keys[trans_labels.index(sel_b_trans_lbl)]
             with col_hk4:
-                badge_keys = list(HOOK_BADGE_PRESETS.keys())
-                badge_labels = [HOOK_BADGE_PRESETS[k]["name"] for k in badge_keys]
-                sel_b_badge_lbl = st.selectbox("Estilo do Badge Flutuante:", badge_labels, index=0, key="batch_hook_badge_sel")
-                sel_b_badge_key = badge_keys[badge_labels.index(sel_b_badge_lbl)]
+                badge_style_opt = st.selectbox(
+                    "Estilo do Badge Flutuante:",
+                    [
+                        "🔴 Alerta Vermelho (Red Alert)",
+                        "🟡 Amarelo Viral (Gold Viral)",
+                        "🟣 Dark Pill (Fundo Escuro com Borda Roxa)",
+                        "🔵 Ciano Elétrico (Neon Cyan)"
+                    ],
+                    index=0,
+                    key="batch_hook_badge_sel"
+                )
+                badge_style_map = {
+                    "🔴 Alerta Vermelho (Red Alert)": "red_alert",
+                    "🟡 Amarelo Viral (Gold Viral)": "gold_viral",
+                    "🟣 Dark Pill (Fundo Escuro com Borda Roxa)": "dark_pill",
+                    "🔵 Ciano Elétrico (Neon Cyan)": "neon_cyan"
+                }
+                sel_b_badge_key = badge_style_map.get(badge_style_opt, "red_alert")
 
             b_badge_text = st.text_input(
                 "Texto do Badge Flutuante:",
