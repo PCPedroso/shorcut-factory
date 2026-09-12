@@ -55,148 +55,174 @@ def save_cuts_catalog(video_id: str, catalog: dict):
         pass
 
 
+_syncing_carrossel_lock = set()
+
+
 def sync_carrossel_parts_to_catalog(video_id: str) -> dict:
     """
     Sincroniza automaticamente partes processadas do carrossel (em data/<video_id>/carrossel/)
     com o catálogo cuts_catalog.json, garantindo que apareçam na Galeria de Cortes & Pós.
     """
-    if not video_id:
+    if not video_id or video_id in _syncing_carrossel_lock:
         return _raw_load_cuts_catalog(video_id)
 
-    carrossel_dir = os.path.join("data", video_id, "carrossel")
-    if not os.path.isdir(carrossel_dir):
-        return _raw_load_cuts_catalog(video_id)
+    _syncing_carrossel_lock.add(video_id)
+    try:
+        carrossel_dir = os.path.join("data", video_id, "carrossel")
+        if not os.path.isdir(carrossel_dir):
+            return _raw_load_cuts_catalog(video_id)
 
-    files = sorted(os.listdir(carrossel_dir))
-    proc_files = []
-    for f in files:
-        if not f.endswith(".mp4") or f.endswith("_editado.mp4"):
-            continue
-        m = re.match(r"^parte_(\d+)_(.+)\.mp4$", f)
-        if m:
-            fp = os.path.join(carrossel_dir, f)
-            if os.path.exists(fp) and os.path.getsize(fp) > 10240:
-                proc_files.append((int(m.group(1)), m.group(2), f, fp))
-
-    if not proc_files:
-        return _raw_load_cuts_catalog(video_id)
-
-    # Carrega metadados do vídeo original para obter título
-    meta_path = os.path.join("data", video_id, "metadata.json")
-    orig_title = "Vídeo"
-    if os.path.exists(meta_path):
-        try:
-            with open(meta_path, "r", encoding="utf-8") as f_meta:
-                m_data = json.load(f_meta)
-                orig_title = m_data.get("title") or orig_title
-        except Exception:
-            pass
-
-    # Carrega ou monta mapa de minutagens das partes
-    split_info_file = os.path.join(carrossel_dir, "split_info.json")
-    part_timings = {}
-    if os.path.exists(split_info_file):
-        try:
-            with open(split_info_file, "r", encoding="utf-8") as f_sp:
-                sp_data = json.load(f_sp)
-                for p_item in sp_data.get("parts", []):
-                    part_timings[int(p_item.get("index", 0))] = (float(p_item.get("start", 0.0)), float(p_item.get("end", 0.0)))
-        except Exception:
-            pass
-
-    # Se não temos split_info.json, reconstrói acumulando durações a partir dos arquivos brutos ou processados
-    if not part_timings:
-        raw_files = [f for f in files if re.match(r"^parte_\d+\.mp4$", f)]
-        from core.quick_editor import get_video_duration
-        cur_t = 0.0
-        parts_accum = []
-        if raw_files:
-            for rf in sorted(raw_files):
-                m_rf = re.match(r"^parte_(\d+)\.mp4$", rf)
-                if m_rf:
-                    idx_rf = int(m_rf.group(1))
-                    d_rf = get_video_duration(os.path.join(carrossel_dir, rf))
-                    part_timings[idx_rf] = (cur_t, cur_t + d_rf)
-                    parts_accum.append({"index": idx_rf, "start": cur_t, "end": cur_t + d_rf, "duration": d_rf})
-                    cur_t += d_rf
-        else:
-            grouped_by_idx = {}
-            for idx, tag, f, fp in proc_files:
-                if idx not in grouped_by_idx:
-                    grouped_by_idx[idx] = fp
-            for idx in sorted(grouped_by_idx.keys()):
-                d_p = get_video_duration(grouped_by_idx[idx])
-                part_timings[idx] = (cur_t, cur_t + d_p)
-                parts_accum.append({"index": idx, "start": cur_t, "end": cur_t + d_p, "duration": d_p})
-                cur_t += d_p
-
-        if parts_accum:
-            try:
-                with open(split_info_file, "w", encoding="utf-8") as f_out_sp:
-                    json.dump({"parts": parts_accum, "total_duration": cur_t}, f_out_sp, indent=2, ensure_ascii=False)
-            except Exception:
-                pass
-
-    catalog = _raw_load_cuts_catalog(video_id)
-
-    def _fmt_ts(s: float) -> str:
-        h = int(s // 3600)
-        m = int((s % 3600) // 60)
-        sec = s % 60
-        return f"{h:02d}:{m:02d}:{sec:05.2f}"
-
-    from core.video_processor import extract_thumbnail_from_video
-
-    for idx, raw_aspect_tag, fname, fpath in proc_files:
-        aspect_mode = raw_aspect_tag
-        if aspect_mode.startswith("9-16"):
-            aspect_mode = aspect_mode.replace("9-16", "9:16", 1)
-        elif aspect_mode.startswith("16-9"):
-            aspect_mode = aspect_mode.replace("16-9", "16:9", 1)
-
-        t_start_sec, t_end_sec = part_timings.get(idx, (0.0, 0.0))
-        if t_end_sec <= t_start_sec:
-            from core.quick_editor import get_video_duration
-            t_end_sec = t_start_sec + get_video_duration(fpath)
-
-        start_time_str = _fmt_ts(t_start_sec)
-        end_time_str = _fmt_ts(t_end_sec)
-        time_key = make_time_key(start_time_str, end_time_str)
-
-        # Se já estiver registrado com este formato e o vídeo existir, pula
-        if time_key in catalog and aspect_mode in catalog[time_key].get("formats", {}):
-            cur_fmt = catalog[time_key]["formats"][aspect_mode]
-            if cur_fmt.get("video_path") and os.path.exists(cur_fmt.get("video_path")):
+        files = sorted(os.listdir(carrossel_dir))
+        proc_files = []
+        for f in files:
+            if not f.endswith(".mp4") or f.endswith("_editado.mp4"):
                 continue
+            m = re.match(r"^parte_(\d+)_(.+)\.mp4$", f)
+            if m:
+                fp = os.path.join(carrossel_dir, f)
+                if os.path.exists(fp) and os.path.getsize(fp) > 10240:
+                    proc_files.append((int(m.group(1)), m.group(2), f, fp))
 
-        # Thumbnail do corte
-        thumb_name = fname.replace(".mp4", "_thumb.jpg")
-        thumb_path = os.path.join(carrossel_dir, thumb_name)
-        if not os.path.exists(thumb_path):
+        if not proc_files:
+            return _raw_load_cuts_catalog(video_id)
+
+        # Carrega metadados do vídeo original para obter título
+        meta_path = os.path.join("data", video_id, "metadata.json")
+        orig_title = "Vídeo"
+        if os.path.exists(meta_path):
             try:
-                extract_thumbnail_from_video(fpath, thumb_path, timestamp_sec=1.0)
+                with open(meta_path, "r", encoding="utf-8") as f_meta:
+                    m_data = json.load(f_meta)
+                    orig_title = m_data.get("title") or orig_title
             except Exception:
                 pass
 
-        part_title = f"Parte {idx:02d}: {orig_title}"
+        # Carrega ou monta mapa de minutagens das partes
+        split_info_file = os.path.join(carrossel_dir, "split_info.json")
+        part_timings = {}
+        if os.path.exists(split_info_file):
+            try:
+                with open(split_info_file, "r", encoding="utf-8") as f_sp:
+                    sp_data = json.load(f_sp)
+                    for p_item in sp_data.get("parts", []):
+                        part_timings[int(p_item.get("index", 0))] = (float(p_item.get("start", 0.0)), float(p_item.get("end", 0.0)))
+            except Exception:
+                pass
 
-        register_cut_instance(
-            video_id=video_id,
-            start_time=start_time_str,
-            end_time=end_time_str,
-            title=part_title,
-            description=f"{part_title}\n\nAssista ao episódio completo!",
-            hashtags=["#shorts", "#cortes", "#viral"],
-            tags_seo=f"parte {idx}, cortes, podcast, viral",
-            aspect_mode=aspect_mode,
-            folder_name="carrossel",
-            folder_path=carrossel_dir,
-            video_path=fpath,
-            resolution="1080p",
-            thumbnail_path=thumb_path if os.path.exists(thumb_path) else None
-        )
+        # Se não temos split_info.json, reconstrói acumulando durações a partir dos arquivos brutos ou processados
+        if not part_timings:
+            raw_files = [f for f in files if re.match(r"^parte_\d+\.mp4$", f)]
+            from core.quick_editor import get_video_duration
+            cur_t = 0.0
+            parts_accum = []
+            if raw_files:
+                for rf in sorted(raw_files):
+                    m_rf = re.match(r"^parte_(\d+)\.mp4$", rf)
+                    if m_rf:
+                        idx_rf = int(m_rf.group(1))
+                        d_rf = get_video_duration(os.path.join(carrossel_dir, rf))
+                        part_timings[idx_rf] = (cur_t, cur_t + d_rf)
+                        parts_accum.append({"index": idx_rf, "start": cur_t, "end": cur_t + d_rf, "duration": d_rf})
+                        cur_t += d_rf
+            else:
+                grouped_by_idx = {}
+                for idx, tag, f, fp in proc_files:
+                    if idx not in grouped_by_idx:
+                        grouped_by_idx[idx] = fp
+                for idx in sorted(grouped_by_idx.keys()):
+                    d_p = get_video_duration(grouped_by_idx[idx])
+                    part_timings[idx] = (cur_t, cur_t + d_p)
+                    parts_accum.append({"index": idx, "start": cur_t, "end": cur_t + d_p, "duration": d_p})
+                    cur_t += d_p
 
-    return _raw_load_cuts_catalog(video_id)
+            if parts_accum:
+                try:
+                    with open(split_info_file, "w", encoding="utf-8") as f_out_sp:
+                        json.dump({"parts": parts_accum, "total_duration": cur_t}, f_out_sp, indent=2, ensure_ascii=False)
+                except Exception:
+                    pass
+
+        catalog = _raw_load_cuts_catalog(video_id)
+        catalog_modified = False
+
+        def _fmt_ts(s: float) -> str:
+            h = int(s // 3600)
+            m = int((s % 3600) // 60)
+            sec = s % 60
+            return f"{h:02d}:{m:02d}:{sec:05.2f}"
+
+        from core.video_processor import extract_thumbnail_from_video
+
+        for idx, raw_aspect_tag, fname, fpath in proc_files:
+            aspect_mode = raw_aspect_tag
+            if aspect_mode.startswith("9-16"):
+                aspect_mode = aspect_mode.replace("9-16", "9:16", 1)
+            elif aspect_mode.startswith("16-9"):
+                aspect_mode = aspect_mode.replace("16-9", "16:9", 1)
+
+            t_start_sec, t_end_sec = part_timings.get(idx, (0.0, 0.0))
+            if t_end_sec <= t_start_sec:
+                from core.quick_editor import get_video_duration
+                t_end_sec = t_start_sec + get_video_duration(fpath)
+
+            start_time_str = _fmt_ts(t_start_sec)
+            end_time_str = _fmt_ts(t_end_sec)
+            time_key = make_time_key(start_time_str, end_time_str)
+
+            # Se já estiver registrado com este formato e o vídeo existir, pula
+            if time_key in catalog and aspect_mode in catalog[time_key].get("formats", {}):
+                cur_fmt = catalog[time_key]["formats"][aspect_mode]
+                if cur_fmt.get("video_path") and os.path.exists(cur_fmt.get("video_path")):
+                    continue
+
+            # Thumbnail do corte
+            thumb_name = fname.replace(".mp4", "_thumb.jpg")
+            thumb_path = os.path.join(carrossel_dir, thumb_name)
+            if not os.path.exists(thumb_path):
+                try:
+                    extract_thumbnail_from_video(fpath, thumb_path, timestamp_sec=1.0)
+                except Exception:
+                    pass
+
+            part_title = f"Parte {idx:02d}: {orig_title}"
+
+            if time_key not in catalog:
+                catalog[time_key] = {
+                    "start_time": start_time_str,
+                    "end_time": end_time_str,
+                    "title": part_title,
+                    "description": f"{part_title}\n\nAssista ao episódio completo!",
+                    "hashtags": ["#shorts", "#cortes", "#viral"],
+                    "tags_seo": f"parte {idx}, cortes, podcast, viral",
+                    "created_at": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                    "updated_at": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                    "formats": {}
+                }
+
+            resolved_thumb_path = thumb_path if os.path.exists(thumb_path) else None
+            catalog[time_key]["formats"][aspect_mode] = {
+                "aspect_mode": aspect_mode,
+                "folder_name": "carrossel",
+                "folder_path": carrossel_dir,
+                "video_path": fpath,
+                "video_filename": fname,
+                "thumbnail_path": resolved_thumb_path,
+                "thumbnail_filename": os.path.basename(resolved_thumb_path) if resolved_thumb_path else None,
+                "thumbnail_variations": [],
+                "active_variation": 1,
+                "subtitle_path": None,
+                "subtitle_filename": None,
+                "resolution": "1080p",
+                "rendered_at": datetime.now().strftime("%d/%m/%Y %H:%M")
+            }
+            catalog_modified = True
+
+        if catalog_modified:
+            save_cuts_catalog(video_id, catalog)
+
+        return catalog
+    finally:
+        _syncing_carrossel_lock.discard(video_id)
 
 
 def make_time_key(start_time: str, end_time: str) -> str:
@@ -210,7 +236,7 @@ def get_cut_entry(video_id: str, start_time: str, end_time: str) -> dict | None:
     """Retorna a entrada do corte se a minutagem exata já tiver sido processada."""
     if not video_id or not start_time or not end_time:
         return None
-    catalog = load_cuts_catalog(video_id)
+    catalog = _raw_load_cuts_catalog(video_id)
     key = make_time_key(start_time, end_time)
     return catalog.get(key)
 
@@ -250,7 +276,7 @@ def register_cut_instance(
     """
     Registra uma nova instância de corte gerada ou atualiza uma existente no catálogo.
     """
-    catalog = load_cuts_catalog(video_id)
+    catalog = _raw_load_cuts_catalog(video_id)
     key = make_time_key(start_time, end_time)
 
     if key not in catalog:
@@ -334,7 +360,7 @@ def set_active_thumbnail_variation(
     """
     Define a variação selecionada (1, 2 ou 3) como a capa principal do corte (thumbnail.jpg).
     """
-    catalog = load_cuts_catalog(video_id)
+    catalog = _raw_load_cuts_catalog(video_id)
     key = make_time_key(start_time, end_time)
     entry = catalog.get(key)
     if not entry:
@@ -373,7 +399,7 @@ def update_cut_thumbnail_in_catalog(
     variations: list = None
 ) -> dict:
     """Atualiza a referência da thumbnail e variações no catálogo para um formato existente."""
-    catalog = load_cuts_catalog(video_id)
+    catalog = _raw_load_cuts_catalog(video_id)
     key = make_time_key(start_time, end_time)
     entry = catalog.get(key)
     if not entry:
@@ -409,7 +435,7 @@ def update_cut_texts_only(
     sem necessidade de re-renderizar nenhum vídeo (.mp4).
     Atualiza info_publicacao.txt, descricao.txt e tags.txt em cada pasta já gerada.
     """
-    catalog = load_cuts_catalog(video_id)
+    catalog = _raw_load_cuts_catalog(video_id)
     key = make_time_key(start_time, end_time)
     entry = catalog.get(key)
     if not entry:
@@ -448,25 +474,24 @@ def update_cut_texts_only(
 
 {hashtags_str}
 
-🏷️ TAGS SEO (separadas por vírgula):
+🏷️ TAGS / PALAVRAS-CHAVE SEO:
 {tags_seo}
 
-🎬 ARQUIVO DE VÍDEO GERADO:
-{inst.get('video_filename')}
+🎬 CRÉDITOS DO VÍDEO ORIGINAL:
+- Vídeo: {orig_title}
+- Canal: {orig_channel}
+- Link Original: {orig_url}
+- Data de Publicação: {orig_date}
 
 ════════════════════════════════════════════════════════════════
-📺 INFORMAÇÕES DO VÍDEO ORIGINAL
+Pronto para publicação rápida nas redes sociais!
 ════════════════════════════════════════════════════════════════
-• Título Original: {orig_title}
-• Canal do YouTube: {orig_channel}
-• Data de Lançamento: {orig_date}
-• Link do Vídeo: {orig_url}
 """
             with open(os.path.join(folder_path, "info_publicacao.txt"), "w", encoding="utf-8") as f:
                 f.write(info_content)
 
             with open(os.path.join(folder_path, "descricao.txt"), "w", encoding="utf-8") as f:
-                f.write(f"{description}\n\n{hashtags_str}")
+                f.write(f"{description}\n\n{hashtags_str}\n")
 
             with open(os.path.join(folder_path, "tags.txt"), "w", encoding="utf-8") as f:
                 f.write(f"HASHTAGS:\n{hashtags_str}\n\nTAGS SEO:\n{tags_seo}\n")
@@ -487,7 +512,7 @@ def delete_format_instance(
     Se delete_publication_kit=False: apaga APENAS o arquivo .mp4, mantendo a pasta e o kit de publicação (.txt).
     Se delete_publication_kit=True: apaga a pasta completa e remove o formato do catálogo.
     """
-    catalog = load_cuts_catalog(video_id)
+    catalog = _raw_load_cuts_catalog(video_id)
     key = make_time_key(start_time, end_time)
     if key in catalog and aspect_mode in catalog[key].get("formats", {}):
         inst = catalog[key]["formats"].get(aspect_mode)
@@ -541,7 +566,7 @@ def delete_entire_cut(
     Se delete_publication_kit=False: apaga APENAS os arquivos .mp4 de todos os formatos, preservando os textos.
     Se delete_publication_kit=True: apaga todas as pastas do disco e limpa o catálogo.
     """
-    catalog = load_cuts_catalog(video_id)
+    catalog = _raw_load_cuts_catalog(video_id)
     key = make_time_key(start_time, end_time)
     if key in catalog:
         entry = catalog[key]
@@ -594,7 +619,7 @@ def delete_entire_carrossel(
         return {"success": False, "error": "video_id não informado."}
 
     carrossel_dir = os.path.join("data", video_id, "carrossel")
-    catalog = load_cuts_catalog(video_id)
+    catalog = _raw_load_cuts_catalog(video_id)
 
     # Limpa do catálogo todas as instâncias e entradas relacionadas ao carrossel
     keys_to_remove = []
