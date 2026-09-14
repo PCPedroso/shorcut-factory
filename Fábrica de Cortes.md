@@ -18,7 +18,7 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
 | **Processamento de Vídeo** | `FFmpeg` (com `libass` e NVENC) | Recorte, filtros complexos, sidechain compress, equalização e queima de legendas/overlays |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
-| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (114 testes) |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (166 testes) |
 
 ---
 
@@ -31,7 +31,7 @@ shorcut-factory/
 ├── assets/
 │   ├── audio/                 # Trilhas sonoras royalty-free categorizadas (.wav / .mp3)
 │   └── fonts/                 # Tipografias bundled (Montserrat-ExtraBold)
-├── tests/                     # Suíte de Testes Unitários Automatizados (114 testes)
+├── tests/                     # Suíte de Testes Unitários Automatizados (166 testes)
 │   ├── test_quick_editor.py      # Testes de duração, trim, corte cirúrgico e concatenação
 │   ├── test_thumbnail_generator.py # Testes de frames, nitidez e capas 9:16
 │   ├── test_headline_drawer.py   # Testes de headlines, quebras, presets ASS e overlay visual
@@ -273,8 +273,26 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
       - **Badge Visual em Tempo Real**: Exibição do momento atual pausado (`⏱️ Momento Atual do Player`) atualizado diretamente no DOM sem acionar re-renderizações desnecessárias da aplicação.
     - `⏬ Baixar Vídeo MP4 Completo Agora`: Botão em 1 clique para baixar o vídeo caso a ingestão inicial tenha focado apenas em áudio/transcrição (ex: lives longas).
   - **Integração no Dashboard Modular de Topo**: Botão `🎬 Assistir Vídeo Local` no card de conteúdo existente do projeto para inspecionar vídeos já baixados imediatamente com os mesmos botões de captura de tempo inicial e final.
-- **🧪 Suíte de 127 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (incluindo testes de quick editor, partial download, audio mixer, translator, face tracker, proportional split screen, headline drawer, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
+- **🏷️ Headline de Topo com Duração Configurável e Transições Animadas (`core/headline_drawer.py`, `app.py`, `tests/test_headline_drawer.py`, `tests/test_batch_quick_editor.py`)**:
+  - **Temporização Flexível de Entrada e Saída**: Suporte a tempo de início exato (`start_offset_s`) e tempo de encerramento (`end_offset_s` / 0.0 para exibição até o encerramento do corte), além de modo automático pós-gancho viral.
+  - **Catálogo Completo de Efeitos de Transição**:
+    - 🌫️ **Suave (`fade`)**: Fade In e Fade Out suaves no canal alpha.
+    - ⬇️ **Deslizar (`slide`)**: Descida suave a partir do topo da tela e recolhimento no encerramento.
+    - 🌟 **Deslizar + Fade (`slide_fade`)**: Translação vertical combinada com transparência progressiva.
+    - 💥 **Deslizar + Explosão em Partículas (`slide_explode`)**: Entrada deslizante do topo e, no término, fragmentação do texto e das caixas em milhares de partículas com física de dispersão radial, faíscas brilhantes e desvanecimento suave.
+    - ⚡ **Corte Seco (`none`)**: Entrada e saída instantâneas.
+  - **Velocidade de Transição Configurável**: Slider interativo de **0.2s a 2.0s** (padrão 1.0s).
+  - **Prévia Visual Fiel em Tempo Real**: Renderização frame a frame do estado exato da animação e controle de escala de zoom da prévia (10% a 100%, padrão 20%).
+  - **Renderização por Hardware NVENC**: Pipeline FFmpeg composto com `:eof_action=pass` e aceleração GPU NVIDIA, preservando qualidade e áudio.
+  - **Disponibilidade Unificada**: Presente na Edição Rápida Individual (Seção 4) e na Edição em Lote do Carrossel (Seção 3).
+- **📋 Ações de Seleção em Massa no Compositor de Pautas (Seção 2) (`app.py`, `tests/test_analyzer_utils.py`)**:
+  - Botões integrados `☑️ Marcar Tudo`, `⬜ Desmarcar Tudo` e `🔄 Inverter Seleção` no cabeçalho de *Pautas Detectadas* para agilizar composições e cortes múltiplos.
+- **📦 Gestão de Carrossel de Cortes & Galeria Sincronizada (`core/cuts_catalog.py`, `app.py`, `tests/test_carrossel_galeria_sync.py`)**:
+  - Exclusão atômica de carrossel completo (`🗑️ Excluir Carrossel Completo`) com limpeza de arquivos físicos e catálogo.
+  - Otimização de performance de memória no carregamento de partes do carrossel na Seção 3 e Seção 4 via miniaturas de imagem estática com badges informativos de duração (original e acelerada).
+  - Sincronização automática e bidirecional das partes geradas no carrossel com o catálogo de cortes da Seção 4.
+- **🧪 Suíte de 166 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
 
 ---
 

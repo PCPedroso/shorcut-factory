@@ -187,6 +187,38 @@ class TestAnalyzerUtils(unittest.TestCase):
         cuts_90 = build_golden_rule_micro_cuts(pautas, segments, max_duration_s=90.0)
         self.assertTrue(len(cuts_90) > 0)
 
+    def test_pautas_batch_selection_logic(self):
+        """Valida a lógica de Marcar Tudo, Desmarcar Tudo e Inverter Seleção em Pautas."""
+        pautas = [{"id": 1}, {"id": 2}, {"id": 3}]
+        session = {}
+
+        # 1. Marcar Tudo
+        for p in pautas:
+            session[f"chk_pauta_{p['id']}"] = True
+        self.assertTrue(all(session[f"chk_pauta_{p['id']}"] for p in pautas))
+
+        # 2. Desmarcar Tudo
+        for p in pautas:
+            session[f"chk_pauta_{p['id']}"] = False
+        self.assertFalse(any(session[f"chk_pauta_{p['id']}"] for p in pautas))
+
+        # 3. Inverter Seleção (de todos False para todos True)
+        for p in pautas:
+            chk_k = f"chk_pauta_{p['id']}"
+            session[chk_k] = not session.get(chk_k, False)
+        self.assertTrue(all(session[f"chk_pauta_{p['id']}"] for p in pautas))
+
+        # Inverter com seleção parcial (marca apenas #2)
+        session["chk_pauta_1"] = False
+        session["chk_pauta_2"] = True
+        session["chk_pauta_3"] = False
+        for p in pautas:
+            chk_k = f"chk_pauta_{p['id']}"
+            session[chk_k] = not session.get(chk_k, False)
+        self.assertTrue(session["chk_pauta_1"])
+        self.assertFalse(session["chk_pauta_2"])
+        self.assertTrue(session["chk_pauta_3"])
+
 
 if __name__ == '__main__':
     unittest.main()

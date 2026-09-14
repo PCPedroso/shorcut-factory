@@ -767,31 +767,97 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
                 with col_b_s2:
                     sel_b_hl_shadow = st.toggle("Sombra Projetada Suave (Drop Shadow)", value=True, key="batch_hl_shadow")
 
-            col_b_hldelay1, col_b_hldelay2 = st.columns([2.2, 1.8])
-            with col_b_hldelay1:
-                delay_b_hook_on = st.checkbox(
-                    "⏱️ Exibir Headline apenas após o Gancho Viral",
-                    value=st.session_state.get("batch_hl_delay_enabled", False),
-                    key="batch_hl_delay_check",
-                    help="Mantém a Headline oculta durante o teaser/gancho de abertura e exibe-a somente a partir do momento em que o vídeo principal começa."
+            st.markdown("##### ⏱️ Duração & Transição de Entrada e Saída:")
+            col_b_time1, col_b_time2 = st.columns([1.5, 1.5])
+            with col_b_time1:
+                b_hl_dur_mode = st.radio(
+                    "Tempo de Exibição da Headline:",
+                    ["Vídeo Completo (0s até o final)", "Após o Gancho Viral", "Intervalo Personalizado"],
+                    index=1 if st.session_state.get("batch_hl_delay_enabled", False) else 0,
+                    key="batch_hl_dur_mode",
+                    help="Escolha se a Headline deve aparecer o vídeo todo, apenas após a abertura/gancho viral, ou durante um intervalo de tempo específico."
                 )
-                st.session_state["batch_hl_delay_enabled"] = delay_b_hook_on
+                st.session_state["batch_hl_delay_enabled"] = (b_hl_dur_mode != "Vídeo Completo (0s até o final)")
 
-            with col_b_hldelay2:
-                b_hl_start_offset = st.number_input(
-                    "Iniciar Headline aos (segundos):",
-                    min_value=0.0,
-                    max_value=max(0.1, float(sample_dur)),
-                    value=float(st.session_state.get("batch_hl_start_offset_val", 3.0)),
-                    step=0.5,
-                    format="%.1f",
-                    key="batch_hl_start_offset_num",
-                    disabled=not delay_b_hook_on,
-                    help="Segundo exato do vídeo em que a Headline fará sua entrada na tela."
+            with col_b_time2:
+                col_b_sub_t1, col_b_sub_t2 = st.columns(2)
+                if b_hl_dur_mode == "Vídeo Completo (0s até o final)":
+                    final_b_hl_start_offset = 0.0
+                    final_b_hl_end_offset = 0.0
+                    with col_b_sub_t1:
+                        st.info("🕒 Exibição contínua desde o 1º segundo até o encerramento do vídeo.")
+                elif b_hl_dur_mode == "Após o Gancho Viral":
+                    with col_b_sub_t1:
+                        b_hl_start_offset = st.number_input(
+                            "Iniciar Headline aos (s):",
+                            min_value=0.0,
+                            max_value=max(0.1, float(sample_dur)),
+                            value=float(st.session_state.get("batch_hl_start_offset_val", 3.0)),
+                            step=0.5,
+                            format="%.1f",
+                            key="batch_hl_start_offset_num",
+                            help="Segundo exato do vídeo em que a Headline fará sua entrada na tela."
+                        )
+                        st.session_state["batch_hl_start_offset_val"] = b_hl_start_offset
+                        final_b_hl_start_offset = float(b_hl_start_offset)
+                        final_b_hl_end_offset = 0.0
+                    with col_b_sub_t2:
+                        st.caption("ℹ️ Permanece visível até o final de cada parte.")
+                else:
+                    with col_b_sub_t1:
+                        b_hl_start_offset = st.number_input(
+                            "Iniciar aos (s):",
+                            min_value=0.0,
+                            max_value=max(0.1, float(sample_dur)),
+                            value=float(st.session_state.get("batch_hl_start_offset_val", 0.0)),
+                            step=0.5,
+                            format="%.1f",
+                            key="batch_hl_start_offset_num"
+                        )
+                        st.session_state["batch_hl_start_offset_val"] = b_hl_start_offset
+                        final_b_hl_start_offset = float(b_hl_start_offset)
+                    with col_b_sub_t2:
+                        b_hl_end_offset = st.number_input(
+                            "Terminar aos (s) [0 = até o fim]:",
+                            min_value=0.0,
+                            max_value=max(0.1, float(sample_dur)),
+                            value=float(st.session_state.get("batch_hl_end_offset_val", min(15.0, float(sample_dur)))),
+                            step=0.5,
+                            format="%.1f",
+                            key="batch_hl_end_offset_num"
+                        )
+                        st.session_state["batch_hl_end_offset_val"] = b_hl_end_offset
+                        final_b_hl_end_offset = float(b_hl_end_offset)
+
+            col_b_tr1, col_b_tr2 = st.columns([1.5, 1.5])
+            with col_b_tr1:
+                sel_b_trans_type = st.selectbox(
+                    "✨ Efeito de Transição (Entrada e Saída):",
+                    options=["slide_explode", "fade", "slide", "slide_fade", "none"],
+                    format_func=lambda x: {
+                        "slide_explode": "💥 Deslizar + Explosão em Partículas (Viral)",
+                        "fade": "🌫️ Suave (Fade In / Fade Out)",
+                        "slide": "⬇️ Deslizar (Slide do Topo)",
+                        "slide_fade": "🌟 Deslizar + Fade (Combo Premium)",
+                        "none": "⚡ Corte Seco (Instantâneo / Sem Transição)"
+                    }.get(x, x),
+                    index=0,
+                    key="batch_hl_trans_type",
+                    help="Efeito de animação ao entrar e sair da tela. A opção 'Deslizar + Explosão' desce a headline do topo e a desintegra em partículas brilhantes ao final."
                 )
-                st.session_state["batch_hl_start_offset_val"] = b_hl_start_offset
-
-            final_b_hl_start_offset = float(b_hl_start_offset) if delay_b_hook_on else 0.0
+            with col_b_tr2:
+                sel_b_trans_dur = st.slider(
+                    "Duração da Animação:",
+                    min_value=0.2,
+                    max_value=2.0,
+                    value=float(st.session_state.get("batch_hl_trans_dur_val", 1.0)),
+                    step=0.1,
+                    format="%.1fs",
+                    key="batch_hl_trans_dur",
+                    disabled=(sel_b_trans_type == "none"),
+                    help="Velocidade com que a transição entra e sai da tela (em segundos, ex: 1.0s para explosão)."
+                )
+                st.session_state["batch_hl_trans_dur_val"] = sel_b_trans_dur
 
             b_hl_cfg = {
                 "preset_key": sel_b_hl_key,
@@ -817,7 +883,10 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
                 "shadow": sel_b_hl_shadow,
                 "stroke_color": "#000000",
                 "stroke_width": 2 if sel_b_hl_mode == "outline_only" else 0,
-                "start_offset_s": final_b_hl_start_offset
+                "start_offset_s": final_b_hl_start_offset,
+                "end_offset_s": final_b_hl_end_offset,
+                "transition_type": sel_b_trans_type,
+                "transition_dur_s": sel_b_trans_dur
             }
 
             # 4. Prévia Visual Instantânea do Frame da 1ª Parte
@@ -829,11 +898,11 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
                 btn_trig_b_hl = st.button("🔄", key="btn_refresh_hl_prev_batch", help="Aplicar ajustes na pré-visualização da Headline")
 
             prev_sec_key = "batch_hl_prev_sec"
-            if delay_b_hook_on and final_b_hl_start_offset > 0:
+            if final_b_hl_start_offset > 0:
                 recommended_sec = min(float(sample_dur), round(final_b_hl_start_offset + 1.0, 1))
                 cur_prev_sec = st.session_state.get(prev_sec_key)
                 last_offset = st.session_state.get("batch_hl_last_offset_synced")
-                if cur_prev_sec is None or cur_prev_sec < final_b_hl_start_offset or last_offset != final_b_hl_start_offset:
+                if cur_prev_sec is None or cur_prev_sec < final_b_hl_start_offset or (final_b_hl_end_offset > 0.05 and cur_prev_sec > final_b_hl_end_offset) or last_offset != final_b_hl_start_offset:
                     st.session_state[prev_sec_key] = recommended_sec
                     st.session_state["batch_hl_last_offset_synced"] = final_b_hl_start_offset
                     st.session_state.pop("cached_batch_hl_prev", None)
@@ -866,7 +935,10 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
                 btn_trig_b_hl
                 or ("cached_batch_hl_prev" not in st.session_state)
                 or (b_hl_preview_sec != st.session_state.get("cached_batch_hl_prev_sec"))
-                or (final_b_hl_start_offset != st.session_state.get("cached_batch_hl_offset"))
+                or (final_b_hl_start_offset != st.session_state.get("cached_batch_hl_start_offset"))
+                or (final_b_hl_end_offset != st.session_state.get("cached_batch_hl_end_offset"))
+                or (sel_b_trans_type != st.session_state.get("cached_batch_hl_trans_type"))
+                or (sel_b_trans_dur != st.session_state.get("cached_batch_hl_trans_dur"))
             )
 
             with col_b_hl_prev_view:
@@ -879,14 +951,23 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
                             timestamp_s=b_hl_preview_sec
                         )
                         st.session_state["cached_batch_hl_prev_sec"] = b_hl_preview_sec
-                        st.session_state["cached_batch_hl_offset"] = final_b_hl_start_offset
+                        st.session_state["cached_batch_hl_start_offset"] = final_b_hl_start_offset
+                        st.session_state["cached_batch_hl_end_offset"] = final_b_hl_end_offset
+                        st.session_state["cached_batch_hl_trans_type"] = sel_b_trans_type
+                        st.session_state["cached_batch_hl_trans_dur"] = sel_b_trans_dur
 
                 prev_frame_hl = st.session_state.get("cached_batch_hl_prev")
                 if prev_frame_hl is not None:
                     calc_b_w = int(720 * (b_hl_preview_scale / 100.0)) if b_hl_preview_scale < 95 else None
+                    if final_b_hl_start_offset > 0.05 and b_hl_preview_sec < final_b_hl_start_offset:
+                        hl_cap = f"Prévia em {b_hl_preview_sec:.1f}s (Headline oculta até {final_b_hl_start_offset:.1f}s)"
+                    elif final_b_hl_end_offset > 0.05 and b_hl_preview_sec > final_b_hl_end_offset:
+                        hl_cap = f"Prévia em {b_hl_preview_sec:.1f}s (Headline encerrada aos {final_b_hl_end_offset:.1f}s)"
+                    else:
+                        hl_cap = f"Prévia com Headline em {b_hl_preview_sec:.1f}s ({b_hl_preview_scale}%)"
                     safe_display_image(
                         prev_frame_hl,
-                        caption=f"Prévia com Headline em {b_hl_preview_sec:.1f}s ({b_hl_preview_scale}%)",
+                        caption=hl_cap,
                         use_container_width=(calc_b_w is None),
                         width=calc_b_w
                     )
@@ -901,7 +982,10 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
                         video_path=bp["path"],
                         text=p_text,
                         config=b_hl_cfg,
-                        start_offset_s=final_b_hl_start_offset
+                        start_offset_s=final_b_hl_start_offset,
+                        end_offset_s=final_b_hl_end_offset,
+                        transition_type=sel_b_trans_type,
+                        transition_dur_s=sel_b_trans_dur
                     )
                     if res.get("error"):
                         b_errors.append(f"{bp['filename']}: {res['error']}")
@@ -909,7 +993,7 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
                         record_quick_edit(
                             video_path=bp["path"],
                             action_name="🏷️ Headline de Topo (Lote)",
-                            details=f"Texto: '{p_text}' | Estilo: {sel_b_hl_data['name']} | Início: {final_b_hl_start_offset:.1f}s"
+                            details=f"Texto: '{p_text}' | Estilo: {sel_b_hl_data['name']} | Início: {final_b_hl_start_offset:.1f}s | Fim: {final_b_hl_end_offset:.1f}s | Transição: {sel_b_trans_type}"
                         )
                 p_bar.progress(1.0, text="✅ Concluído!")
                 if video_id:
@@ -2152,33 +2236,98 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         detected_hook_dur = float(m.group(1))
                         break
 
-            col_hldelay1, col_hldelay2 = st.columns([2.2, 1.8])
-            with col_hldelay1:
-                default_delay_check = bool(has_hook_in_history and detected_hook_dur > 0)
-                delay_hook_on = st.checkbox(
-                    "⏱️ Exibir Headline apenas após o Gancho Viral",
-                    value=st.session_state.get(f"hl_delay_enabled_{unique_key}", default_delay_check),
-                    key=f"hl_delay_check_{unique_key}",
-                    help="Mantém a Headline oculta durante o teaser/gancho de abertura e exibe-a somente a partir do momento em que o vídeo principal começa."
+            st.markdown("##### ⏱️ Duração & Transição de Entrada e Saída:")
+            col_hl_time1, col_hl_time2 = st.columns([1.5, 1.5])
+            with col_hl_time1:
+                default_dur_idx = 1 if (has_hook_in_history and detected_hook_dur > 0) else 0
+                hl_dur_mode = st.radio(
+                    "Tempo de Exibição da Headline:",
+                    ["Vídeo Completo (0s até o final)", "Após o Gancho Viral", "Intervalo Personalizado"],
+                    index=default_dur_idx,
+                    key=f"hl_dur_mode_{unique_key}",
+                    help="Escolha se a Headline deve aparecer o vídeo todo, apenas após o gancho viral, ou durante um intervalo de tempo específico."
                 )
-                st.session_state[f"hl_delay_enabled_{unique_key}"] = delay_hook_on
 
-            with col_hldelay2:
-                init_offset_val = detected_hook_dur if (has_hook_in_history and detected_hook_dur > 0) else 4.0
-                hl_start_offset = st.number_input(
-                    "Iniciar Headline aos (segundos):",
-                    min_value=0.0,
-                    max_value=max(0.1, float(dur)),
-                    value=float(st.session_state.get(f"hl_start_offset_val_{unique_key}", init_offset_val)),
-                    step=0.5,
-                    format="%.1f",
-                    key=f"hl_start_offset_num_{unique_key}",
-                    disabled=not delay_hook_on,
-                    help="Segundo exato do vídeo em que a Headline fará sua entrada na tela."
+            with col_hl_time2:
+                col_hl_sub_t1, col_hl_sub_t2 = st.columns(2)
+                if hl_dur_mode == "Vídeo Completo (0s até o final)":
+                    final_hl_start_offset = 0.0
+                    final_hl_end_offset = 0.0
+                    with col_hl_sub_t1:
+                        st.info("🕒 Exibição contínua desde o 1º segundo até o encerramento do vídeo.")
+                elif hl_dur_mode == "Após o Gancho Viral":
+                    with col_hl_sub_t1:
+                        init_offset_val = detected_hook_dur if (has_hook_in_history and detected_hook_dur > 0) else 4.0
+                        hl_start_offset = st.number_input(
+                            "Iniciar Headline aos (s):",
+                            min_value=0.0,
+                            max_value=max(0.1, float(dur)),
+                            value=float(st.session_state.get(f"hl_start_offset_val_{unique_key}", init_offset_val)),
+                            step=0.5,
+                            format="%.1f",
+                            key=f"hl_start_offset_num_{unique_key}",
+                            help="Segundo exato do vídeo em que a Headline fará sua entrada na tela."
+                        )
+                        st.session_state[f"hl_start_offset_val_{unique_key}"] = hl_start_offset
+                        final_hl_start_offset = float(hl_start_offset)
+                        final_hl_end_offset = 0.0
+                    with col_hl_sub_t2:
+                        st.caption("ℹ️ Permanece visível até o final do vídeo.")
+                else:
+                    with col_hl_sub_t1:
+                        hl_start_offset = st.number_input(
+                            "Iniciar aos (s):",
+                            min_value=0.0,
+                            max_value=max(0.1, float(dur)),
+                            value=float(st.session_state.get(f"hl_start_offset_val_{unique_key}", 0.0)),
+                            step=0.5,
+                            format="%.1f",
+                            key=f"hl_start_offset_num_{unique_key}"
+                        )
+                        st.session_state[f"hl_start_offset_val_{unique_key}"] = hl_start_offset
+                        final_hl_start_offset = float(hl_start_offset)
+                    with col_hl_sub_t2:
+                        hl_end_offset = st.number_input(
+                            "Terminar aos (s) [0 = até o fim]:",
+                            min_value=0.0,
+                            max_value=max(0.1, float(dur)),
+                            value=float(st.session_state.get(f"hl_end_offset_val_{unique_key}", min(15.0, float(dur)))),
+                            step=0.5,
+                            format="%.1f",
+                            key=f"hl_end_offset_num_{unique_key}"
+                        )
+                        st.session_state[f"hl_end_offset_val_{unique_key}"] = hl_end_offset
+                        final_hl_end_offset = float(hl_end_offset)
+
+            col_hl_tr1, col_hl_tr2 = st.columns([1.5, 1.5])
+            with col_hl_tr1:
+                sel_hl_trans_type = st.selectbox(
+                    "✨ Efeito de Transição (Entrada e Saída):",
+                    options=["slide_explode", "fade", "slide", "slide_fade", "none"],
+                    format_func=lambda x: {
+                        "slide_explode": "💥 Deslizar + Explosão em Partículas (Viral)",
+                        "fade": "🌫️ Suave (Fade In / Fade Out)",
+                        "slide": "⬇️ Deslizar (Slide do Topo)",
+                        "slide_fade": "🌟 Deslizar + Fade (Combo Premium)",
+                        "none": "⚡ Corte Seco (Instantâneo / Sem Transição)"
+                    }.get(x, x),
+                    index=0,
+                    key=f"hl_trans_type_{unique_key}",
+                    help="Efeito de animação ao entrar e sair da tela. A opção 'Deslizar + Explosão' desce a headline do topo e a desintegra em partículas brilhantes ao final."
                 )
-                st.session_state[f"hl_start_offset_val_{unique_key}"] = hl_start_offset
-
-            final_hl_start_offset = float(hl_start_offset) if delay_hook_on else 0.0
+            with col_hl_tr2:
+                sel_hl_trans_dur = st.slider(
+                    "Duração da Animação:",
+                    min_value=0.2,
+                    max_value=2.0,
+                    value=float(st.session_state.get(f"hl_trans_dur_val_{unique_key}", 1.0)),
+                    step=0.1,
+                    format="%.1fs",
+                    key=f"hl_trans_dur_{unique_key}",
+                    disabled=(sel_hl_trans_type == "none"),
+                    help="Velocidade com que a transição entra e sai da tela (em segundos, ex: 1.0s para explosão)."
+                )
+                st.session_state[f"hl_trans_dur_val_{unique_key}"] = sel_hl_trans_dur
 
             current_hl_cfg = {
                 "preset_key": sel_hl_preset_key,
@@ -2203,7 +2352,10 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 "shadow": sel_hl_shadow,
                 "stroke_color": "#000000",
                 "stroke_width": 2 if sel_hl_mode == "outline_only" else 0,
-                "start_offset_s": final_hl_start_offset
+                "start_offset_s": final_hl_start_offset,
+                "end_offset_s": final_hl_end_offset,
+                "transition_type": sel_hl_trans_type,
+                "transition_dur_s": sel_hl_trans_dur
             }
 
             # 4. Prévia Visual Instantânea do Frame (Com acionamento por botão ou reativo)
@@ -2217,11 +2369,11 @@ def render_quick_editor_component(video_path: str, unique_key: str):
             # Posicionamento inteligente da prévia: se a headline inicia após o gancho,
             # posiciona a prévia em pelo menos +1.0s após o início da headline para exibir o texto na tela.
             prev_sec_key = f"hl_post_prev_sec_{unique_key}"
-            if delay_hook_on and final_hl_start_offset > 0:
+            if final_hl_start_offset > 0:
                 recommended_sec = min(float(dur), round(final_hl_start_offset + 1.0, 1))
                 cur_prev_sec = st.session_state.get(prev_sec_key)
                 last_offset = st.session_state.get(f"hl_last_offset_synced_{unique_key}")
-                if cur_prev_sec is None or cur_prev_sec < final_hl_start_offset or last_offset != final_hl_start_offset:
+                if cur_prev_sec is None or cur_prev_sec < final_hl_start_offset or (final_hl_end_offset > 0.05 and cur_prev_sec > final_hl_end_offset) or last_offset != final_hl_start_offset:
                     st.session_state[prev_sec_key] = recommended_sec
                     st.session_state[f"hl_last_offset_synced_{unique_key}"] = final_hl_start_offset
                     st.session_state.pop(f"cached_hl_prev_{unique_key}", None)
@@ -2254,7 +2406,10 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 btn_trig_hl
                 or (f"cached_hl_prev_{unique_key}" not in st.session_state)
                 or (hl_preview_sec != st.session_state.get(f"cached_hl_prev_sec_{unique_key}"))
-                or (final_hl_start_offset != st.session_state.get(f"cached_hl_offset_{unique_key}"))
+                or (final_hl_start_offset != st.session_state.get(f"cached_hl_start_offset_{unique_key}"))
+                or (final_hl_end_offset != st.session_state.get(f"cached_hl_end_offset_{unique_key}"))
+                or (sel_hl_trans_type != st.session_state.get(f"cached_hl_trans_type_{unique_key}"))
+                or (sel_hl_trans_dur != st.session_state.get(f"cached_hl_trans_dur_{unique_key}"))
             )
             if need_prev_update:
                 with st.spinner("Atualizando prévia da Headline..."):
@@ -2265,21 +2420,32 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         timestamp_s=hl_preview_sec
                     )
                     st.session_state[f"cached_hl_prev_sec_{unique_key}"] = hl_preview_sec
-                    st.session_state[f"cached_hl_offset_{unique_key}"] = final_hl_start_offset
+                    st.session_state[f"cached_hl_start_offset_{unique_key}"] = final_hl_start_offset
+                    st.session_state[f"cached_hl_end_offset_{unique_key}"] = final_hl_end_offset
+                    st.session_state[f"cached_hl_trans_type_{unique_key}"] = sel_hl_trans_type
+                    st.session_state[f"cached_hl_trans_dur_{unique_key}"] = sel_hl_trans_dur
 
             prev_hl_frame = st.session_state.get(f"cached_hl_prev_{unique_key}")
             prev_hl_sec_shown = st.session_state.get(f"cached_hl_prev_sec_{unique_key}", hl_preview_sec)
             with col_hl_prev_view:
                 calc_hl_w = int(720 * (hl_preview_scale / 100.0)) if hl_preview_scale < 95 else None
                 if prev_hl_frame is not None:
-                    if delay_hook_on and final_hl_start_offset > 0.05 and prev_hl_sec_shown < final_hl_start_offset:
+                    if final_hl_start_offset > 0.05 and prev_hl_sec_shown < final_hl_start_offset:
                         safe_display_image(
                             prev_hl_frame,
-                            caption=f"Prévia aos {prev_hl_sec_shown:.1f}s (Gancho ativo — Headline oculta até {final_hl_start_offset:.1f}s)",
+                            caption=f"Prévia aos {prev_hl_sec_shown:.1f}s (Headline oculta até {final_hl_start_offset:.1f}s)",
                             use_container_width=(calc_hl_w is None),
                             width=calc_hl_w
                         )
-                        st.info(f"💡 **Gancho Viral em reprodução aos {prev_hl_sec_shown:.1f}s.** A Headline surgirá a partir dos **{final_hl_start_offset:.1f}s**. Deslize o slider para além de `{final_hl_start_offset:.1f}s` para vê-la!")
+                        st.info(f"💡 **Vídeo aos {prev_hl_sec_shown:.1f}s.** A Headline surgirá a partir dos **{final_hl_start_offset:.1f}s**. Deslize o slider para além de `{final_hl_start_offset:.1f}s` para vê-la!")
+                    elif final_hl_end_offset > 0.05 and prev_hl_sec_shown > final_hl_end_offset:
+                        safe_display_image(
+                            prev_hl_frame,
+                            caption=f"Prévia aos {prev_hl_sec_shown:.1f}s (Headline encerrada aos {final_hl_end_offset:.1f}s)",
+                            use_container_width=(calc_hl_w is None),
+                            width=calc_hl_w
+                        )
+                        st.info(f"💡 **Vídeo aos {prev_hl_sec_shown:.1f}s.** A Headline encerrou aos **{final_hl_end_offset:.1f}s**.")
                     else:
                         safe_display_image(
                             prev_hl_frame,
@@ -2307,7 +2473,10 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         text=hl_text_input,
                         config=current_hl_cfg,
                         output_path=out_target_hl,
-                        start_offset_s=final_hl_start_offset
+                        start_offset_s=final_hl_start_offset,
+                        end_offset_s=final_hl_end_offset,
+                        transition_type=sel_hl_trans_type,
+                        transition_dur_s=sel_hl_trans_dur
                     )
 
                     if hl_res.get("error"):
@@ -2318,9 +2487,14 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         entry = record_quick_edit(
                             video_path=video_path,
                             action_name="🏷️ Headline de Topo",
-                            details=f"Texto: '{hl_text_input.replace(chr(10), ' ')}' | Início: {final_hl_start_offset:.1f}s | Modo: {current_hl_cfg.get('mode', 'line_boxes')} | Preset: {sel_hl_preset_data['name']}",
+                            details=f"Texto: '{hl_text_input.replace(chr(10), ' ')}' | Início: {final_hl_start_offset:.1f}s | Fim: {final_hl_end_offset:.1f}s | Transição: {sel_hl_trans_type} | Modo: {current_hl_cfg.get('mode', 'line_boxes')} | Preset: {sel_hl_preset_data['name']}",
                             output_path=out_target_hl,
-                            extra_info={"start_offset_s": final_hl_start_offset}
+                            extra_info={
+                                "start_offset_s": final_hl_start_offset,
+                                "end_offset_s": final_hl_end_offset,
+                                "transition_type": sel_hl_trans_type,
+                                "transition_dur_s": sel_hl_trans_dur
+                            }
                         )
                         st.session_state[f"last_edit_status_{unique_key}"] = entry
                         st.session_state[f"just_edited_{unique_key}"] = True
@@ -4501,18 +4675,27 @@ if _has_media_ready:
                     with open(steps_file, "w", encoding="utf-8") as f:
                         json.dump(st.session_state.saved_steps, f, indent=2, ensure_ascii=False)
     
-                col_head1, col_head2 = st.columns([3, 2])
+                col_head1, col_head2 = st.columns([2.0, 3.0])
                 with col_head1:
                     st.markdown(f"### 📋 Pautas Detectadas ({len(pautas)} encontradas):")
                 with col_head2:
-                    col_btn_uncheck, col_btn_reanalyze = st.columns(2)
+                    col_btn_check, col_btn_uncheck, col_btn_invert = st.columns(3)
+                    with col_btn_check:
+                        if st.button("☑️ Marcar Tudo", key="btn_check_all_pautas", use_container_width=True, help="Marca todas as pautas detectadas"):
+                            for p in pautas:
+                                st.session_state[f"chk_pauta_{p['id']}"] = True
+                            st.rerun()
                     with col_btn_uncheck:
-                        if st.button("🧹 Desmarcar Tudo", key="btn_uncheck_all", help="Limpa as seleções para iniciar um novo corte"):
+                        if st.button("⬜ Desmarcar Tudo", key="btn_uncheck_all", use_container_width=True, help="Limpa todas as seleções para iniciar um novo corte"):
                             for p in pautas:
                                 st.session_state[f"chk_pauta_{p['id']}"] = False
                             st.rerun()
-                    with col_btn_reanalyze:
-                        pass
+                    with col_btn_invert:
+                        if st.button("🔄 Inverter Seleção", key="btn_invert_pautas", use_container_width=True, help="Inverte a seleção de cada pauta"):
+                            for p in pautas:
+                                chk_k = f"chk_pauta_{p['id']}"
+                                st.session_state[chk_k] = not st.session_state.get(chk_k, False)
+                            st.rerun()
     
                 # Monta lista de pautas em cards selecionáveis
                 st.markdown("")

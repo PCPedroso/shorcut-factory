@@ -7,6 +7,8 @@ com sobreposição de caixas individuais (line boxes), bloco único (single card
 
 import os
 import re
+import time
+import shutil
 import textwrap
 import subprocess
 import cv2
@@ -298,7 +300,7 @@ def render_headline_overlay(
 
     # Parâmetros de Layout com suporte a sinônimos
     font_size = int(config.get("font_size", 70))
-    margin_top = int(config.get("margin_top", 240))
+    margin_top = int(config.get("margin_top", 240)) + int(config.get("y_shift", 0))
     container_mode = config.get("container_mode") or config.get("mode") or "line_boxes"
     
     raw_w_pct = config.get("container_width_pct", config.get("max_width_pct", 92.0))
@@ -490,22 +492,165 @@ def render_headline_overlay(
 def draw_headline_on_frame(
     frame_bgr: np.ndarray,
     text: str,
-    config: dict = None
+    config: dict = None,
+    alpha_multiplier: float = 1.0,
+    y_shift: int = 0
 ) -> np.ndarray:
     """
     Aplica a camada de Headline diretamente sobre um frame BGR (OpenCV) e retorna a imagem RGB.
+    Permite controle de transparência (alpha_multiplier) e deslocamento vertical (y_shift) para prévias de transição.
     """
     if frame_bgr is None:
         return None
 
+    if alpha_multiplier <= 0.01:
+        return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+
+    cfg = dict(config or {})
+    if y_shift != 0:
+        cfg["y_shift"] = int(cfg.get("y_shift", 0)) + int(y_shift)
+
     h, w = frame_bgr.shape[:2]
-    overlay_rgba = render_headline_overlay(w, h, text, config)
+    overlay_rgba = render_headline_overlay(w, h, text, cfg)
 
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    alpha = overlay_rgba[:, :, 3:4].astype(np.float32) / 255.0
+    alpha = (overlay_rgba[:, :, 3:4].astype(np.float32) / 255.0) * float(max(0.0, min(1.0, alpha_multiplier)))
     overlay_rgb = overlay_rgba[:, :, :3].astype(np.float32)
 
     composited = (overlay_rgb * alpha + frame_rgb.astype(np.float32) * (1.0 - alpha)).astype(np.uint8)
+    return composited
+
+
+def extract_particles_from_overlay(overlay_rgba: np.ndarray, block_size: int = 5, max_particles: int = 2500) -> list:
+    """
+    Extrai amostras de partículas do overlay da Headline para a simulação física de explosão.
+    """
+    if overlay_rgba is None or overlay_rgba.shape[2] < 4:
+        return []
+
+    alpha = overlay_rgba[:, :, 3]
+    ys, xs = np.where(alpha > 30)
+    if len(xs) == 0:
+        return []
+
+    cx = float(np.mean(xs))
+    cy = float(np.mean(ys))
+
+    particles = []
+    rng = np.random.RandomState(42)
+
+    step = max(3, block_size)
+    for y in range(int(ys.min()), int(ys.max()) + 1, step):
+        for x in range(int(xs.min()), int(xs.max()) + 1, step):
+            a = overlay_rgba[y, x, 3]
+            if a > 40:
+                color = overlay_rgba[y, x, :4].astype(float)
+                dx = x - cx
+                dy = y - cy
+                speed = rng.uniform(250.0, 850.0)
+                angle = np.arctan2(dy, dx) + rng.uniform(-0.5, 0.5)
+                vx = np.cos(angle) * speed
+                vy = np.sin(angle) * speed - rng.uniform(40.0, 180.0)
+                p_size = rng.uniform(step * 0.7, step * 1.4)
+                particles.append({
+                    "x0": float(x),
+                    "y0": float(y),
+                    "vx": float(vx),
+                    "vy": float(vy),
+                    "color": color,
+                    "size": float(p_size),
+                })
+
+    if len(particles) > max_particles:
+        indices = rng.choice(len(particles), max_particles, replace=False)
+        particles = [particles[i] for i in indices]
+
+    # Faíscas douradas e brancas para brilho e impacto viral
+    spk_palette = [
+        [255, 255, 220, 255],
+        [255, 215, 0, 255],
+        [255, 255, 255, 255],
+        [255, 140, 0, 255]
+    ]
+    n_sparks = min(250, len(xs))
+    for _ in range(n_sparks):
+        idx = rng.randint(0, len(xs))
+        x = float(xs[idx])
+        y = float(ys[idx])
+        angle = rng.uniform(0, 2 * np.pi)
+        speed = rng.uniform(500.0, 1400.0)
+        spark_color = spk_palette[rng.randint(0, len(spk_palette))]
+        particles.append({
+            "x0": x,
+            "y0": y,
+            "vx": float(np.cos(angle) * speed),
+            "vy": float(np.sin(angle) * speed),
+            "color": np.array(spark_color, dtype=float),
+            "size": rng.uniform(2.0, 4.0),
+        })
+
+    return particles
+
+
+def render_particle_explosion_frame(particles: list, progress: float, frame_w: int, frame_h: int) -> np.ndarray:
+    """
+    Renderiza um único frame RGBA transparente da explosão de partículas no progresso t (0.0 a 1.0).
+    """
+    p_img = np.zeros((frame_h, frame_w, 4), dtype=np.uint8)
+    if progress >= 1.0 or not particles:
+        return p_img
+
+    t = float(max(0.0, min(1.0, progress)))
+    t_physics = t ** 0.85
+    alpha_fade = max(0.0, (1.0 - t) ** 1.35)
+
+    x0 = np.array([p["x0"] for p in particles], dtype=np.float32)
+    y0 = np.array([p["y0"] for p in particles], dtype=np.float32)
+    vx = np.array([p["vx"] for p in particles], dtype=np.float32)
+    vy = np.array([p["vy"] for p in particles], dtype=np.float32)
+    sizes = np.array([p["size"] for p in particles], dtype=np.float32)
+    colors = np.array([p["color"] for p in particles], dtype=np.float32)
+
+    cur_x = (x0 + vx * t_physics).astype(np.int32)
+    cur_y = (y0 + vy * t_physics + 220.0 * (t ** 2)).astype(np.int32)
+    cur_alpha = (colors[:, 3] * alpha_fade).astype(np.uint8)
+
+    # Renderiza blocos com clamping seguro
+    for i in range(len(particles)):
+        a = cur_alpha[i]
+        if a < 4:
+            continue
+        cx = cur_x[i]
+        cy = cur_y[i]
+        if cx < 0 or cx >= frame_w or cy < 0 or cy >= frame_h:
+            continue
+        sz = int(sizes[i] * (1.0 - 0.35 * t))
+        if sz <= 1:
+            p_img[cy, cx] = [int(colors[i, 0]), int(colors[i, 1]), int(colors[i, 2]), a]
+        else:
+            r = sz // 2
+            x_min = max(0, cx - r)
+            x_max = min(frame_w, cx + r + 1)
+            y_min = max(0, cy - r)
+            y_max = min(frame_h, cy + r + 1)
+            p_img[y_min:y_max, x_min:x_max] = [int(colors[i, 0]), int(colors[i, 1]), int(colors[i, 2]), a]
+
+    return p_img
+
+
+def draw_particle_explosion_on_frame(frame_bgr: np.ndarray, particles: list, progress: float) -> np.ndarray:
+    """
+    Sobrepõe as partículas da explosão diretamente em um frame BGR e retorna a imagem RGB final.
+    """
+    h, w = frame_bgr.shape[:2]
+    p_img = render_particle_explosion_frame(particles, progress, w, h)
+    frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    if p_img is None or progress >= 1.0:
+        return frame_rgb
+
+    alpha = p_img[:, :, 3:4].astype(np.float32) / 255.0
+    p_rgb = p_img[:, :, :3].astype(np.float32)
+    composited = (p_rgb * alpha + frame_rgb.astype(np.float32) * (1.0 - alpha)).astype(np.uint8)
     return composited
 
 
@@ -518,8 +663,8 @@ def generate_headline_preview(
 ) -> np.ndarray:
     """
     Gera uma prévia visual instantânea (RGB) da Headline sobreposta no frame exato do vídeo.
-    Se o vídeo tiver um gancho configurado e o timestamp_s estiver antes do término do gancho (start_offset_s),
-    o frame é exibido sem headline para refletir com fidelidade o início do vídeo.
+    Respeita com fidelidade o período de exibição (início e término) e simula o efeito de transição
+    de entrada e saída (fade / slide) no exato segundo visualizado.
     """
     if timestamp_sec is not None:
         timestamp_s = timestamp_sec
@@ -542,10 +687,81 @@ def generate_headline_preview(
 
     cfg = config or {}
     start_offset = float(cfg.get("start_offset_s", 0.0))
-    if start_offset > 0.05 and timestamp_s < start_offset and not cfg.get("force_headline_on_preview", False):
+    end_offset = float(cfg.get("end_offset_s", 0.0))
+    trans_type = cfg.get("transition_type", "fade")
+    trans_dur = float(cfg.get("transition_dur_s", 0.5))
+    force_on = cfg.get("force_headline_on_preview", False)
+
+    if force_on:
+        return draw_headline_on_frame(frame, text, cfg)
+
+    # 1. Totalmente antes do início
+    if start_offset > 0.05 and timestamp_s < (start_offset - 0.01):
         return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-    return draw_headline_on_frame(frame, text, config)
+    # 2. Totalmente após o término (quando fim configurado)
+    if end_offset > 0.05 and timestamp_s > (end_offset + 0.01):
+        return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+    # 3. Cálculo de transição de entrada / saída se o timestamp estiver nos segundos de transição
+    alpha_factor = 1.0
+    y_shift = 0
+    slide_dist = max(250, int(frame.shape[0] * 0.22))
+
+    if trans_type == "slide_explode":
+        f_count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+        total_dur = float(f_count / fps) if (fps > 0 and f_count > 0) else 0.0
+        expl_dur = max(0.3, trans_dur)
+        if end_offset > 0.05:
+            expl_end = end_offset
+            expl_start = max(start_offset + trans_dur, expl_end - expl_dur)
+        else:
+            expl_end = total_dur if total_dur > 0 else (start_offset + 10.0)
+            expl_start = max(start_offset + trans_dur, expl_end - expl_dur)
+
+        # 1. Totalmente antes do início
+        if start_offset > 0.05 and timestamp_s < (start_offset - 0.01):
+            return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # 2. Totalmente após a explosão
+        if timestamp_s > (expl_end + 0.01):
+            return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # 3. Durante a explosão de partículas
+        if timestamp_s >= expl_start:
+            p_expl = max(0.0, min(1.0, (timestamp_s - expl_start) / max(0.01, expl_end - expl_start)))
+            h, w = frame.shape[:2]
+            overlay_rgba = render_headline_overlay(w, h, text, cfg)
+            particles = extract_particles_from_overlay(overlay_rgba)
+            return draw_particle_explosion_on_frame(frame, particles, p_expl)
+
+        # 4. Durante o slide de entrada
+        if start_offset <= timestamp_s < (start_offset + trans_dur):
+            p_in = max(0.0, min(1.0, (timestamp_s - start_offset) / trans_dur))
+            y_shift = int(-slide_dist * (1.0 - p_in))
+            return draw_headline_on_frame(frame, text, cfg, alpha_multiplier=1.0, y_shift=y_shift)
+
+        # 5. Durante o período estável da headline
+        return draw_headline_on_frame(frame, text, cfg, alpha_multiplier=1.0, y_shift=0)
+
+    if trans_type in ["fade", "slide", "slide_fade"] and trans_dur > 0.05:
+        # Transição de entrada
+        if start_offset <= timestamp_s < (start_offset + trans_dur):
+            p_in = max(0.0, min(1.0, (timestamp_s - start_offset) / trans_dur))
+            if trans_type in ["fade", "slide_fade"]:
+                alpha_factor = p_in
+            if trans_type in ["slide", "slide_fade"]:
+                y_shift = int(-slide_dist * (1.0 - p_in))
+
+        # Transição de saída
+        elif end_offset > 0.05 and (end_offset - trans_dur) <= timestamp_s <= end_offset:
+            p_out = max(0.0, min(1.0, (end_offset - timestamp_s) / trans_dur))
+            if trans_type in ["fade", "slide_fade"]:
+                alpha_factor = p_out
+            if trans_type in ["slide", "slide_fade"]:
+                y_shift = int(-slide_dist * (1.0 - p_out))
+
+    return draw_headline_on_frame(frame, text, cfg, alpha_multiplier=alpha_factor, y_shift=y_shift)
 
 
 def apply_headline_to_video(
@@ -553,12 +769,18 @@ def apply_headline_to_video(
     text: str,
     config: dict = None,
     output_path: str = None,
-    start_offset_s: float = 0.0
+    start_offset_s: float = 0.0,
+    end_offset_s: float = 0.0,
+    transition_type: str = "fade",
+    transition_dur_s: float = 0.5
 ) -> dict:
     """
     Renderiza e queima a Headline diretamente no arquivo de vídeo com aceleração por GPU (NVENC).
-    Pós-corte instantâneo sem necessitar de reprocessamento do vídeo do zero.
-    - start_offset_s: Se > 0, a Headline só aparece após esse tempo (ex: duração do Gancho Viral).
+    Suporta período configurável de início e término, e efeitos de transição de entrada/saída (fade, slide, slide_fade).
+    - start_offset_s: Segundo em que a Headline inicia.
+    - end_offset_s: Segundo em que a Headline encerra (0.0 = permanece até o final do vídeo).
+    - transition_type: 'fade', 'slide', 'slide_fade' ou 'none'.
+    - transition_dur_s: Duração em segundos da transição (ex: 0.5s).
     """
     if not video_path or not os.path.exists(video_path):
         return {"path": None, "error": "Vídeo original não encontrado."}
@@ -567,25 +789,40 @@ def apply_headline_to_video(
         return {"path": None, "error": "Texto da Headline está vazio."}
 
     cfg = config or {}
-    if start_offset_s <= 0.05 and "start_offset_s" in cfg:
-        try:
-            start_offset_s = float(cfg["start_offset_s"])
-        except Exception:
-            start_offset_s = 0.0
+    start_s = float(start_offset_s if start_offset_s > 0.05 else cfg.get("start_offset_s", 0.0))
+    end_s = float(end_offset_s if end_offset_s > 0.05 else cfg.get("end_offset_s", 0.0))
+    trans_type = transition_type if transition_type else cfg.get("transition_type", "fade")
+    trans_dur = float(transition_dur_s if transition_dur_s > 0.05 else cfg.get("transition_dur_s", 0.5))
 
-    # 1. Obtém resolução do vídeo
+    # 1. Obtém resolução e duração do vídeo
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         return {"path": None, "error": "Não foi possível abrir o arquivo de vídeo."}
-    vw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    vh = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    vw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1080)
+    vh = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1920)
+    try:
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+    except Exception:
+        fps = 30.0
+    try:
+        f_count = float(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    except Exception:
+        f_count = 0
+    total_dur = float(f_count / fps) if (fps > 0 and f_count > 0) else 0.0
     cap.release()
 
     if vw <= 0 or vh <= 0:
         vw, vh = 1080, 1920
 
+    # Validação de limites de tempo
+    if total_dur > 0 and end_s >= (total_dur - 0.05):
+        end_s = 0.0  # 0.0 = até o final
+
+    if end_s > 0.05 and end_s <= (start_s + trans_dur):
+        end_s = start_s + trans_dur + 0.5
+
     # 2. Renderiza imagem RGBA transparente completa do overlay
-    overlay_rgba = render_headline_overlay(vw, vh, text, config)
+    overlay_rgba = render_headline_overlay(vw, vh, text, cfg)
 
     temp_dir = os.path.dirname(video_path) or "data"
     temp_overlay_png = os.path.join(temp_dir, f"temp_hl_{os.path.basename(video_path)}.png")
@@ -603,26 +840,99 @@ def apply_headline_to_video(
         except Exception:
             pass
 
-    # 3. Executa FFmpeg com GPU NVENC e fallback CPU
-    if start_offset_s > 0.05:
-        filter_complex = f"[0:v][1:v]overlay=0:0:enable='gte(t,{start_offset_s:.3f})'[outv]"
-    else:
-        filter_complex = "[0:v][1:v]overlay=0:0[outv]"
+    # 3. Montagem inteligente do filter_complex no FFmpeg com transições
+    slide_dist = max(300, int(vh * 0.25))
+    input_extra = []
+    temp_expl_dir = None
+
+    if trans_type == "slide_explode":
+        expl_dur = max(0.3, trans_dur)
+        if end_s > 0.05:
+            expl_end = end_s
+            expl_start = max(start_s + trans_dur, expl_end - expl_dur)
+        else:
+            expl_end = total_dur if total_dur > 0 else (start_s + 10.0)
+            expl_start = max(start_s + trans_dur, expl_end - expl_dur)
+
+        # Gera frames da explosão em pasta temporária
+        temp_expl_dir = os.path.join(temp_dir, f"expl_{int(time.time()*1000)}_{os.getpid()}")
+        os.makedirs(temp_expl_dir, exist_ok=True)
+        particles = extract_particles_from_overlay(overlay_rgba)
+        n_frames = max(15, int(round(expl_dur * fps)))
+        for fi in range(n_frames):
+            p = fi / float(max(1, n_frames - 1))
+            p_frame = render_particle_explosion_frame(particles, p, vw, vh)
+            Image.fromarray(p_frame).save(os.path.join(temp_expl_dir, f"frame_{fi:03d}.png"), format="PNG")
+
+        y_expr = f"'if(lte(t,{start_s + trans_dur:.3f}), -{slide_dist}*(1-(t-{start_s:.3f})/{trans_dur:.3f}), 0)'"
+        filter_complex = (
+            f"[0:v][1:v]overlay=x=0:y={y_expr}:enable='between(t,{start_s:.3f},{expl_start:.3f})'[v1];"
+            f"[2:v]setpts=PTS-STARTPTS+{expl_start:.3f}/TB[expl];"
+            f"[v1][expl]overlay=x=0:y=0:enable='between(t,{expl_start:.3f},{expl_end:.3f})':eof_action=pass[outv]"
+        )
+        input_extra = [
+            "-framerate", str(int(round(fps))),
+            "-start_number", "0",
+            "-i", os.path.join(temp_expl_dir, "frame_%03d.png")
+        ]
+
+    elif trans_type == "fade":
+        if end_s > 0.05:
+            fade_filter = f"fade=t=in:st={start_s:.3f}:d={trans_dur:.3f}:alpha=1,fade=t=out:st={max(start_s, end_s - trans_dur):.3f}:d={trans_dur:.3f}:alpha=1"
+            filter_complex = f"[1:v]format=rgba,{fade_filter}[hl];[0:v][hl]overlay=0:0:enable='between(t,{start_s:.3f},{end_s:.3f})'[outv]"
+        else:
+            fade_filter = f"fade=t=in:st={start_s:.3f}:d={trans_dur:.3f}:alpha=1"
+            filter_complex = f"[1:v]format=rgba,{fade_filter}[hl];[0:v][hl]overlay=0:0:enable='gte(t,{start_s:.3f})'[outv]"
+
+    elif trans_type == "slide":
+        if end_s > 0.05:
+            y_expr = (
+                f"'if(lte(t,{start_s + trans_dur:.3f}), -{slide_dist}*(1-(t-{start_s:.3f})/{trans_dur:.3f}), "
+                f"if(gte(t,{end_s - trans_dur:.3f}), -{slide_dist}*((t-({end_s - trans_dur:.3f}))/{trans_dur:.3f}), 0))'"
+            )
+            filter_complex = f"[0:v][1:v]overlay=x=0:y={y_expr}:enable='between(t,{start_s:.3f},{end_s:.3f})'[outv]"
+        else:
+            y_expr = f"'if(lte(t,{start_s + trans_dur:.3f}), -{slide_dist}*(1-(t-{start_s:.3f})/{trans_dur:.3f}), 0)'"
+            filter_complex = f"[0:v][1:v]overlay=x=0:y={y_expr}:enable='gte(t,{start_s:.3f})'[outv]"
+
+    elif trans_type == "slide_fade":
+        if end_s > 0.05:
+            fade_filter = f"fade=t=in:st={start_s:.3f}:d={trans_dur:.3f}:alpha=1,fade=t=out:st={max(start_s, end_s - trans_dur):.3f}:d={trans_dur:.3f}:alpha=1"
+            y_expr = (
+                f"'if(lte(t,{start_s + trans_dur:.3f}), -{slide_dist}*(1-(t-{start_s:.3f})/{trans_dur:.3f}), "
+                f"if(gte(t,{end_s - trans_dur:.3f}), -{slide_dist}*((t-({end_s - trans_dur:.3f}))/{trans_dur:.3f}), 0))'"
+            )
+            filter_complex = f"[1:v]format=rgba,{fade_filter}[hl];[0:v][hl]overlay=x=0:y={y_expr}:enable='between(t,{start_s:.3f},{end_s:.3f})'[outv]"
+        else:
+            fade_filter = f"fade=t=in:st={start_s:.3f}:d={trans_dur:.3f}:alpha=1"
+            y_expr = f"'if(lte(t,{start_s + trans_dur:.3f}), -{slide_dist}*(1-(t-{start_s:.3f})/{trans_dur:.3f}), 0)'"
+            filter_complex = f"[1:v]format=rgba,{fade_filter}[hl];[0:v][hl]overlay=x=0:y={y_expr}:enable='gte(t,{start_s:.3f})'[outv]"
+
+    else:  # none / corte seco
+        if end_s > 0.05:
+            filter_complex = f"[0:v][1:v]overlay=0:0:enable='between(t,{start_s:.3f},{end_s:.3f})'[outv]"
+        else:
+            filter_complex = f"[0:v][1:v]overlay=0:0:enable='gte(t,{start_s:.3f})'[outv]"
 
     cmd_gpu = [
         FFMPEG_EXE, "-y",
         "-i", video_path,
-        "-i", temp_overlay_png,
+        "-loop", "1", "-i", temp_overlay_png
+    ]
+    if input_extra:
+        cmd_gpu.extend(input_extra)
+    cmd_gpu.extend([
         "-filter_complex", filter_complex,
         "-map", "[outv]",
         "-map", "0:a?",
         "-c:v", "h264_nvenc",
         "-preset", "p4",
         "-b:v", "8M",
+        "-shortest",
         "-c:a", "copy",
         "-movflags", "+faststart",
         tmp_out
-    ]
+    ])
 
     res = subprocess.run(cmd_gpu, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
@@ -631,23 +941,34 @@ def apply_headline_to_video(
         cmd_cpu = [
             FFMPEG_EXE, "-y",
             "-i", video_path,
-            "-i", temp_overlay_png,
+            "-loop", "1", "-i", temp_overlay_png
+        ]
+        if input_extra:
+            cmd_cpu.extend(input_extra)
+        cmd_cpu.extend([
             "-filter_complex", filter_complex,
             "-map", "[outv]",
             "-map", "0:a?",
             "-c:v", "libx264",
             "-preset", "veryfast",
             "-crf", "20",
+            "-shortest",
             "-c:a", "copy",
             "-movflags", "+faststart",
             tmp_out
-        ]
+        ])
         res = subprocess.run(cmd_cpu, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
-    # Limpeza do PNG temporário
+    # Limpeza dos arquivos temporários
     if os.path.exists(temp_overlay_png):
         try:
             os.remove(temp_overlay_png)
+        except Exception:
+            pass
+
+    if temp_expl_dir and os.path.exists(temp_expl_dir):
+        try:
+            shutil.rmtree(temp_expl_dir, ignore_errors=True)
         except Exception:
             pass
 
@@ -658,7 +979,14 @@ def apply_headline_to_video(
             except Exception:
                 pass
         os.rename(tmp_out, target_out)
-        return {"path": target_out, "error": None, "start_offset_s": start_offset_s}
+        return {
+            "path": target_out,
+            "error": None,
+            "start_offset_s": start_s,
+            "end_offset_s": end_s,
+            "transition_type": trans_type,
+            "transition_dur_s": trans_dur
+        }
     else:
         if os.path.exists(tmp_out):
             os.remove(tmp_out)
