@@ -110,3 +110,66 @@ def test_slice_or_copy_local_video():
                     os.remove(f)
                 except Exception:
                     pass
+
+
+def test_local_workflow_full_and_slice():
+    """
+    Testa o fluxo exato especificado:
+    - Processar completo: cópia para pasta -> renomeia para video_full
+    - Com corte: cópia para pasta -> corta gerando video_full -> exclui cópia base
+    """
+    import subprocess
+    import shutil
+    import imageio_ffmpeg
+    from core.video_processor import slice_or_copy_local_video
+    from core.quick_editor import get_video_duration
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    
+    test_dir = os.path.join("data", "test_workflow_local")
+    os.makedirs(test_dir, exist_ok=True)
+    
+    raw_src = os.path.join(test_dir, "video_gravado_podcast.mp4")
+    v_full = os.path.join(test_dir, "video_full.mp4")
+    
+    try:
+        # Gera arquivo fonte simulando upload
+        subprocess.run([
+            ffmpeg_exe, "-y",
+            "-f", "lavfi", "-i", "testsrc=duration=5:size=320x240:rate=30",
+            "-c:v", "libx264", "-preset", "ultrafast",
+            raw_src
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        assert os.path.exists(raw_src)
+        
+        # Fluxo 1: Completo (sem corte)
+        # 1. Cópia
+        copy_path = os.path.join(test_dir, "copy_full.mp4")
+        shutil.copy2(raw_src, copy_path)
+        assert os.path.exists(copy_path)
+        # 2. Renomeia para video_full
+        os.replace(copy_path, v_full)
+        assert os.path.exists(v_full)
+        assert not os.path.exists(copy_path)
+        assert get_video_duration(v_full) >= 4.5
+        
+        # Remove video_full para testar Fluxo 2
+        os.remove(v_full)
+        
+        # Fluxo 2: Com início e fim
+        # 1. Cópia base
+        copy_base = os.path.join(test_dir, "copy_to_cut.mp4")
+        shutil.copy2(raw_src, copy_base)
+        assert os.path.exists(copy_base)
+        # 2. Corte com início 1s e fim 3s gerando video_full
+        res = slice_or_copy_local_video(copy_base, v_full, start_time_str="00:00:01", end_time_str="00:00:03")
+        assert res["error"] is None
+        # 3. Exclui a cópia base
+        os.remove(copy_base)
+        assert not os.path.exists(copy_base)
+        assert os.path.exists(v_full)
+        assert 1.5 <= get_video_duration(v_full) <= 2.5
+        
+    finally:
+        if os.path.exists(test_dir):
+            shutil.rmtree(test_dir, ignore_errors=True)
+

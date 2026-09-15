@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import shutil
 import re
 import json
 import importlib
@@ -3731,25 +3732,38 @@ if show_sec1:
                 _start_s = parse_time_to_seconds(local_start_time)
                 _end_s = parse_time_to_seconds(local_end_time) if local_end_time.strip() else 0.0
 
+                base_copy_filename = orig_filename if orig_filename.lower() != "video_full.mp4" else f"raw_{orig_filename}"
+                base_copy_path = os.path.join(data_dir, base_copy_filename)
+
                 with st.spinner("🎵 Processando arquivo de vídeo e extraindo áudio..."):
                     if _start_s > 0 or _end_s > 0:
-                        temp_upload_path = os.path.join(data_dir, f"temp_raw_{orig_filename}")
-                        with open(temp_upload_path, "wb") as f_out:
+                        # 1. Cópia do arquivo para a pasta local padrão
+                        with open(base_copy_path, "wb") as f_out:
                             uploaded_file.seek(0)
                             shutil.copyfileobj(uploaded_file, f_out)
-                        slice_res = slice_or_copy_local_video(temp_upload_path, v_full_path, local_start_time, local_end_time)
-                        if os.path.exists(temp_upload_path):
+                        # 2. Corte com início e fim gerando o video_full
+                        slice_res = slice_or_copy_local_video(base_copy_path, v_full_path, local_start_time, local_end_time)
+                        # 3. Exclusão do arquivo base que serviu para o corte
+                        if os.path.exists(base_copy_path):
                             try:
-                                os.remove(temp_upload_path)
+                                os.remove(base_copy_path)
                             except Exception:
                                 pass
                         if slice_res.get("error"):
                             st.error(f"Erro ao recortar vídeo: {slice_res['error']}")
                             st.stop()
                     else:
-                        with open(v_full_path, "wb") as f_out:
+                        # 1. Cópia do arquivo para a pasta local padrão
+                        with open(base_copy_path, "wb") as f_out:
                             uploaded_file.seek(0)
                             shutil.copyfileobj(uploaded_file, f_out)
+                        # 2. Renomeia a cópia para video_full
+                        if os.path.exists(v_full_path):
+                            try:
+                                os.remove(v_full_path)
+                            except Exception:
+                                pass
+                        os.replace(base_copy_path, v_full_path)
 
                     v_dur = get_video_duration(v_full_path)
                     extract_audio_from_local_video(v_full_path, audio_path)
@@ -3805,29 +3819,51 @@ if show_sec1:
                 _start_s = parse_time_to_seconds(local_start_time)
                 _end_s = parse_time_to_seconds(local_end_time) if local_end_time.strip() else 0.0
 
-                # 1. Salva diretamente ou apara o arquivo de vídeo para a pasta padrão
+                base_copy_filename = orig_filename if orig_filename.lower() != "video_full.mp4" else f"raw_{orig_filename}"
+                base_copy_path = os.path.join(data_dir, base_copy_filename)
+
                 if _start_s > 0 or _end_s > 0:
-                    with st.spinner("✂️ Salvando e recortando trecho do vídeo local com FFmpeg..."):
-                        temp_upload_path = os.path.join(data_dir, f"temp_raw_{orig_filename}")
-                        with open(temp_upload_path, "wb") as f_out:
+                    # CASO COM CORTE:
+                    # 1. Faz uma cópia do arquivo para a pasta local padrão
+                    with st.spinner("📁 Copiando arquivo de vídeo para a pasta padrão do projeto..."):
+                        with open(base_copy_path, "wb") as f_out:
                             uploaded_file.seek(0)
                             shutil.copyfileobj(uploaded_file, f_out)
-                        slice_res = slice_or_copy_local_video(temp_upload_path, v_full_path, local_start_time, local_end_time)
-                        if os.path.exists(temp_upload_path):
-                            try:
-                                os.remove(temp_upload_path)
-                            except Exception:
-                                pass
-                        if slice_res.get("error"):
-                            st.error(f"Erro ao realizar corte no vídeo local: {slice_res['error']}")
-                            st.stop()
-                        st.toast(f"✂️ Trecho fatiado com sucesso ({slice_res.get('duration', 0.0):.1f}s)!", icon="✂️")
+
+                    # 2. A partir daí se faz o corte com os tempos início e fim, e o resultado deste corte passa a ser o nosso video_full
+                    with st.spinner("✂️ Realizando corte do vídeo com FFmpeg..."):
+                        slice_res = slice_or_copy_local_video(base_copy_path, v_full_path, local_start_time, local_end_time)
+
+                    # 3. O arquivo copiado que serviu de base para o corte pode ser excluído
+                    if os.path.exists(base_copy_path):
+                        try:
+                            os.remove(base_copy_path)
+                        except Exception:
+                            pass
+
+                    if slice_res.get("error"):
+                        st.error(f"Erro ao realizar corte no vídeo local: {slice_res['error']}")
+                        st.stop()
+                    st.toast(f"✂️ Trecho fatiado com sucesso ({slice_res.get('duration', 0.0):.1f}s)!", icon="✂️")
+
                 else:
-                    with st.spinner("📁 Copiando arquivo de vídeo local para a pasta padrão..."):
-                        with open(v_full_path, "wb") as f_out:
+                    # CASO COMPLETO (SEM CORTE):
+                    # 1. Deve ser feita uma cópia do arquivo para a pasta local padrão
+                    with st.spinner("📁 Copiando arquivo para a pasta local padrão..."):
+                        with open(base_copy_path, "wb") as f_out:
                             uploaded_file.seek(0)
                             shutil.copyfileobj(uploaded_file, f_out)
-                        st.toast("📁 Vídeo copiado para a pasta padrão!", icon="📁")
+
+                    # 2. Este arquivo é renomeado e passa a ser o nosso video_full
+                    if os.path.exists(v_full_path):
+                        try:
+                            os.remove(v_full_path)
+                        except Exception:
+                            pass
+                    os.replace(base_copy_path, v_full_path)
+                    st.toast("📁 Vídeo copiado e renomeado para video_full com sucesso!", icon="📁")
+
+                # 4. A partir deste ponto todo o resto segue normalmente.
 
                 # 2. Metadados e Thumbnail
                 v_title = custom_local_title.strip() if custom_local_title.strip() else os.path.splitext(orig_filename)[0]
