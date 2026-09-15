@@ -291,8 +291,16 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Exclusão atômica de carrossel completo (`🗑️ Excluir Carrossel Completo`) com limpeza de arquivos físicos e catálogo.
   - Otimização de performance de memória no carregamento de partes do carrossel na Seção 3 e Seção 4 via miniaturas de imagem estática com badges informativos de duração (original e acelerada).
   - Sincronização automática e bidirecional das partes geradas no carrossel com o catálogo de cortes da Seção 4.
-- **🧪 Suíte de 166 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
+- **📁 Ingestão de Vídeo Local com Cópia Direta ou Corte de Trecho Otimizado (`core/video_processor.py`, `app.py`, `tests/test_local_video.py`)**:
+  - **Cópia Integral Direta sem Recodificação**: Ao carregar um arquivo de vídeo do computador sem corte definido, a aplicação simplesmente copia o arquivo diretamente para a pasta padrão do projeto (`data/<video_id>/video_full.mp4`) via stream chunked sem re-encoding, economizando CPU/GPU e preservando 100% da taxa de bits e fidelidade originais.
+  - **Definição Opcional de Corte (Início e Fim) na Ingestão Local**:
+    - Campos de tempo interativos `⏱️ Início do Corte` (ex: `00:00:00` ou `MM:SS`) e `⏱️ Fim do Corte` (ex: `00:05:00` ou vazio para ir até o final do vídeo).
+    - Badge dinâmico de status sinalizando em tempo real se o arquivo será copiado integralmente ou se terá o trecho especificado fatiado para a pasta padrão.
+    - Motor inteligente `slice_or_copy_local_video`: Executa fatiamento ultra-rápido via stream copy do FFmpeg (`-c copy`) em fração de segundo com tolerância e validação de alinhamento de keyframes, acionando fallback seguro para re-encoding rápido quando necessário.
+    - Identificador determinístico e isolado (`generate_local_video_id`), garantindo diretórios de projeto e caches de transcrição independentes para diferentes trechos do mesmo arquivo de vídeo.
+    - Pipeline cirúrgico e otimizado: A extração de áudio, thumbnail e a transcrição Whisper ocorrem exclusivamente sobre o trecho cortado, economizando gigabytes de disco e reduzindo drasticamente o tempo de processamento.
+- **🧪 Suíte de 170 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (local video copy & slice, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
 
 ---
 

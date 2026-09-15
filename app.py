@@ -57,7 +57,7 @@ from core.video_processor import (
     download_full_video, cut_video, get_video_resolution,
     extract_audio_from_local_video, extract_thumbnail_from_video, generate_local_video_id,
     generate_local_dual_video_id, generate_dual_split_preview, compose_dual_video_split_sequence,
-    split_video_smart
+    split_video_smart, slice_or_copy_local_video, parse_time_to_seconds
 )
 from core.library_manager import get_library, add_or_update_video_in_library, remove_video_from_library
 from core.config_manager import load_settings, save_all_settings, save_setting
@@ -3683,30 +3683,77 @@ if show_sec1:
                     key="custom_local_title"
                 )
             with col_loc2:
-                st.caption("📁 Arquivo individual carregado do disco, processado 100% offline com Whisper e GPU.")
-    
+                file_size_mb = (uploaded_file.size / (1024 * 1024)) if hasattr(uploaded_file, 'size') else 0.0
+                st.caption(f"📁 Arquivo: **{uploaded_file.name}** ({file_size_mb:.1f} MB)\nProcessamento 100% offline com Whisper e GPU.")
+
+            # Configuração de Corte Opcional para o Vídeo Local
+            col_cut1, col_cut2, col_cut_status = st.columns([1, 1, 1.5])
+            with col_cut1:
+                local_start_time = st.text_input(
+                    "⏱️ Início do Corte (Opcional):",
+                    value="00:00:00",
+                    placeholder="00:00:00 ou MM:SS",
+                    key="local_cut_start_time",
+                    help="Deixe 00:00:00 para iniciar a partir do começo do vídeo."
+                )
+            with col_cut2:
+                local_end_time = st.text_input(
+                    "⏱️ Fim do Corte (Opcional):",
+                    value="",
+                    placeholder="00:00:00 (vazio = até o fim)",
+                    key="local_cut_end_time",
+                    help="Deixe em branco ou 00:00:00 para ir até o final do vídeo."
+                )
+            with col_cut_status:
+                _start_s = parse_time_to_seconds(local_start_time)
+                _end_s = parse_time_to_seconds(local_end_time) if local_end_time.strip() else 0.0
+                if _start_s > 0 or _end_s > 0:
+                    _end_display = local_end_time if local_end_time.strip() and _end_s > 0 else "final do vídeo"
+                    st.info(f"✂️ **Corte configurado**: `{local_start_time}` até `{_end_display}`.\n*(Apenas este trecho será importado para a pasta padrão)*")
+                else:
+                    st.caption("📁 **Cópia Padrão**: O vídeo será copiado integralmente para a pasta padrão sem necessidade de recodificação.")
+
             col_loc_b1, col_loc_b2 = st.columns([1.5, 1])
             with col_loc_b1:
                 btn_process_local = st.button("🚀 Processar Arquivo Local (Completo)", type="primary", key="btn_process_local", use_container_width=True)
             with col_loc_b2:
                 btn_audio_local = st.button("🎵 Extrair Apenas Áudio (MP3)", key="btn_extract_audio_local", use_container_width=True)
-    
+
             if btn_audio_local:
                 orig_filename = uploaded_file.name
-                video_id = generate_local_video_id(orig_filename)
+                video_id = generate_local_video_id(orig_filename, local_start_time, local_end_time)
                 data_dir = os.path.join("data", video_id)
                 os.makedirs(data_dir, exist_ok=True)
                 v_full_path = os.path.join(data_dir, "video_full.mp4")
                 audio_path = os.path.join(data_dir, "audio.mp3")
                 v_title = custom_local_title.strip() if custom_local_title.strip() else os.path.splitext(orig_filename)[0]
-    
-                with st.spinner("🎵 Extraindo faixa de áudio de alta qualidade e identificando a música exata..."):
-                    file_bytes = uploaded_file.getbuffer()
-                    with open(v_full_path, "wb") as f_out:
-                        f_out.write(file_bytes)
+
+                _start_s = parse_time_to_seconds(local_start_time)
+                _end_s = parse_time_to_seconds(local_end_time) if local_end_time.strip() else 0.0
+
+                with st.spinner("🎵 Processando arquivo de vídeo e extraindo áudio..."):
+                    if _start_s > 0 or _end_s > 0:
+                        temp_upload_path = os.path.join(data_dir, f"temp_raw_{orig_filename}")
+                        with open(temp_upload_path, "wb") as f_out:
+                            uploaded_file.seek(0)
+                            shutil.copyfileobj(uploaded_file, f_out)
+                        slice_res = slice_or_copy_local_video(temp_upload_path, v_full_path, local_start_time, local_end_time)
+                        if os.path.exists(temp_upload_path):
+                            try:
+                                os.remove(temp_upload_path)
+                            except Exception:
+                                pass
+                        if slice_res.get("error"):
+                            st.error(f"Erro ao recortar vídeo: {slice_res['error']}")
+                            st.stop()
+                    else:
+                        with open(v_full_path, "wb") as f_out:
+                            uploaded_file.seek(0)
+                            shutil.copyfileobj(uploaded_file, f_out)
+
                     v_dur = get_video_duration(v_full_path)
                     extract_audio_from_local_video(v_full_path, audio_path)
-    
+
                     add_or_update_video_in_library(
                         video_id=video_id,
                         title=v_title,
@@ -3717,7 +3764,7 @@ if show_sec1:
                         channel="Vídeo Local (Upload)",
                         is_live=False
                     )
-    
+
                     from core.music_recognizer import identify_song_from_audio_and_meta
                     rec_res = identify_song_from_audio_and_meta(
                         audio_path=audio_path,
@@ -3728,7 +3775,7 @@ if show_sec1:
                     v_clean_music = rec_res["music_title"]
                     v_sugg_cat = rec_res["category_label"]
                     v_rec_source = rec_res.get("source", "Identificação Automática")
-    
+
                 if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
                     st.session_state["extracted_music_card"] = {
                         "path": audio_path,
@@ -3740,32 +3787,53 @@ if show_sec1:
                     }
                 else:
                     st.error("Não foi possível extrair o áudio do arquivo selecionado.")
-    
+
             if btn_process_local:
                 orig_filename = uploaded_file.name
-                video_id = generate_local_video_id(orig_filename)
+                video_id = generate_local_video_id(orig_filename, local_start_time, local_end_time)
                 local_url = f"local://{video_id}"
                 st.session_state.video_url = local_url
                 st.session_state.input_yt_url = local_url
-    
+
                 data_dir = os.path.join("data", video_id)
                 os.makedirs(data_dir, exist_ok=True)
                 v_full_path = os.path.join(data_dir, "video_full.mp4")
                 audio_path = os.path.join(data_dir, "audio.mp3")
                 thumb_path = os.path.join(data_dir, "thumbnail.jpg")
                 transcript_file = os.path.join(data_dir, "transcript.json")
-    
-                # 1. Salva o arquivo de vídeo na pasta do projeto
-                with st.spinner("Salvando e organizando arquivo de vídeo local..."):
-                    file_bytes = uploaded_file.getbuffer()
-                    with open(v_full_path, "wb") as f_out:
-                        f_out.write(file_bytes)
-    
+
+                _start_s = parse_time_to_seconds(local_start_time)
+                _end_s = parse_time_to_seconds(local_end_time) if local_end_time.strip() else 0.0
+
+                # 1. Salva diretamente ou apara o arquivo de vídeo para a pasta padrão
+                if _start_s > 0 or _end_s > 0:
+                    with st.spinner("✂️ Salvando e recortando trecho do vídeo local com FFmpeg..."):
+                        temp_upload_path = os.path.join(data_dir, f"temp_raw_{orig_filename}")
+                        with open(temp_upload_path, "wb") as f_out:
+                            uploaded_file.seek(0)
+                            shutil.copyfileobj(uploaded_file, f_out)
+                        slice_res = slice_or_copy_local_video(temp_upload_path, v_full_path, local_start_time, local_end_time)
+                        if os.path.exists(temp_upload_path):
+                            try:
+                                os.remove(temp_upload_path)
+                            except Exception:
+                                pass
+                        if slice_res.get("error"):
+                            st.error(f"Erro ao realizar corte no vídeo local: {slice_res['error']}")
+                            st.stop()
+                        st.toast(f"✂️ Trecho fatiado com sucesso ({slice_res.get('duration', 0.0):.1f}s)!", icon="✂️")
+                else:
+                    with st.spinner("📁 Copiando arquivo de vídeo local para a pasta padrão..."):
+                        with open(v_full_path, "wb") as f_out:
+                            uploaded_file.seek(0)
+                            shutil.copyfileobj(uploaded_file, f_out)
+                        st.toast("📁 Vídeo copiado para a pasta padrão!", icon="📁")
+
                 # 2. Metadados e Thumbnail
                 v_title = custom_local_title.strip() if custom_local_title.strip() else os.path.splitext(orig_filename)[0]
                 v_dur = get_video_duration(v_full_path)
                 extract_thumbnail_from_video(v_full_path, thumb_path, timestamp_sec=min(2.0, max(0.0, v_dur * 0.1)))
-    
+
                 add_or_update_video_in_library(
                     video_id=video_id,
                     title=v_title,

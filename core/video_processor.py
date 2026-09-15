@@ -12,6 +12,8 @@ import re
 import hashlib
 import cv2
 import numpy as np
+import shutil
+from core.quick_editor import get_video_duration
 
 # Garante que o Deno e o FFmpeg estejam no PATH do processo
 DENO_DIR = os.path.expanduser(r"~/.deno/bin")
@@ -22,7 +24,6 @@ FFMPEG_DIR = os.path.dirname(FFMPEG_EXE)
 ffmpeg_alias = os.path.join(FFMPEG_DIR, "ffmpeg.exe")
 if not os.path.exists(ffmpeg_alias) and os.path.exists(FFMPEG_EXE):
     try:
-        import shutil
         shutil.copy2(FFMPEG_EXE, ffmpeg_alias)
     except Exception:
         pass
@@ -33,10 +34,28 @@ if paths_to_add:
     os.environ["PATH"] = os.pathsep.join(paths_to_add) + os.pathsep + current_path
 
 
-def generate_local_video_id(filename_or_path: str) -> str:
+def parse_time_to_seconds(time_str: str) -> float:
+    """Converte formato HH:MM:SS, HH:MM:SS.ms ou MM:SS para segundos (float)."""
+    if not time_str:
+        return 0.0
+    clean = str(time_str).strip().replace(',', '.')
+    parts = clean.split(':')
+    if len(parts) == 3:
+        return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+    elif len(parts) == 2:
+        return int(parts[0]) * 60 + float(parts[1])
+    try:
+        return float(clean)
+    except Exception:
+        return 0.0
+
+
+def generate_local_video_id(filename_or_path: str, start_time_str: str = None, end_time_str: str = None) -> str:
     """
     Gera um identificador único e seguro para vídeos locais do computador.
     Exemplo: 'Entrevista Podcast.mp4' -> 'local_entrevista_podcast_a1b2c3d4'
+    Se start_time_str ou end_time_str forem fornecidos e representarem um corte,
+    o hash e o identificador incluirão a faixa de corte para manter diretórios e caches isolados.
     """
     base_name = os.path.splitext(os.path.basename(filename_or_path))[0]
     # Sanitiza o nome para caracteres alfanuméricos e underscores
@@ -46,9 +65,20 @@ def generate_local_video_id(filename_or_path: str) -> str:
     if len(slug) > 35:
         slug = slug[:35]
 
-    # Gera hash curto de 8 caracteres baseado no nome
-    hash_str = hashlib.md5(filename_or_path.encode('utf-8')).hexdigest()[:8]
-    return f"local_{slug}_{hash_str}"
+    start_s = parse_time_to_seconds(start_time_str) if start_time_str else 0.0
+    end_s = parse_time_to_seconds(end_time_str) if end_time_str and str(end_time_str).strip() else 0.0
+
+    raw_key = filename_or_path
+    cut_slug = ""
+    if start_s > 0 or end_s > 0:
+        raw_key = f"{filename_or_path}_cut_{start_s:.2f}_{end_s:.2f}"
+        cut_slug = f"_cut_{int(start_s)}s"
+        if end_s > 0:
+            cut_slug += f"_{int(end_s)}s"
+
+    # Gera hash curto de 8 caracteres baseado no nome e corte
+    hash_str = hashlib.md5(raw_key.encode('utf-8')).hexdigest()[:8]
+    return f"local_{slug}{cut_slug}_{hash_str}"
 
 
 def generate_local_dual_video_id(filename1: str, filename2: str) -> str:
@@ -63,6 +93,127 @@ def generate_local_dual_video_id(filename1: str, filename2: str) -> str:
     combo_str = f"{filename1}__AND__{filename2}"
     hash_str = hashlib.md5(combo_str.encode('utf-8')).hexdigest()[:8]
     return f"local_dual_{slug1}_e_{slug2}_{hash_str}"
+
+
+def slice_or_copy_local_video(
+    source_path: str,
+    destination_path: str,
+    start_time_str: str = None,
+    end_time_str: str = None
+) -> dict:
+    """
+    Copia ou apara um arquivo de vídeo local para a pasta padrão (video_full.mp4).
+    - Se start_time_str e end_time_str não forem definidos (ou forem 00:00:00/vazios),
+      apenas copia o arquivo diretamente sem recodificação para máxima velocidade e fidelidade.
+    - Se houver corte definido, realiza o recorte ultra-rápido via stream copy do FFmpeg (-c copy),
+      com fallback seguro para recodificação H.264 caso o stream copy apresente falhas.
+    """
+    if not source_path or not os.path.exists(source_path):
+        return {"path": None, "error": "Arquivo de vídeo de origem não encontrado.", "is_trimmed": False}
+
+    try:
+        out_dir = os.path.dirname(os.path.abspath(destination_path))
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
+        start_s = parse_time_to_seconds(start_time_str) if start_time_str else 0.0
+        end_s = parse_time_to_seconds(end_time_str) if end_time_str and str(end_time_str).strip() else 0.0
+
+        # Caso 1: Sem corte definido (cópia integral direta)
+        if start_s <= 0.0 and end_s <= 0.0:
+            if os.path.abspath(source_path) != os.path.abspath(destination_path):
+                shutil.copy2(source_path, destination_path)
+            dur = get_video_duration(destination_path)
+            return {
+                "path": destination_path,
+                "error": None,
+                "is_trimmed": False,
+                "duration": dur,
+                "start_s": 0.0,
+                "end_s": dur
+            }
+
+        # Caso 2: Corte definido (início e/ou fim)
+        total_dur = get_video_duration(source_path)
+        start_s = max(0.0, float(start_s))
+        if end_s <= 0.0 or (total_dur > 0 and end_s > total_dur):
+            end_s = total_dur if total_dur > 0 else start_s + 10.0
+
+        if end_s > 0 and start_s >= end_s:
+            return {"path": None, "error": "O tempo inicial deve ser menor que o tempo final do corte.", "is_trimmed": True}
+
+        duration = end_s - start_s
+        if duration < 0.3:
+            return {"path": None, "error": "A duração mínima do corte deve ser de pelo menos 0.3 segundos.", "is_trimmed": True}
+
+        is_same = os.path.abspath(source_path) == os.path.abspath(destination_path)
+        tmp_dst = destination_path if not is_same else destination_path + ".tmp_cut.mp4"
+        if os.path.exists(tmp_dst):
+            try:
+                os.remove(tmp_dst)
+            except Exception:
+                pass
+
+        # 1. Tentativa rápida: Stream Copy (-c copy)
+        cmd_copy = [
+            FFMPEG_EXE, "-y",
+            "-ss", f"{start_s:.3f}",
+            "-t", f"{duration:.3f}",
+            "-i", source_path,
+            "-c", "copy",
+            "-avoid_negative_ts", "make_zero",
+            tmp_dst
+        ]
+        res_copy = subprocess.run(cmd_copy, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        dur_result = get_video_duration(tmp_dst) if (res_copy.returncode == 0 and os.path.exists(tmp_dst) and os.path.getsize(tmp_dst) > 1000) else 0.0
+
+        # Se stream copy funcionou com duração válida e alinhada aos keyframes
+        if dur_result > 0.1 and abs(dur_result - duration) <= 0.6:
+            if is_same:
+                os.replace(tmp_dst, destination_path)
+            return {
+                "path": destination_path,
+                "error": None,
+                "is_trimmed": True,
+                "duration": dur_result,
+                "start_s": start_s,
+                "end_s": end_s
+            }
+
+        # 2. Fallback: Recodificação rápida (H.264 / AAC)
+        cmd_reencode = [
+            FFMPEG_EXE, "-y",
+            "-ss", f"{start_s:.3f}",
+            "-t", f"{duration:.3f}",
+            "-i", source_path,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "20",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            tmp_dst
+        ]
+        res_reencode = subprocess.run(cmd_reencode, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        if res_reencode.returncode == 0 and os.path.exists(tmp_dst) and os.path.getsize(tmp_dst) > 0:
+            if is_same:
+                os.replace(tmp_dst, destination_path)
+            final_dur = get_video_duration(destination_path)
+            return {
+                "path": destination_path,
+                "error": None,
+                "is_trimmed": True,
+                "duration": final_dur,
+                "start_s": start_s,
+                "end_s": end_s
+            }
+        else:
+            err_msg = res_reencode.stderr.decode('utf-8', errors='replace')[-300:] if res_reencode.stderr else 'Erro desconhecido'
+            return {"path": None, "error": f"Falha ao realizar corte no vídeo local: {err_msg}", "is_trimmed": True}
+
+    except Exception as exc:
+        return {"path": None, "error": str(exc), "is_trimmed": True}
 
 
 def extract_audio_from_local_video(video_path: str, output_path: str = "temp_audio.mp3") -> dict:
@@ -380,22 +531,6 @@ def get_video_resolution(video_path: str) -> str:
             return f"{w}x{h}"
     except Exception:
         return "1080x1920"
-
-
-def parse_time_to_seconds(time_str: str) -> float:
-    """Converte formato HH:MM:SS, HH:MM:SS.ms ou MM:SS para segundos (float)."""
-    if not time_str:
-        return 0.0
-    clean = str(time_str).strip().replace(',', '.')
-    parts = clean.split(':')
-    if len(parts) == 3:
-        return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
-    elif len(parts) == 2:
-        return int(parts[0]) * 60 + float(parts[1])
-    try:
-        return float(clean)
-    except Exception:
-        return 0.0
 
 
 def cut_video(
