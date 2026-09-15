@@ -3564,42 +3564,12 @@ if show_sec1:
                                     if len(langs) > 1:
                                         st.caption(f"🌐 **Idiomas detectados no YouTube ({len(langs)} faixas):** {', '.join([l['name'] for l in langs])}")
     
-                        # 2. Garante o download do áudio se ainda não existir
-                        if not os.path.exists(audio_path):
-                            _sp_msg = "🔴 Capturando Live Snapshot de áudio da transmissão ao vivo..." if is_live_flag else f"Baixando áudio do vídeo ({platform_label})..."
-                            with st.spinner(_sp_msg):
-                                audio_res = download_audio(
-                                    video_url,
-                                    output_path=audio_path,
-                                    is_live=is_live_flag,
-                                    start_sec=active_slice_start,
-                                    end_sec=active_slice_end
-                                )
-                        else:
-                            audio_res = {"path": audio_path, "error": None}
-
-                        if audio_res.get("error"):
-                            st.error(f"Erro no download do áudio: {audio_res['error']}")
-                        else:
-                            if os.path.exists(audio_path):
-                                v_dur = get_video_duration(audio_path)
-                                add_or_update_video_in_library(
-                                    video_id=video_id,
-                                    title=v_title,
-                                    upload_date_raw=v_date,
-                                    url=video_url,
-                                    thumbnail_url=v_thumb,
-                                    duration_sec=v_dur,
-                                    channel=meta.get("channel"),
-                                    is_live=is_live_flag
-                                )
-
-                        # 3. Download automático do vídeo completo/trecho (essencial para o player e recortes)
+                        # 2. Download direto do vídeo completo/trecho (Regra Mestra: Ingestão Leve)
                         _vfull_path = os.path.join(data_dir, "video_full.mp4")
                         if not is_live_flag and not os.path.exists(_vfull_path):
                             import time
                             _t_vpost_start = time.time()
-                            with st.spinner("⏬ Baixando vídeo em 1080p Full HD para player e recortes..."):
+                            with st.spinner("⏬ Baixando vídeo Full HD na pasta local..."):
                                 _vres = download_full_video(
                                     video_url,
                                     _vfull_path,
@@ -3614,6 +3584,19 @@ if show_sec1:
                                 _sz_mb = os.path.getsize(_vfull_path) / (1024 * 1024)
                                 _res = get_video_resolution(_vfull_path)
                                 st.success(f"🎥 Vídeo baixado em ⏱️ **{format_elapsed_time(_t_vpost_elapsed)}** ({_sz_mb:.1f} MB, {_res})!")
+
+                        # 3. Registro na Biblioteca com duração do vídeo
+                        v_dur = get_video_duration(_vfull_path) if os.path.exists(_vfull_path) else (meta.get("duration") or 0)
+                        add_or_update_video_in_library(
+                            video_id=video_id,
+                            title=v_title,
+                            upload_date_raw=v_date,
+                            url=video_url,
+                            thumbnail_url=v_thumb,
+                            duration_sec=v_dur,
+                            channel=meta.get("channel"),
+                            is_live=is_live_flag
+                        )
 
                         # 4. Trata transcrição: se veio oficial do YouTube salva imediatamente, senão mantém sob demanda
                         if transcribe_res.get("transcript_segments"):
@@ -3880,41 +3863,20 @@ if show_sec1:
                     channel="Vídeo Local (Upload)",
                     is_live=False
                 )
-    
-                # 3. Extração de Áudio e Transcrição
+
+                # 3. Transcrição Sob Demanda (Regra Mestra de Ingestão Leve)
                 if os.path.exists(transcript_file):
                     st.success("✅ Cache de transcrição encontrado para este arquivo! Carregando...")
                     load_video_saved_artifacts(video_id)
                 else:
-                    with st.spinner("Extraindo áudio do vídeo local com FFmpeg..."):
-                        audio_res = extract_audio_from_local_video(v_full_path, audio_path)
-    
-                    if audio_res.get("error"):
-                        st.error(f"Erro ao extrair áudio: {audio_res['error']}")
-                    else:
-                        with st.spinner(f"Transcrevendo áudio com Whisper ({model_size}) na {device_option.upper()}..."):
-                            transcribe_res = transcribe_audio(
-                                audio_path,
-                                model_size=model_size,
-                                device=device_option
-                            )
-    
-                        if transcribe_res.get("error"):
-                            st.error(f"Erro na transcrição: {transcribe_res['error']}")
-                        else:
-                            st.success("🎉 Transcrição do vídeo local concluída com sucesso!")
-                            st.session_state.transcription_done = True
-                            st.session_state.full_text = transcribe_res["full_text"]
-                            st.session_state.segments = transcribe_res["transcript_segments"]
-                            st.session_state.transcript_source = "Whisper Local (Arquivo do Computador)"
-    
-                            with open(transcript_file, "w", encoding="utf-8") as f:
-                                json.dump({
-                                    "full_text": st.session_state.full_text,
-                                    "segments": st.session_state.segments,
-                                    "source": st.session_state.transcript_source
-                                }, f, ensure_ascii=False, indent=4)
-    
+                    st.session_state.transcription_done = False
+                    st.session_state.full_text = ""
+                    st.session_state.segments = []
+                    st.session_state.video_ready = True
+                    st.session_state.active_video_id = video_id
+                    st.success("🎉 **Vídeo local pronto para reprodução e recortes imediatos!**")
+                    st.info("💡 **Ingestão Leve Ativa:** O áudio e a transcrição Whisper completa foram poupados. O vídeo já está liberado no player e na Seção 3 para recortes imediatos. Caso deseje minerar pautas com IA, a transcrição completa poderá ser gerada sob demanda na Seção 2.")
+
         else:
             # Modo Composição Dupla (2 Vídeos Selecionados)
             file_a = uploaded_files[0]
@@ -4614,6 +4576,7 @@ if _has_media_ready:
         _v_id_s2 = get_current_active_video_id(video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or "") or st.session_state.get("active_video_id") or ""
         _tr_file_s2 = os.path.join("data", _v_id_s2, "transcript.json") if _v_id_s2 else ""
         _aud_file_s2 = os.path.join("data", _v_id_s2, "audio.mp3") if _v_id_s2 else ""
+        _vfull_file_s2 = os.path.join("data", _v_id_s2, "video_full.mp4") if _v_id_s2 else ""
 
         if not st.session_state.get("segments"):
             if _tr_file_s2 and os.path.exists(_tr_file_s2):
@@ -4630,42 +4593,50 @@ if _has_media_ready:
             st.markdown(
                 f'<div style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.18), rgba(139, 92, 246, 0.12)); border: 1.5px solid rgba(139, 92, 246, 0.4); border-radius: 12px; padding: 24px; text-align: center; margin: 16px 0;">'
                 f'<div style="font-size: 2.2rem; margin-bottom: 8px;">🧠</div>'
-                f'<h3 style="margin: 0 0 8px 0; color: #f8fafc;">Transcrição Completa Necessária para Mineração IA</h3>'
-                f'<p style="color: #cbd5e1; max-width: 560px; margin: 0 auto 16px auto; font-size: 14px;">'
-                f'O Llama 3 precisa analisar o texto de todo o vídeo para ranquear os melhores momentos e assuntos. '
-                f'Gere a transcrição agora com o Whisper ou vá direto para a Seção 3 caso queira apenas cortar trechos manuais sem esperar.'
+                f'<h3 style="margin: 0 0 8px 0; color: #f8fafc;">Transcrição Completa Necessária para Mineração de IA</h3>'
+                f'<p style="color: #cbd5e1; max-width: 620px; margin: 0 auto 16px auto; font-size: 14px;">'
+                f'Para que a Inteligência Artificial (Llama 3) possa analisar o assunto, detectar ganchos e sugerir pautas automaticamente, '
+                f'é necessário gerar a transcrição completa do vídeo.<br>'
+                f'<strong>O restante desta aba permanecerá desabilitado</strong> até a conclusão deste processamento sob demanda.'
                 f'</p>'
                 f'</div>',
                 unsafe_allow_html=True
             )
-            col_tr_act, col_skip_act = st.columns([1.8, 1.8])
+            col_tr_act, col_skip_act = st.columns([2.2, 1.8])
             with col_tr_act:
-                if _aud_file_s2 and os.path.exists(_aud_file_s2):
-                    if st.button("🎙️ Transcrever Vídeo Completo com Whisper Agora", type="primary", key="btn_transcribe_s2_ondemand", use_container_width=True):
-                        with st.spinner(f"Transcrevendo áudio com Whisper ({model_size}) na {device_option.upper()}..."):
-                            _tr_res = transcribe_audio(_aud_file_s2, model_size=model_size, device=device_option, language="pt")
-                        if _tr_res.get("error"):
-                            st.error(f"Erro na transcrição: {_tr_res['error']}")
+                if st.button("🎙️ Gerar Transcrição Completa Agora (Whisper GPU)", type="primary", key="btn_transcribe_s2_ondemand", use_container_width=True):
+                    if not _vfull_file_s2 or not os.path.exists(_vfull_file_s2):
+                        st.error("Arquivo de vídeo (video_full.mp4) não encontrado. Por favor, volte à Seção 1.")
+                    else:
+                        # Extrai o áudio do video_full caso ainda não exista
+                        if not os.path.exists(_aud_file_s2):
+                            with st.spinner("🎵 Extraindo faixa de áudio do vídeo para transcrição..."):
+                                extract_audio_from_local_video(_vfull_file_s2, _aud_file_s2)
+
+                        if not os.path.exists(_aud_file_s2):
+                            st.error("Não foi possível extrair a faixa de áudio do vídeo.")
                         else:
-                            st.session_state.transcription_done = True
-                            st.session_state.full_text = _tr_res["full_text"]
-                            st.session_state.segments = _tr_res["transcript_segments"]
-                            with open(_tr_file_s2, "w", encoding="utf-8") as _f_s2_w:
-                                json.dump({
-                                    "full_text": st.session_state.full_text,
-                                    "segments": st.session_state.segments,
-                                    "source": "Whisper Local (Mineração IA)"
-                                }, _f_s2_w, ensure_ascii=False, indent=4)
-                            st.success("✅ Transcrição concluída! Liberando mineração...")
-                            st.rerun()
-                else:
-                    st.warning("⚠️ Áudio não encontrado. Processe o vídeo na Seção 1 primeiro.")
+                            with st.spinner(f"🎙️ Transcrevendo áudio com Whisper ({model_size}) na {device_option.upper()}..."):
+                                _tr_res = transcribe_audio(_aud_file_s2, model_size=model_size, device=device_option, language="pt")
+                            if _tr_res.get("error"):
+                                st.error(f"Erro na transcrição: {_tr_res['error']}")
+                            else:
+                                st.session_state.transcription_done = True
+                                st.session_state.full_text = _tr_res["full_text"]
+                                st.session_state.segments = _tr_res["transcript_segments"]
+                                with open(_tr_file_s2, "w", encoding="utf-8") as _f_s2_w:
+                                    json.dump({
+                                        "full_text": st.session_state.full_text,
+                                        "segments": st.session_state.segments,
+                                        "source": "Whisper Local (Mineração IA)"
+                                    }, _f_s2_w, ensure_ascii=False, indent=4)
+                                st.success("🎉 Transcrição concluída com sucesso! Desbloqueando Mineração de IA...")
+                                st.rerun()
             with col_skip_act:
-                if st.button("✂️ Pular para Fábrica de Enquadramento 9:16 ➔", use_container_width=True, key="btn_skip_s2_to_s3"):
+                if st.button("✂️ Pular para Fábrica de Enquadramento 9:16 (Cortes Manuais) ➔", use_container_width=True, key="btn_skip_s2_to_s3"):
                     navigate_to_step('3')
                     st.rerun()
         else:
-            # Construir lista de chunks estruturada (com start/end em segundos)
             def build_chunks_list(segments, chunk_seconds=60):
                 """Retorna lista de dicts com start, end, text para cada chunk de 1 minuto."""
                 if not segments:
@@ -4699,763 +4670,763 @@ if _has_media_ready:
                 for c in chunks_list
             )
     
-        # --- Seção 2: Seleção de Cortes e Compositor ---
-        st.header("2. Seleção e Composição de Cortes")
+            # --- Seção 2: Seleção de Cortes e Compositor ---
+            st.header("2. Seleção e Composição de Cortes")
         
-        tab_composer, tab_series, tab_shorts, tab_manual = st.tabs([
-            "🧩 Compositor de Pautas (Micro-Assuntos)",
-            "💡 Séries Sugeridas",
-            "🔥 Ganchos Virais (Shorts)",
-            "🖱️ Seleção Manual (Chunks)"
-        ])
+            tab_composer, tab_series, tab_shorts, tab_manual = st.tabs([
+                "🧩 Compositor de Pautas (Micro-Assuntos)",
+                "💡 Séries Sugeridas",
+                "🔥 Ganchos Virais (Shorts)",
+                "🖱️ Seleção Manual (Chunks)"
+            ])
         
-        # ── TAB 1: COMPOSITOR DE PAUTAS ───────────────────────────────────────────
-        with tab_composer:
-            st.markdown(
-                "Selecione o tipo de conteúdo para o mapeamento inteligente de cortes e pautas:"
-            )
-            
-            col_strat, col_act = st.columns([3, 1])
-            with col_strat:
-                _strat_options = [
-                    "🎙️ Entrevistas, Sabatinas & Podcasts (Perguntas e Respostas Exatas)",
-                    "🧠 Temático / Monólogos, Aulas & Palestras (Transições de Assunto)"
-                ]
-                _strat_idx = 0 if "Entrevistas" in _cfg.get("analysis_strategy", "") else 1
-                strategy_choice = st.radio(
-                    "🎯 Estratégia de Identificação de Pautas:",
-                    _strat_options,
-                    index=_strat_idx,
-                    horizontal=False,
-                    key="analysis_strategy_radio"
+            # ── TAB 1: COMPOSITOR DE PAUTAS ───────────────────────────────────────────
+            with tab_composer:
+                st.markdown(
+                    "Selecione o tipo de conteúdo para o mapeamento inteligente de cortes e pautas:"
                 )
-                strat_code = "qa_interview" if "Entrevistas" in strategy_choice else "semantic_topics"
-    
-            with col_act:
-                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-                if st.button("🔍 Mapear Pautas (IA)", key="btn_map_pautas", type="primary", use_container_width=True):
-                    with st.spinner("Mapeando perguntas e limites de pauta com IA..."):
-                        res = analyze_transcript(
-                            chunked_transcript, "pautas",
-                            model=ollama_model,
-                            chunks_list=chunks_list,
-                            segments=st.session_state.segments,
-                            strategy=strat_code
-                        )
-                        if res.get("error"):
-                            st.error(f"Erro na análise: {res['error']}")
-                        else:
-                            st.session_state.pautas = res.get("pautas", [])
-                            st.session_state.bundles = res.get("bundles", [])
-                            st.session_state.ai_raw = res.get("raw", "")
-                            
-                            active_u = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-                            v_id = get_video_id(active_u)
-                            if v_id:
-                                p_file = os.path.join("data", v_id, "pautas.json")
-                                with open(p_file, "w", encoding="utf-8") as f:
-                                    json.dump({"pautas": st.session_state.pautas, "raw": st.session_state.ai_raw}, f, ensure_ascii=False, indent=4)
-                            st.rerun()
-    
-            if 'pautas' in st.session_state and st.session_state.pautas:
-                pautas = st.session_state.pautas
-                
-                # Carrega passos salvos do disco se existirem
-                active_u = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-                v_id = get_video_id(active_u)
-                steps_file = os.path.join("data", v_id, "saved_steps.json") if v_id else "data/saved_steps.json"
-                if 'saved_steps' not in st.session_state or not st.session_state.saved_steps:
-                    if os.path.exists(steps_file):
-                        try:
-                            with open(steps_file, "r", encoding="utf-8") as f:
-                                st.session_state.saved_steps = json.load(f)
-                        except Exception:
-                            st.session_state.saved_steps = []
-                    else:
-                        st.session_state.saved_steps = []
-    
-                def _save_steps_to_disk():
-                    os.makedirs(os.path.dirname(steps_file), exist_ok=True)
-                    with open(steps_file, "w", encoding="utf-8") as f:
-                        json.dump(st.session_state.saved_steps, f, indent=2, ensure_ascii=False)
-    
-                col_head1, col_head2 = st.columns([2.0, 3.0])
-                with col_head1:
-                    st.markdown(f"### 📋 Pautas Detectadas ({len(pautas)} encontradas):")
-                with col_head2:
-                    col_btn_check, col_btn_uncheck, col_btn_invert = st.columns(3)
-                    with col_btn_check:
-                        if st.button("☑️ Marcar Tudo", key="btn_check_all_pautas", use_container_width=True, help="Marca todas as pautas detectadas"):
-                            for p in pautas:
-                                st.session_state[f"chk_pauta_{p['id']}"] = True
-                            st.rerun()
-                    with col_btn_uncheck:
-                        if st.button("⬜ Desmarcar Tudo", key="btn_uncheck_all", use_container_width=True, help="Limpa todas as seleções para iniciar um novo corte"):
-                            for p in pautas:
-                                st.session_state[f"chk_pauta_{p['id']}"] = False
-                            st.rerun()
-                    with col_btn_invert:
-                        if st.button("🔄 Inverter Seleção", key="btn_invert_pautas", use_container_width=True, help="Inverte a seleção de cada pauta"):
-                            for p in pautas:
-                                chk_k = f"chk_pauta_{p['id']}"
-                                st.session_state[chk_k] = not st.session_state.get(chk_k, False)
-                            st.rerun()
-    
-                # Monta lista de pautas em cards selecionáveis
-                st.markdown("")
-                selected_pauta_objs = []
-    
-                for p in pautas:
-                    chk_key = f"chk_pauta_{p['id']}"
-                    if chk_key not in st.session_state:
-                        st.session_state[chk_key] = False
-    
-                    col_chk, col_p_info, col_dur = st.columns([0.5, 4.5, 1.2])
-                    with col_chk:
-                        is_checked = st.checkbox(f"Pauta {p['id']}", key=chk_key, label_visibility="collapsed")
-                        if is_checked:
-                            selected_pauta_objs.append(p)
-                    with col_p_info:
-                        st.markdown(f"**Pauta #{p['id']}**: `[{p['start']} → {p['end']}]` **{p['title']}**")
-                        if p.get('text_snippet'):
-                            st.caption(f"💬 *\"{p['text_snippet']}...\"*")
-                    with col_dur:
-                        st.markdown(f"⏱️ **{p['duration_label']}**")
-                    st.divider()
-    
-                # ── BARRA INFORMATIVA DA SELEÇÃO (COMPOSITOR) ─────────────────────────
-                if selected_pauta_objs:
-                    # Ordena por timestamp de início
-                    selected_pauta_objs = sorted(selected_pauta_objs, key=lambda x: x["start_s"])
-                    comb_start = selected_pauta_objs[0]["start"]
-                    comb_end = selected_pauta_objs[-1]["end"]
-                    comb_dur_s = sum(x["duration_s"] for x in selected_pauta_objs)
-                    comb_dur_fmt = format_time(comb_dur_s)
-                    
-                    # Título composto inteligente
-                    if len(selected_pauta_objs) == 1:
-                        comb_title = selected_pauta_objs[0]["title"]
-                    else:
-                        comb_title = f"{selected_pauta_objs[0]['title']} (+ {len(selected_pauta_objs)-1} pautas)"
-    
-                    st.info(
-                        f"🎯 **Corte Composto**: `[{comb_start} → {comb_end}]` | "
-                        f"⏱️ Duração Total: **{comb_dur_fmt}** | "
-                        f"Pautas Inclusas: **{len(selected_pauta_objs)}** ({', '.join(f'#{x['id']}' for x in selected_pauta_objs)})"
+            
+                col_strat, col_act = st.columns([3, 1])
+                with col_strat:
+                    _strat_options = [
+                        "🎙️ Entrevistas, Sabatinas & Podcasts (Perguntas e Respostas Exatas)",
+                        "🧠 Temático / Monólogos, Aulas & Palestras (Transições de Assunto)"
+                    ]
+                    _strat_idx = 0 if "Entrevistas" in _cfg.get("analysis_strategy", "") else 1
+                    strategy_choice = st.radio(
+                        "🎯 Estratégia de Identificação de Pautas:",
+                        _strat_options,
+                        index=_strat_idx,
+                        horizontal=False,
+                        key="analysis_strategy_radio"
                     )
+                    strat_code = "qa_interview" if "Entrevistas" in strategy_choice else "semantic_topics"
     
-                    col_ap1, col_ap2 = st.columns([2, 1])
-                    with col_ap1:
-                        if st.button("✂️ Carregar Seleção para Exportação (Seção 3)", key="btn_apply_composed", type="primary", use_container_width=True):
-                            st.session_state.final_start_time = normalize_time_mask(comb_start)
-                            st.session_state.final_end_time = normalize_time_mask(comb_end)
-                            st.session_state.final_corte_title = comb_title
-                            st.session_state.cut_ready_banner = f"✅ Composição pronta para corte: [{comb_start} → {comb_end}] ({comb_dur_fmt})"
-                            navigate_to_step("3")
-                            st.rerun()
-    
-                    with col_ap2:
-                        step_num = len(st.session_state.saved_steps) + 1
-                        if st.button("💾 Guardar como Passo", key="btn_save_step", use_container_width=True, help="Salva esta composição no histórico de passos para poder montar múltiplos cortes sem perder o progresso"):
-                            new_step = {
-                                "step_id": step_num,
-                                "start": comb_start,
-                                "end": comb_end,
-                                "start_s": selected_pauta_objs[0]["start_s"],
-                                "end_s": selected_pauta_objs[-1]["end_s"],
-                                "duration_s": comb_dur_s,
-                                "duration_label": comb_dur_fmt,
-                                "title": comb_title,
-                                "pauta_ids": [x["id"] for x in selected_pauta_objs],
-                                "pautas_titles": [f"Pauta #{x['id']}: {x['title']} ({x['duration_label']})" for x in selected_pauta_objs]
-                            }
-                            st.session_state.saved_steps.append(new_step)
-                            _save_steps_to_disk()
-                            st.success(f"🎉 Passo #{step_num} guardado com sucesso!")
-                            st.rerun()
-    
-                else:
-                    if 'cut_ready_banner' in st.session_state:
-                        st.session_state.cut_ready_banner = ""
-    
-                # ── PAINEL DE PASSOS GUARDADOS ────────────────────────────────────────
-                st.markdown("---")
-                st.markdown("### 🗂️ Histórico de Passos / Cortes Salvos:")
-                if 'saved_steps' in st.session_state and st.session_state.saved_steps:
-                    st.caption(f"Você possui **{len(st.session_state.saved_steps)} passos/cortes** guardados.")
-                    
-                    for idx, step in enumerate(st.session_state.saved_steps):
-                        with st.container():
-                            col_s_info, col_s_redo, col_s_del = st.columns([4, 1.2, 1])
-                            with col_s_info:
-                                st.markdown(f"**Passo #{idx+1}**: `[{step['start']} → {step['end']}]` **{step['title']}**")
-                                st.caption(f"⏱️ Duração: **{step['duration_label']}**")
-                            
-                            with col_s_redo:
-                                if st.button("🔁 Carregar", key=f"btn_redo_step_{idx}"):
-                                    st.session_state.final_start_time = step['start']
-                                    st.session_state.final_end_time = step['end']
-                                    st.session_state.final_corte_title = step['title']
-                                    st.rerun()
-    
-                            with col_s_del:
-                                if st.button("🗑️ Excluir", key=f"btn_del_step_{idx}"):
-                                    st.session_state.saved_steps.pop(idx)
-                                    _save_steps_to_disk()
-                                    st.rerun()
-                            st.divider()
-    
-                    if st.button("🗑️ Excluir Todos os Passos", key="btn_clear_all_steps"):
-                        st.session_state.saved_steps = []
-                        _save_steps_to_disk()
-                        st.success("Todos os passos foram excluídos.")
-                        st.rerun()
-                else:
-                    st.info("Nenhum passo guardado ainda. Selecione pautas acima e clique em **'💾 Guardar como Passo'** para montar sua fila de cortes!")
-    
-    
-        # ── TAB 2: SÉRIES SUGERIDAS ───────────────────────────────────────────────
-        with tab_series:
-            st.markdown("Séries sugeridas agrupando sequências de pautas para publicação como **Vídeos Normais no YouTube** (Horizontal 16:9 Full HD) ou outros formatos.")
-            st.info("ℹ️ **Modo Vídeo Normal (YouTube 16:9)**: Séries e vídeos longos são renderizados no formato original widescreen limpo (sem tarjas de topo, zoom punches periódicos ou barras de progresso de Shorts), preservando a experiência de vídeo tradicional do YouTube.")
-    
-            if "batch_feedback" in st.session_state:
-                fb = st.session_state.pop("batch_feedback")
-                if fb.get("type") == "success":
-                    st.success(fb.get("msg", ""))
-                elif fb.get("type") == "warning":
-                    st.warning(fb.get("msg", ""))
-                else:
-                    st.error(fb.get("msg", ""))
-            
-            col_s_min, col_s_btn = st.columns([1.5, 2.5])
-            with col_s_min:
-                saved_min_mins = float(_cfg.get("series_min_minutes", 10.0))
-                series_min_mins = st.number_input(
-                    "⏱️ Tempo Mínimo por Corte (minutos):",
-                    min_value=1.0,
-                    max_value=120.0,
-                    value=saved_min_mins,
-                    step=1.0,
-                    key="series_min_minutes_input",
-                    on_change=lambda: save_setting("series_min_minutes", st.session_state.series_min_minutes_input),
-                    help="Define a duração mínima de agrupamento para cada série/episódio gerado."
-                )
-    
-            with col_s_btn:
-                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-                _btn_label = f"🧠 Gerar / Reagrupar Séries Sugeridas ({series_min_mins:.0f}+ min)" if series_min_mins == int(series_min_mins) else f"🧠 Gerar / Reagrupar Séries Sugeridas ({series_min_mins:.1f}+ min)"
-                if st.button(_btn_label, key="btn_series", type="primary", use_container_width=True):
-                    with st.spinner(f"Agrupando pautas em séries de {series_min_mins:.0f}+ min..."):
-                        if 'pautas' in st.session_state and st.session_state.pautas:
-                            st.session_state.bundles = build_suggested_bundles(st.session_state.pautas, min_minutes=series_min_mins)
-                        else:
+                with col_act:
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                    if st.button("🔍 Mapear Pautas (IA)", key="btn_map_pautas", type="primary", use_container_width=True):
+                        with st.spinner("Mapeando perguntas e limites de pauta com IA..."):
                             res = analyze_transcript(
-                                chunked_transcript, "blocos",
+                                chunked_transcript, "pautas",
                                 model=ollama_model,
                                 chunks_list=chunks_list,
                                 segments=st.session_state.segments,
-                                strategy="qa_interview" if "Entrevistas" in strategy_choice else "semantic_topics",
-                                min_series_minutes=series_min_mins
-                            )
-                            if res.get("error"):
-                                st.error(f"Erro no Ollama: {res['error']}")
-                            else:
-                                st.session_state.bundles = res.get("bundles", [])
-                                st.session_state.pautas = res.get("pautas", [])
-                                st.session_state.ai_raw = res.get("raw", "")
-                        
-                        active_u = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-                        v_id = get_video_id(active_u)
-                        if v_id and 'bundles' in st.session_state:
-                            s_file = os.path.join("data", v_id, "series.json")
-                            with open(s_file, "w", encoding="utf-8") as f:
-                                json.dump(st.session_state.bundles, f, ensure_ascii=False, indent=4)
-                        st.rerun()
-    
-            if 'bundles' in st.session_state and st.session_state.bundles:
-                # Reseta seleção de checkboxes de forma segura antes da instanciação dos widgets
-                if st.session_state.get("_reset_bundles_selection"):
-                    st.session_state["_reset_bundles_selection"] = False
-                    for b_i in range(len(st.session_state.bundles)):
-                        st.session_state[f"chk_bundle_{b_i}"] = False
-                    st.session_state["batch_bundle_selected"] = {}
-    
-                if "batch_bundle_selected" not in st.session_state:
-                    st.session_state["batch_bundle_selected"] = {}
-    
-                col_bb1, col_bb2, col_bb3, _ = st.columns([1.4, 1.4, 1.4, 1.8])
-                with col_bb1:
-                    if st.button("☑️ Marcar Tudo", key="btn_sel_all_bundles", use_container_width=True):
-                        for b_i, b_item in enumerate(st.session_state.bundles):
-                            st.session_state[f"chk_bundle_{b_i}"] = True
-                            st.session_state["batch_bundle_selected"][b_i] = b_item
-                        st.rerun()
-                with col_bb2:
-                    if st.button("⬜ Desmarcar Tudo", key="btn_clear_bundles_batch", use_container_width=True):
-                        st.session_state["_reset_bundles_selection"] = True
-                        st.rerun()
-                with col_bb3:
-                    if st.button("🔄 Inverter Seleção", key="btn_invert_bundles_batch", use_container_width=True):
-                        for b_i, b_item in enumerate(st.session_state.bundles):
-                            cur_val = st.session_state.get(f"chk_bundle_{b_i}", False)
-                            new_val = not cur_val
-                            st.session_state[f"chk_bundle_{b_i}"] = new_val
-                            if new_val:
-                                st.session_state["batch_bundle_selected"][b_i] = b_item
-                            else:
-                                st.session_state["batch_bundle_selected"].pop(b_i, None)
-                        st.rerun()
-    
-                st.markdown(f"### 📦 Séries Sugeridas ({len(st.session_state.bundles)}):")
-                for idx, b in enumerate(st.session_state.bundles):
-                    with st.container():
-                        col_chk, col_info, col_btn = st.columns([0.3, 3.7, 1])
-                        with col_chk:
-                            chk_val = st.checkbox("Fila", key=f"chk_bundle_{idx}", label_visibility="collapsed")
-                            if chk_val:
-                                st.session_state["batch_bundle_selected"][idx] = b
-                            else:
-                                st.session_state["batch_bundle_selected"].pop(idx, None)
-                        with col_info:
-                            badge = f"**{b.get('series_label', f'Vídeo {idx+1}')}**"
-                            st.markdown(f"{badge}: `[{b['start']} - {b['end']}]` **{b['title']}**")
-                            st.caption(f"⏱️ Duração: {b.get('duration_label', '')}")
-                        with col_btn:
-                            if st.button("✂️ Usar", key=f"btn_use_bundle_{idx}"):
-                                st.session_state.final_start_time = b['start']
-                                st.session_state.final_end_time = b['end']
-                                st.session_state.final_corte_title = b['title']
-                                st.session_state.cut_ready_banner = f"✅ Série selecionada: [{b['start']} → {b['end']}] ({b['title']})"
-                                st.rerun()
-                        st.divider()
-    
-                # Painel da Fila de Produção em Lote para Séries
-                selected_bundles = list(st.session_state["batch_bundle_selected"].values())
-                if selected_bundles:
-                    with st.container():
-                        st.markdown("---")
-                        st.markdown(f"### 📦 Fila de Produção em Lote para Séries (**{len(selected_bundles)}** séries selecionadas)")
-                        
-                        col_sp1, col_sp2 = st.columns([2, 2])
-                        with col_sp1:
-                            _series_aspect_map = {
-                                "💻 Horizontal 16:9 (Original 1080p Full HD - Padrão YouTube)": "16:9",
-                                "📱 Vertical 9:16 (Fundo Desfocado / Blur)": "9:16_blur",
-                                "📱 Vertical 9:16 (🎯 Auto-Reframing Facial)": "9:16_smart_face",
-                                "📱 Vertical 9:16 (👥 Split Screen)": "9:16_split",
-                                "📱 Vertical 9:16 (Corte Central 100%)": "9:16_crop"
-                            }
-                            series_aspect_choice = st.selectbox(
-                                "Formato de Enquadramento:",
-                                list(_series_aspect_map.keys()),
-                                index=0,
-                                key="series_aspect_choice"
-                            )
-                            series_aspect_mode = _series_aspect_map[series_aspect_choice]
-                        with col_sp2:
-                            series_sub_enabled = st.toggle("✨ Ativar Legendas Dinâmicas", value=_cfg.get("subtitle_enabled", False), key="series_sub_toggle")
-                            st.caption(f"Fontes e cores: {_cfg.get('subtitle_font_size', 80)}px • Destaque {_cfg.get('subtitle_highlight_color', '#FFFF00')}")
-    
-                        if st.button(f"⚡ Iniciar Renderização em Lote ({len(selected_bundles)} Séries)", type="primary", use_container_width=True, key="btn_start_series_batch"):
-                            _active_u_sbatch = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-                            _vid_id_sbatch = get_video_id(_active_u_sbatch)
-                            if not _vid_id_sbatch:
-                                st.error("URL do vídeo do YouTube não identificada.")
-                            else:
-                                s_prog_bar = st.progress(0)
-                                s_status_box = st.empty()
-                                s_live_logs = []
-    
-                                def _s_batch_cb(cur, tot, msg):
-                                    pct = int((cur / max(tot, 1)) * 100)
-                                    s_prog_bar.progress(min(pct, 100))
-                                    s_status_box.info(f"**Progresso ({cur}/{tot}):** {msg}")
-    
-                                def _s_log_cb(line):
-                                    s_live_logs.append(line)
-    
-                                s_batch_res = process_batch_cuts(
-                                    video_id=_vid_id_sbatch,
-                                    active_url=_active_u_sbatch,
-                                    cut_items=selected_bundles,
-                                    aspect_ratio_mode=series_aspect_mode,
-                                    subtitle_enabled=series_sub_enabled,
-                                    subtitle_highlight_color=_cfg.get("subtitle_highlight_color", "#FFFF00"),
-                                    subtitle_base_color=_cfg.get("subtitle_base_color", "#FFFFFF"),
-                                    subtitle_font_size=_cfg.get("subtitle_font_size", 80),
-                                    ollama_model=ollama_model,
-                                    aspect_params=dict(_cfg),
-                                    force_rerender=False,
-                                    progress_callback=_s_batch_cb,
-                                    log_callback=_s_log_cb
-                                )
-    
-                                s_prog_bar.progress(100)
-                                if not isinstance(s_batch_res, list):
-                                    s_batch_res = [s_batch_res] if s_batch_res else []
-    
-                                success_count = sum(1 for r in s_batch_res if isinstance(r, dict) and r.get("success"))
-                                error_items = [r for r in s_batch_res if isinstance(r, dict) and r.get("error")]
-    
-                                if error_items:
-                                    err_details = "\n".join([f"- **{e.get('title', 'Série')}**: {e.get('error')}" for e in error_items])
-                                    st.session_state["batch_feedback"] = {
-                                        "type": "warning" if success_count > 0 else "error",
-                                        "msg": f"Processamento de séries concluído com {success_count} sucesso(s) e {len(error_items)} erro(s):\n{err_details}"
-                                    }
-                                else:
-                                    st.session_state["batch_feedback"] = {
-                                        "type": "success",
-                                        "msg": f"🎉 **Renderização de séries em lote concluída com sucesso!** {success_count} séries geradas e disponíveis na Galeria (Seção 4)."
-                                    }
-                                st.session_state["_reset_bundles_selection"] = True
-                                st.rerun()
-    
-        # ── TAB 3: GANCHOS VIRAIS & PEQUENOS CORTES (SHORTS / REELS) ───────────────
-        with tab_shorts:
-            st.markdown(
-                "Geração de **Pequenos Cortes** para Shorts/Reels estruturados sob as **6 Regras de Ouro Editoriais**."
-            )
-            
-            col_sh_max, col_sh_btn = st.columns([1.5, 2.5])
-            with col_sh_max:
-                saved_max_shorts = float(_cfg.get("shorts_max_seconds", 60.0))
-                shorts_max_secs = st.number_input(
-                    "⏱️ Duração Máxima do Short (segundos):",
-                    min_value=15.0,
-                    max_value=180.0,
-                    value=saved_max_shorts,
-                    step=5.0,
-                    key="shorts_max_seconds_input",
-                    on_change=lambda: save_setting("shorts_max_seconds", st.session_state.shorts_max_seconds_input),
-                    help="Define o teto de duração máxima para cada corte vertical gerado (Shorts, Reels, TikTok)."
-                )
-    
-            with col_sh_btn:
-                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-                _btn_sh_label = f"🔥 Gerar / Reestruturar Pequenos Cortes (Até {shorts_max_secs:.0f}s)"
-                if st.button(_btn_sh_label, key="btn_shorts", type="primary", use_container_width=True):
-                    with st.spinner(f"Estruturando pequenos cortes (máx. {shorts_max_secs:.0f}s) sob as 6 Regras de Ouro..."):
-                        if 'pautas' in st.session_state and st.session_state.pautas:
-                            st.session_state.shorts = build_golden_rule_micro_cuts(
-                                st.session_state.pautas,
-                                st.session_state.segments,
-                                max_duration_s=shorts_max_secs
-                            )
-                        else:
-                            res = analyze_transcript(
-                                chunked_transcript, "ganchos",
-                                model=ollama_model,
-                                chunks_list=chunks_list,
-                                segments=st.session_state.segments,
-                                strategy="qa_interview" if "Entrevistas" in strategy_choice else "semantic_topics",
-                                max_shorts_seconds=shorts_max_secs
+                                strategy=strat_code
                             )
                             if res.get("error"):
                                 st.error(f"Erro na análise: {res['error']}")
                             else:
-                                st.session_state.shorts = res.get("micro_cuts", []) or res.get("cortes", [])
                                 st.session_state.pautas = res.get("pautas", [])
+                                st.session_state.bundles = res.get("bundles", [])
                                 st.session_state.ai_raw = res.get("raw", "")
-                        
-                        active_u = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-                        v_id = get_video_id(active_u)
-                        if v_id and 'shorts' in st.session_state:
-                            sh_file = os.path.join("data", v_id, "shorts.json")
-                            with open(sh_file, "w", encoding="utf-8") as f:
-                                json.dump(st.session_state.shorts, f, ensure_ascii=False, indent=4)
-                        st.rerun()
+                            
+                                active_u = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                                v_id = get_video_id(active_u)
+                                if v_id:
+                                    p_file = os.path.join("data", v_id, "pautas.json")
+                                    with open(p_file, "w", encoding="utf-8") as f:
+                                        json.dump({"pautas": st.session_state.pautas, "raw": st.session_state.ai_raw}, f, ensure_ascii=False, indent=4)
+                                st.rerun()
     
-            if "batch_feedback" in st.session_state:
-                fb = st.session_state.pop("batch_feedback")
-                if fb.get("type") == "success":
-                    st.success(fb.get("msg", ""))
-                elif fb.get("type") == "warning":
-                    st.warning(fb.get("msg", ""))
-                else:
-                    st.error(fb.get("msg", ""))
+                if 'pautas' in st.session_state and st.session_state.pautas:
+                    pautas = st.session_state.pautas
+                
+                    # Carrega passos salvos do disco se existirem
+                    active_u = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                    v_id = get_video_id(active_u)
+                    steps_file = os.path.join("data", v_id, "saved_steps.json") if v_id else "data/saved_steps.json"
+                    if 'saved_steps' not in st.session_state or not st.session_state.saved_steps:
+                        if os.path.exists(steps_file):
+                            try:
+                                with open(steps_file, "r", encoding="utf-8") as f:
+                                    st.session_state.saved_steps = json.load(f)
+                            except Exception:
+                                st.session_state.saved_steps = []
+                        else:
+                            st.session_state.saved_steps = []
     
-            if 'shorts' in st.session_state and st.session_state.shorts:
-                # Reseta seleção de checkboxes de forma segura antes da instanciação dos widgets
-                if st.session_state.get("_reset_batch_selection"):
-                    st.session_state["_reset_batch_selection"] = False
-                    for s_i in range(len(st.session_state.shorts)):
-                        st.session_state[f"chk_short_{s_i}"] = False
-                    st.session_state["batch_short_selected"] = {}
+                    def _save_steps_to_disk():
+                        os.makedirs(os.path.dirname(steps_file), exist_ok=True)
+                        with open(steps_file, "w", encoding="utf-8") as f:
+                            json.dump(st.session_state.saved_steps, f, indent=2, ensure_ascii=False)
     
-                if "batch_short_selected" not in st.session_state:
-                    st.session_state["batch_short_selected"] = {}
+                    col_head1, col_head2 = st.columns([2.0, 3.0])
+                    with col_head1:
+                        st.markdown(f"### 📋 Pautas Detectadas ({len(pautas)} encontradas):")
+                    with col_head2:
+                        col_btn_check, col_btn_uncheck, col_btn_invert = st.columns(3)
+                        with col_btn_check:
+                            if st.button("☑️ Marcar Tudo", key="btn_check_all_pautas", use_container_width=True, help="Marca todas as pautas detectadas"):
+                                for p in pautas:
+                                    st.session_state[f"chk_pauta_{p['id']}"] = True
+                                st.rerun()
+                        with col_btn_uncheck:
+                            if st.button("⬜ Desmarcar Tudo", key="btn_uncheck_all", use_container_width=True, help="Limpa todas as seleções para iniciar um novo corte"):
+                                for p in pautas:
+                                    st.session_state[f"chk_pauta_{p['id']}"] = False
+                                st.rerun()
+                        with col_btn_invert:
+                            if st.button("🔄 Inverter Seleção", key="btn_invert_pautas", use_container_width=True, help="Inverte a seleção de cada pauta"):
+                                for p in pautas:
+                                    chk_k = f"chk_pauta_{p['id']}"
+                                    st.session_state[chk_k] = not st.session_state.get(chk_k, False)
+                                st.rerun()
     
-                col_bk1, col_bk2, col_bk3, _ = st.columns([1.4, 1.4, 1.4, 1.8])
-                with col_bk1:
-                    if st.button("☑️ Marcar Tudo", key="btn_sel_all_shorts", use_container_width=True):
-                        for s_i, s_item in enumerate(st.session_state.shorts):
-                            st.session_state[f"chk_short_{s_i}"] = True
-                            st.session_state["batch_short_selected"][s_i] = s_item
-                        st.rerun()
-                with col_bk2:
-                    if st.button("⬜ Desmarcar Tudo", key="btn_clear_shorts_batch", use_container_width=True):
-                        st.session_state["_reset_batch_selection"] = True
-                        st.rerun()
-                with col_bk3:
-                    if st.button("🔄 Inverter Seleção", key="btn_invert_shorts_batch", use_container_width=True):
-                        for s_i, s_item in enumerate(st.session_state.shorts):
-                            cur_val = st.session_state.get(f"chk_short_{s_i}", False)
-                            new_val = not cur_val
-                            st.session_state[f"chk_short_{s_i}"] = new_val
-                            if new_val:
-                                st.session_state["batch_short_selected"][s_i] = s_item
-                            else:
-                                st.session_state["batch_short_selected"].pop(s_i, None)
-                        st.rerun()
+                    # Monta lista de pautas em cards selecionáveis
+                    st.markdown("")
+                    selected_pauta_objs = []
     
-                st.markdown(f"### 🎬 Pequenos Cortes Gerados ({len(st.session_state.shorts)}):")
-                for idx, s in enumerate(st.session_state.shorts):
-                    with st.container():
-                        col_chk, col_info = st.columns([0.3, 4.7])
+                    for p in pautas:
+                        chk_key = f"chk_pauta_{p['id']}"
+                        if chk_key not in st.session_state:
+                            st.session_state[chk_key] = False
+    
+                        col_chk, col_p_info, col_dur = st.columns([0.5, 4.5, 1.2])
                         with col_chk:
-                            chk_val = st.checkbox("Fila", key=f"chk_short_{idx}", label_visibility="collapsed")
-                            if chk_val:
-                                st.session_state["batch_short_selected"][idx] = s
-                            else:
-                                st.session_state["batch_short_selected"].pop(idx, None)
-                        with col_info:
-                            st.markdown(f"**{s.get('type', 'Corte')}** | `[{s['start']} → {s['end']}]` **{s['title']}**")
-                            st.caption(f"⏱️ Duração: **{s.get('duration_label', '')}**")
-                            if s.get('snippet'):
-                                st.markdown(f"💬 *\"{s['snippet']}\"*")
+                            is_checked = st.checkbox(f"Pauta {p['id']}", key=chk_key, label_visibility="collapsed")
+                            if is_checked:
+                                selected_pauta_objs.append(p)
+                        with col_p_info:
+                            st.markdown(f"**Pauta #{p['id']}**: `[{p['start']} → {p['end']}]` **{p['title']}**")
+                            if p.get('text_snippet'):
+                                st.caption(f"💬 *\"{p['text_snippet']}...\"*")
+                        with col_dur:
+                            st.markdown(f"⏱️ **{p['duration_label']}**")
                         st.divider()
     
-                # ── PAINEL DA FILA DE PRODUÇÃO EM LOTE ────────────────────────────
-                selected_items = list(st.session_state["batch_short_selected"].values())
-                if selected_items:
-                    with st.container():
-                        st.markdown("---")
-                        st.markdown(f"### 📦 Fila de Produção em Lote (**{len(selected_items)}** cortes selecionados)")
-                        
-                        _batch_aspect_list = [
-                            "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)",
-                            "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)",
-                            "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen - Estilo Podpah & Flow)",
-                            "📱 Vertical 9:16 (Corte Central 100% Tela)",
-                            "💻 Horizontal 16:9 (Original 1080p Full HD)"
-                        ]
-                        _default_b_aspect = _cfg.get("aspect_option", _batch_aspect_list[0])
-                        _b_idx = _batch_aspect_list.index(_default_b_aspect) if _default_b_aspect in _batch_aspect_list else 0
+                    # ── BARRA INFORMATIVA DA SELEÇÃO (COMPOSITOR) ─────────────────────────
+                    if selected_pauta_objs:
+                        # Ordena por timestamp de início
+                        selected_pauta_objs = sorted(selected_pauta_objs, key=lambda x: x["start_s"])
+                        comb_start = selected_pauta_objs[0]["start"]
+                        comb_end = selected_pauta_objs[-1]["end"]
+                        comb_dur_s = sum(x["duration_s"] for x in selected_pauta_objs)
+                        comb_dur_fmt = format_time(comb_dur_s)
+                    
+                        # Título composto inteligente
+                        if len(selected_pauta_objs) == 1:
+                            comb_title = selected_pauta_objs[0]["title"]
+                        else:
+                            comb_title = f"{selected_pauta_objs[0]['title']} (+ {len(selected_pauta_objs)-1} pautas)"
     
-                        col_bp1, col_bp2 = st.columns(2)
-                        with col_bp1:
-                            batch_aspect_choice = st.selectbox(
-                                "📐 Enquadramento para o Lote:",
-                                _batch_aspect_list,
-                                index=_b_idx,
-                                key="batch_aspect_select"
-                            )
-                            b_aspect_map = {
-                                "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)": "9:16_blur",
-                                "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)": "9:16_smart_face",
-                                "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen - Estilo Podpah & Flow)": "9:16_split",
-                                "📱 Vertical 9:16 (Corte Central 100% Tela)": "9:16_crop",
-                                "💻 Horizontal 16:9 (Original 1080p Full HD)": "16:9"
-                            }
-                            batch_aspect_mode = b_aspect_map[batch_aspect_choice]
-                            st.caption(f"🎯 Modo ativo: `{batch_aspect_mode}`")
-    
-                        with col_bp2:
-                            batch_sub_enabled = st.toggle("✨ Ativar Legendas Dinâmicas", value=_cfg.get("subtitle_enabled", True), key="batch_sub_toggle")
-                            st.caption(f"Fontes e cores: {_cfg.get('subtitle_font_size', 80)}px • Destaque {_cfg.get('subtitle_highlight_color', '#FFFF00')}")
-    
-                        with st.expander("⚙️ Personalizações da Fase 3 & 4 para o Lote (Headlines, Retenção, Capas & Áudio)", expanded=False):
-                            col_bopt1, col_bopt2 = st.columns(2)
-                            with col_bopt1:
-                                b_hl_on = st.toggle("🏷️ Headline de Retenção no Topo", value=_cfg.get("headline_enabled", False), key="b_hl_toggle")
-                                b_em_on = st.toggle("😃 Emojis Contextuais", value=_cfg.get("emojis_enabled", False), key="b_em_toggle")
-                                b_zp_on = st.toggle("🔍 Zoom Punch Dinâmico", value=_cfg.get("zoom_punch_enabled", False), key="b_zp_toggle")
-                                b_cz_on = st.toggle("🎯 Zoom de Clímax na Frase Final", value=_cfg.get("climax_zoom_enabled", False), key="b_cz_toggle")
-                            with col_bopt2:
-                                b_pb_on = st.toggle("⏳ Barra de Progresso no Rodapé", value=_cfg.get("progress_bar_enabled", False), key="b_pb_toggle")
-                                b_co_on = st.toggle("📌 Banner de Chamada / Callout", value=_cfg.get("callout_enabled", False), key="b_co_toggle")
-                                b_th_on = st.toggle("🖼️ Gerar Capa / Thumbnail 9:16", value=_cfg.get("thumbnail_enabled", True), key="b_th_toggle")
-                                b_bgm_on = st.toggle("🎵 Trilha Sonora & Ducking", value=_cfg.get("bg_music_enabled", False), key="b_bgm_toggle")
-                                if b_bgm_on:
-                                    b_bgm_trk = st.selectbox(
-                                        "Trilha:",
-                                        ["lofi_chill", "dynamic_pulse", "tension_suspense", "inspirational_epic"],
-                                        format_func=lambda x: {"lofi_chill": "🧘 Lo-Fi Chill", "dynamic_pulse": "⚡ Dinâmica", "tension_suspense": "🔥 Tensão", "inspirational_epic": "✨ Inspiracional"}.get(x, x),
-                                        key="b_bgm_trk_sel"
-                                    )
-                                else:
-                                    b_bgm_trk = _cfg.get("bg_music_track_id", "lofi_chill")
-    
-                        batch_force_rerender = st.checkbox(
-                            "🔄 Forçar Re-renderização de Cortes Já Gerados",
-                            value=False,
-                            help="Por padrão, a aplicação pula e reaproveita cortes que já foram gerados neste formato. Marque para reprocessar tudo."
+                        st.info(
+                            f"🎯 **Corte Composto**: `[{comb_start} → {comb_end}]` | "
+                            f"⏱️ Duração Total: **{comb_dur_fmt}** | "
+                            f"Pautas Inclusas: **{len(selected_pauta_objs)}** ({', '.join(f'#{x['id']}' for x in selected_pauta_objs)})"
                         )
     
-                        if st.button(f"⚡ Iniciar Renderização em Lote ({len(selected_items)} Cortes)", type="primary", use_container_width=True, key="btn_start_batch"):
-                            _active_u_batch = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-                            _vid_id_batch = get_video_id(_active_u_batch)
-                            if not _vid_id_batch:
-                                st.error("URL do vídeo do YouTube não identificada.")
+                        col_ap1, col_ap2 = st.columns([2, 1])
+                        with col_ap1:
+                            if st.button("✂️ Carregar Seleção para Exportação (Seção 3)", key="btn_apply_composed", type="primary", use_container_width=True):
+                                st.session_state.final_start_time = normalize_time_mask(comb_start)
+                                st.session_state.final_end_time = normalize_time_mask(comb_end)
+                                st.session_state.final_corte_title = comb_title
+                                st.session_state.cut_ready_banner = f"✅ Composição pronta para corte: [{comb_start} → {comb_end}] ({comb_dur_fmt})"
+                                navigate_to_step("3")
+                                st.rerun()
+    
+                        with col_ap2:
+                            step_num = len(st.session_state.saved_steps) + 1
+                            if st.button("💾 Guardar como Passo", key="btn_save_step", use_container_width=True, help="Salva esta composição no histórico de passos para poder montar múltiplos cortes sem perder o progresso"):
+                                new_step = {
+                                    "step_id": step_num,
+                                    "start": comb_start,
+                                    "end": comb_end,
+                                    "start_s": selected_pauta_objs[0]["start_s"],
+                                    "end_s": selected_pauta_objs[-1]["end_s"],
+                                    "duration_s": comb_dur_s,
+                                    "duration_label": comb_dur_fmt,
+                                    "title": comb_title,
+                                    "pauta_ids": [x["id"] for x in selected_pauta_objs],
+                                    "pautas_titles": [f"Pauta #{x['id']}: {x['title']} ({x['duration_label']})" for x in selected_pauta_objs]
+                                }
+                                st.session_state.saved_steps.append(new_step)
+                                _save_steps_to_disk()
+                                st.success(f"🎉 Passo #{step_num} guardado com sucesso!")
+                                st.rerun()
+    
+                    else:
+                        if 'cut_ready_banner' in st.session_state:
+                            st.session_state.cut_ready_banner = ""
+    
+                    # ── PAINEL DE PASSOS GUARDADOS ────────────────────────────────────────
+                    st.markdown("---")
+                    st.markdown("### 🗂️ Histórico de Passos / Cortes Salvos:")
+                    if 'saved_steps' in st.session_state and st.session_state.saved_steps:
+                        st.caption(f"Você possui **{len(st.session_state.saved_steps)} passos/cortes** guardados.")
+                    
+                        for idx, step in enumerate(st.session_state.saved_steps):
+                            with st.container():
+                                col_s_info, col_s_redo, col_s_del = st.columns([4, 1.2, 1])
+                                with col_s_info:
+                                    st.markdown(f"**Passo #{idx+1}**: `[{step['start']} → {step['end']}]` **{step['title']}**")
+                                    st.caption(f"⏱️ Duração: **{step['duration_label']}**")
+                            
+                                with col_s_redo:
+                                    if st.button("🔁 Carregar", key=f"btn_redo_step_{idx}"):
+                                        st.session_state.final_start_time = step['start']
+                                        st.session_state.final_end_time = step['end']
+                                        st.session_state.final_corte_title = step['title']
+                                        st.rerun()
+    
+                                with col_s_del:
+                                    if st.button("🗑️ Excluir", key=f"btn_del_step_{idx}"):
+                                        st.session_state.saved_steps.pop(idx)
+                                        _save_steps_to_disk()
+                                        st.rerun()
+                                st.divider()
+    
+                        if st.button("🗑️ Excluir Todos os Passos", key="btn_clear_all_steps"):
+                            st.session_state.saved_steps = []
+                            _save_steps_to_disk()
+                            st.success("Todos os passos foram excluídos.")
+                            st.rerun()
+                    else:
+                        st.info("Nenhum passo guardado ainda. Selecione pautas acima e clique em **'💾 Guardar como Passo'** para montar sua fila de cortes!")
+    
+    
+            # ── TAB 2: SÉRIES SUGERIDAS ───────────────────────────────────────────────
+            with tab_series:
+                st.markdown("Séries sugeridas agrupando sequências de pautas para publicação como **Vídeos Normais no YouTube** (Horizontal 16:9 Full HD) ou outros formatos.")
+                st.info("ℹ️ **Modo Vídeo Normal (YouTube 16:9)**: Séries e vídeos longos são renderizados no formato original widescreen limpo (sem tarjas de topo, zoom punches periódicos ou barras de progresso de Shorts), preservando a experiência de vídeo tradicional do YouTube.")
+    
+                if "batch_feedback" in st.session_state:
+                    fb = st.session_state.pop("batch_feedback")
+                    if fb.get("type") == "success":
+                        st.success(fb.get("msg", ""))
+                    elif fb.get("type") == "warning":
+                        st.warning(fb.get("msg", ""))
+                    else:
+                        st.error(fb.get("msg", ""))
+            
+                col_s_min, col_s_btn = st.columns([1.5, 2.5])
+                with col_s_min:
+                    saved_min_mins = float(_cfg.get("series_min_minutes", 10.0))
+                    series_min_mins = st.number_input(
+                        "⏱️ Tempo Mínimo por Corte (minutos):",
+                        min_value=1.0,
+                        max_value=120.0,
+                        value=saved_min_mins,
+                        step=1.0,
+                        key="series_min_minutes_input",
+                        on_change=lambda: save_setting("series_min_minutes", st.session_state.series_min_minutes_input),
+                        help="Define a duração mínima de agrupamento para cada série/episódio gerado."
+                    )
+    
+                with col_s_btn:
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                    _btn_label = f"🧠 Gerar / Reagrupar Séries Sugeridas ({series_min_mins:.0f}+ min)" if series_min_mins == int(series_min_mins) else f"🧠 Gerar / Reagrupar Séries Sugeridas ({series_min_mins:.1f}+ min)"
+                    if st.button(_btn_label, key="btn_series", type="primary", use_container_width=True):
+                        with st.spinner(f"Agrupando pautas em séries de {series_min_mins:.0f}+ min..."):
+                            if 'pautas' in st.session_state and st.session_state.pautas:
+                                st.session_state.bundles = build_suggested_bundles(st.session_state.pautas, min_minutes=series_min_mins)
                             else:
-                                prog_bar = st.progress(0)
-                                status_box = st.empty()
-    
-                                live_logs_list = []
-    
-                                def _batch_cb(cur, tot, msg):
-                                    pct = int((cur / max(tot, 1)) * 100)
-                                    prog_bar.progress(min(pct, 100))
-                                    status_box.info(f"**Progresso ({cur}/{tot}):** {msg}")
-    
-                                def _log_cb(line):
-                                    live_logs_list.append(line)
-    
-                                batch_params_merged = dict(_cfg)
-                                batch_params_merged.update({
-                                    "headline_enabled": b_hl_on,
-                                    "emojis_enabled": b_em_on,
-                                    "zoom_punch_enabled": b_zp_on,
-                                    "climax_zoom_enabled": b_cz_on,
-                                    "progress_bar_enabled": b_pb_on,
-                                    "callout_enabled": b_co_on,
-                                    "callout_text": _cfg.get("callout_text", "💬 O que você acha? Comente abaixo!"),
-                                    "thumbnail_enabled": b_th_on,
-                                    "bg_music_enabled": b_bgm_on,
-                                    "bg_music_track_id": b_bgm_trk,
-                                })
-    
-                                batch_res = process_batch_cuts(
-                                    video_id=_vid_id_batch,
-                                    active_url=_active_u_batch,
-                                    cut_items=selected_items,
-                                    aspect_ratio_mode=batch_aspect_mode,
-                                    subtitle_enabled=batch_sub_enabled,
-                                    subtitle_highlight_color=_cfg.get("subtitle_highlight_color", "#FFFF00"),
-                                    subtitle_base_color=_cfg.get("subtitle_base_color", "#FFFFFF"),
-                                    subtitle_font_size=_cfg.get("subtitle_font_size", 80),
-                                    ollama_model=ollama_model,
-                                    aspect_params=batch_params_merged,
-                                    force_rerender=batch_force_rerender,
-                                    progress_callback=_batch_cb,
-                                    log_callback=_log_cb
+                                res = analyze_transcript(
+                                    chunked_transcript, "blocos",
+                                    model=ollama_model,
+                                    chunks_list=chunks_list,
+                                    segments=st.session_state.segments,
+                                    strategy="qa_interview" if "Entrevistas" in strategy_choice else "semantic_topics",
+                                    min_series_minutes=series_min_mins
                                 )
-    
-                                prog_bar.progress(100)
-    
-                                # Salva todos os logs completos para visualização e cópia
-                                full_logs_text = "\n".join(live_logs_list)
-                                st.session_state["last_batch_logs"] = full_logs_text
-    
-                                # Agenda o reset limpo dos checkboxes para a próxima renderização
-                                st.session_state["_reset_batch_selection"] = True
-    
-                                success_count = sum(1 for r in batch_res if r.get("success"))
-                                error_items = [r for r in batch_res if r.get("error")]
-    
-                                if error_items:
-                                    err_details = "\n".join([f"- **{e.get('title', 'Corte')}**: {e.get('error')}" for e in error_items])
-                                    st.session_state["batch_feedback"] = {
-                                        "type": "warning" if success_count > 0 else "error",
-                                        "msg": f"Processamento concluído com {success_count} sucesso(s) e {len(error_items)} erro(s):\n{err_details}"
-                                    }
+                                if res.get("error"):
+                                    st.error(f"Erro no Ollama: {res['error']}")
                                 else:
-                                    st.session_state["batch_feedback"] = {
-                                        "type": "success",
-                                        "msg": f"🎉 **Renderização em lote concluída com sucesso!** {success_count} cortes gerados e disponíveis na Galeria (Seção 4)."
-                                    }
-                                st.rerun()
+                                    st.session_state.bundles = res.get("bundles", [])
+                                    st.session_state.pautas = res.get("pautas", [])
+                                    st.session_state.ai_raw = res.get("raw", "")
+                        
+                            active_u = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                            v_id = get_video_id(active_u)
+                            if v_id and 'bundles' in st.session_state:
+                                s_file = os.path.join("data", v_id, "series.json")
+                                with open(s_file, "w", encoding="utf-8") as f:
+                                    json.dump(st.session_state.bundles, f, ensure_ascii=False, indent=4)
+                            st.rerun()
     
-        # ── TAB 4: SELEÇÃO MANUAL ────────────────────────────────────────────────
-        with tab_manual:
+                if 'bundles' in st.session_state and st.session_state.bundles:
+                    # Reseta seleção de checkboxes de forma segura antes da instanciação dos widgets
+                    if st.session_state.get("_reset_bundles_selection"):
+                        st.session_state["_reset_bundles_selection"] = False
+                        for b_i in range(len(st.session_state.bundles)):
+                            st.session_state[f"chk_bundle_{b_i}"] = False
+                        st.session_state["batch_bundle_selected"] = {}
+    
+                    if "batch_bundle_selected" not in st.session_state:
+                        st.session_state["batch_bundle_selected"] = {}
+    
+                    col_bb1, col_bb2, col_bb3, _ = st.columns([1.4, 1.4, 1.4, 1.8])
+                    with col_bb1:
+                        if st.button("☑️ Marcar Tudo", key="btn_sel_all_bundles", use_container_width=True):
+                            for b_i, b_item in enumerate(st.session_state.bundles):
+                                st.session_state[f"chk_bundle_{b_i}"] = True
+                                st.session_state["batch_bundle_selected"][b_i] = b_item
+                            st.rerun()
+                    with col_bb2:
+                        if st.button("⬜ Desmarcar Tudo", key="btn_clear_bundles_batch", use_container_width=True):
+                            st.session_state["_reset_bundles_selection"] = True
+                            st.rerun()
+                    with col_bb3:
+                        if st.button("🔄 Inverter Seleção", key="btn_invert_bundles_batch", use_container_width=True):
+                            for b_i, b_item in enumerate(st.session_state.bundles):
+                                cur_val = st.session_state.get(f"chk_bundle_{b_i}", False)
+                                new_val = not cur_val
+                                st.session_state[f"chk_bundle_{b_i}"] = new_val
+                                if new_val:
+                                    st.session_state["batch_bundle_selected"][b_i] = b_item
+                                else:
+                                    st.session_state["batch_bundle_selected"].pop(b_i, None)
+                            st.rerun()
+    
+                    st.markdown(f"### 📦 Séries Sugeridas ({len(st.session_state.bundles)}):")
+                    for idx, b in enumerate(st.session_state.bundles):
+                        with st.container():
+                            col_chk, col_info, col_btn = st.columns([0.3, 3.7, 1])
+                            with col_chk:
+                                chk_val = st.checkbox("Fila", key=f"chk_bundle_{idx}", label_visibility="collapsed")
+                                if chk_val:
+                                    st.session_state["batch_bundle_selected"][idx] = b
+                                else:
+                                    st.session_state["batch_bundle_selected"].pop(idx, None)
+                            with col_info:
+                                badge = f"**{b.get('series_label', f'Vídeo {idx+1}')}**"
+                                st.markdown(f"{badge}: `[{b['start']} - {b['end']}]` **{b['title']}**")
+                                st.caption(f"⏱️ Duração: {b.get('duration_label', '')}")
+                            with col_btn:
+                                if st.button("✂️ Usar", key=f"btn_use_bundle_{idx}"):
+                                    st.session_state.final_start_time = b['start']
+                                    st.session_state.final_end_time = b['end']
+                                    st.session_state.final_corte_title = b['title']
+                                    st.session_state.cut_ready_banner = f"✅ Série selecionada: [{b['start']} → {b['end']}] ({b['title']})"
+                                    st.rerun()
+                            st.divider()
+    
+                    # Painel da Fila de Produção em Lote para Séries
+                    selected_bundles = list(st.session_state["batch_bundle_selected"].values())
+                    if selected_bundles:
+                        with st.container():
+                            st.markdown("---")
+                            st.markdown(f"### 📦 Fila de Produção em Lote para Séries (**{len(selected_bundles)}** séries selecionadas)")
+                        
+                            col_sp1, col_sp2 = st.columns([2, 2])
+                            with col_sp1:
+                                _series_aspect_map = {
+                                    "💻 Horizontal 16:9 (Original 1080p Full HD - Padrão YouTube)": "16:9",
+                                    "📱 Vertical 9:16 (Fundo Desfocado / Blur)": "9:16_blur",
+                                    "📱 Vertical 9:16 (🎯 Auto-Reframing Facial)": "9:16_smart_face",
+                                    "📱 Vertical 9:16 (👥 Split Screen)": "9:16_split",
+                                    "📱 Vertical 9:16 (Corte Central 100%)": "9:16_crop"
+                                }
+                                series_aspect_choice = st.selectbox(
+                                    "Formato de Enquadramento:",
+                                    list(_series_aspect_map.keys()),
+                                    index=0,
+                                    key="series_aspect_choice"
+                                )
+                                series_aspect_mode = _series_aspect_map[series_aspect_choice]
+                            with col_sp2:
+                                series_sub_enabled = st.toggle("✨ Ativar Legendas Dinâmicas", value=_cfg.get("subtitle_enabled", False), key="series_sub_toggle")
+                                st.caption(f"Fontes e cores: {_cfg.get('subtitle_font_size', 80)}px • Destaque {_cfg.get('subtitle_highlight_color', '#FFFF00')}")
+    
+                            if st.button(f"⚡ Iniciar Renderização em Lote ({len(selected_bundles)} Séries)", type="primary", use_container_width=True, key="btn_start_series_batch"):
+                                _active_u_sbatch = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                                _vid_id_sbatch = get_video_id(_active_u_sbatch)
+                                if not _vid_id_sbatch:
+                                    st.error("URL do vídeo do YouTube não identificada.")
+                                else:
+                                    s_prog_bar = st.progress(0)
+                                    s_status_box = st.empty()
+                                    s_live_logs = []
+    
+                                    def _s_batch_cb(cur, tot, msg):
+                                        pct = int((cur / max(tot, 1)) * 100)
+                                        s_prog_bar.progress(min(pct, 100))
+                                        s_status_box.info(f"**Progresso ({cur}/{tot}):** {msg}")
+    
+                                    def _s_log_cb(line):
+                                        s_live_logs.append(line)
+    
+                                    s_batch_res = process_batch_cuts(
+                                        video_id=_vid_id_sbatch,
+                                        active_url=_active_u_sbatch,
+                                        cut_items=selected_bundles,
+                                        aspect_ratio_mode=series_aspect_mode,
+                                        subtitle_enabled=series_sub_enabled,
+                                        subtitle_highlight_color=_cfg.get("subtitle_highlight_color", "#FFFF00"),
+                                        subtitle_base_color=_cfg.get("subtitle_base_color", "#FFFFFF"),
+                                        subtitle_font_size=_cfg.get("subtitle_font_size", 80),
+                                        ollama_model=ollama_model,
+                                        aspect_params=dict(_cfg),
+                                        force_rerender=False,
+                                        progress_callback=_s_batch_cb,
+                                        log_callback=_s_log_cb
+                                    )
+    
+                                    s_prog_bar.progress(100)
+                                    if not isinstance(s_batch_res, list):
+                                        s_batch_res = [s_batch_res] if s_batch_res else []
+    
+                                    success_count = sum(1 for r in s_batch_res if isinstance(r, dict) and r.get("success"))
+                                    error_items = [r for r in s_batch_res if isinstance(r, dict) and r.get("error")]
+    
+                                    if error_items:
+                                        err_details = "\n".join([f"- **{e.get('title', 'Série')}**: {e.get('error')}" for e in error_items])
+                                        st.session_state["batch_feedback"] = {
+                                            "type": "warning" if success_count > 0 else "error",
+                                            "msg": f"Processamento de séries concluído com {success_count} sucesso(s) e {len(error_items)} erro(s):\n{err_details}"
+                                        }
+                                    else:
+                                        st.session_state["batch_feedback"] = {
+                                            "type": "success",
+                                            "msg": f"🎉 **Renderização de séries em lote concluída com sucesso!** {success_count} séries geradas e disponíveis na Galeria (Seção 4)."
+                                        }
+                                    st.session_state["_reset_bundles_selection"] = True
+                                    st.rerun()
+    
+            # ── TAB 3: GANCHOS VIRAIS & PEQUENOS CORTES (SHORTS / REELS) ───────────────
+            with tab_shorts:
+                st.markdown(
+                    "Geração de **Pequenos Cortes** para Shorts/Reels estruturados sob as **6 Regras de Ouro Editoriais**."
+                )
             
-            mode_manual = st.radio("Modo de Seleção:", ["📜 Blocos de Legenda (Estilo YouTube)", "⏱️ Intervalos de 1 Minuto"], horizontal=True)
+                col_sh_max, col_sh_btn = st.columns([1.5, 2.5])
+                with col_sh_max:
+                    saved_max_shorts = float(_cfg.get("shorts_max_seconds", 60.0))
+                    shorts_max_secs = st.number_input(
+                        "⏱️ Duração Máxima do Short (segundos):",
+                        min_value=15.0,
+                        max_value=180.0,
+                        value=saved_max_shorts,
+                        step=5.0,
+                        key="shorts_max_seconds_input",
+                        on_change=lambda: save_setting("shorts_max_seconds", st.session_state.shorts_max_seconds_input),
+                        help="Define o teto de duração máxima para cada corte vertical gerado (Shorts, Reels, TikTok)."
+                    )
+    
+                with col_sh_btn:
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                    _btn_sh_label = f"🔥 Gerar / Reestruturar Pequenos Cortes (Até {shorts_max_secs:.0f}s)"
+                    if st.button(_btn_sh_label, key="btn_shorts", type="primary", use_container_width=True):
+                        with st.spinner(f"Estruturando pequenos cortes (máx. {shorts_max_secs:.0f}s) sob as 6 Regras de Ouro..."):
+                            if 'pautas' in st.session_state and st.session_state.pautas:
+                                st.session_state.shorts = build_golden_rule_micro_cuts(
+                                    st.session_state.pautas,
+                                    st.session_state.segments,
+                                    max_duration_s=shorts_max_secs
+                                )
+                            else:
+                                res = analyze_transcript(
+                                    chunked_transcript, "ganchos",
+                                    model=ollama_model,
+                                    chunks_list=chunks_list,
+                                    segments=st.session_state.segments,
+                                    strategy="qa_interview" if "Entrevistas" in strategy_choice else "semantic_topics",
+                                    max_shorts_seconds=shorts_max_secs
+                                )
+                                if res.get("error"):
+                                    st.error(f"Erro na análise: {res['error']}")
+                                else:
+                                    st.session_state.shorts = res.get("micro_cuts", []) or res.get("cortes", [])
+                                    st.session_state.pautas = res.get("pautas", [])
+                                    st.session_state.ai_raw = res.get("raw", "")
+                        
+                            active_u = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                            v_id = get_video_id(active_u)
+                            if v_id and 'shorts' in st.session_state:
+                                sh_file = os.path.join("data", v_id, "shorts.json")
+                                with open(sh_file, "w", encoding="utf-8") as f:
+                                    json.dump(st.session_state.shorts, f, ensure_ascii=False, indent=4)
+                            st.rerun()
+    
+                if "batch_feedback" in st.session_state:
+                    fb = st.session_state.pop("batch_feedback")
+                    if fb.get("type") == "success":
+                        st.success(fb.get("msg", ""))
+                    elif fb.get("type") == "warning":
+                        st.warning(fb.get("msg", ""))
+                    else:
+                        st.error(fb.get("msg", ""))
+    
+                if 'shorts' in st.session_state and st.session_state.shorts:
+                    # Reseta seleção de checkboxes de forma segura antes da instanciação dos widgets
+                    if st.session_state.get("_reset_batch_selection"):
+                        st.session_state["_reset_batch_selection"] = False
+                        for s_i in range(len(st.session_state.shorts)):
+                            st.session_state[f"chk_short_{s_i}"] = False
+                        st.session_state["batch_short_selected"] = {}
+    
+                    if "batch_short_selected" not in st.session_state:
+                        st.session_state["batch_short_selected"] = {}
+    
+                    col_bk1, col_bk2, col_bk3, _ = st.columns([1.4, 1.4, 1.4, 1.8])
+                    with col_bk1:
+                        if st.button("☑️ Marcar Tudo", key="btn_sel_all_shorts", use_container_width=True):
+                            for s_i, s_item in enumerate(st.session_state.shorts):
+                                st.session_state[f"chk_short_{s_i}"] = True
+                                st.session_state["batch_short_selected"][s_i] = s_item
+                            st.rerun()
+                    with col_bk2:
+                        if st.button("⬜ Desmarcar Tudo", key="btn_clear_shorts_batch", use_container_width=True):
+                            st.session_state["_reset_batch_selection"] = True
+                            st.rerun()
+                    with col_bk3:
+                        if st.button("🔄 Inverter Seleção", key="btn_invert_shorts_batch", use_container_width=True):
+                            for s_i, s_item in enumerate(st.session_state.shorts):
+                                cur_val = st.session_state.get(f"chk_short_{s_i}", False)
+                                new_val = not cur_val
+                                st.session_state[f"chk_short_{s_i}"] = new_val
+                                if new_val:
+                                    st.session_state["batch_short_selected"][s_i] = s_item
+                                else:
+                                    st.session_state["batch_short_selected"].pop(s_i, None)
+                            st.rerun()
+    
+                    st.markdown(f"### 🎬 Pequenos Cortes Gerados ({len(st.session_state.shorts)}):")
+                    for idx, s in enumerate(st.session_state.shorts):
+                        with st.container():
+                            col_chk, col_info = st.columns([0.3, 4.7])
+                            with col_chk:
+                                chk_val = st.checkbox("Fila", key=f"chk_short_{idx}", label_visibility="collapsed")
+                                if chk_val:
+                                    st.session_state["batch_short_selected"][idx] = s
+                                else:
+                                    st.session_state["batch_short_selected"].pop(idx, None)
+                            with col_info:
+                                st.markdown(f"**{s.get('type', 'Corte')}** | `[{s['start']} → {s['end']}]` **{s['title']}**")
+                                st.caption(f"⏱️ Duração: **{s.get('duration_label', '')}**")
+                                if s.get('snippet'):
+                                    st.markdown(f"💬 *\"{s['snippet']}\"*")
+                            st.divider()
+    
+                    # ── PAINEL DA FILA DE PRODUÇÃO EM LOTE ────────────────────────────
+                    selected_items = list(st.session_state["batch_short_selected"].values())
+                    if selected_items:
+                        with st.container():
+                            st.markdown("---")
+                            st.markdown(f"### 📦 Fila de Produção em Lote (**{len(selected_items)}** cortes selecionados)")
+                        
+                            _batch_aspect_list = [
+                                "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)",
+                                "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)",
+                                "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen - Estilo Podpah & Flow)",
+                                "📱 Vertical 9:16 (Corte Central 100% Tela)",
+                                "💻 Horizontal 16:9 (Original 1080p Full HD)"
+                            ]
+                            _default_b_aspect = _cfg.get("aspect_option", _batch_aspect_list[0])
+                            _b_idx = _batch_aspect_list.index(_default_b_aspect) if _default_b_aspect in _batch_aspect_list else 0
+    
+                            col_bp1, col_bp2 = st.columns(2)
+                            with col_bp1:
+                                batch_aspect_choice = st.selectbox(
+                                    "📐 Enquadramento para o Lote:",
+                                    _batch_aspect_list,
+                                    index=_b_idx,
+                                    key="batch_aspect_select"
+                                )
+                                b_aspect_map = {
+                                    "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)": "9:16_blur",
+                                    "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)": "9:16_smart_face",
+                                    "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen - Estilo Podpah & Flow)": "9:16_split",
+                                    "📱 Vertical 9:16 (Corte Central 100% Tela)": "9:16_crop",
+                                    "💻 Horizontal 16:9 (Original 1080p Full HD)": "16:9"
+                                }
+                                batch_aspect_mode = b_aspect_map[batch_aspect_choice]
+                                st.caption(f"🎯 Modo ativo: `{batch_aspect_mode}`")
+    
+                            with col_bp2:
+                                batch_sub_enabled = st.toggle("✨ Ativar Legendas Dinâmicas", value=_cfg.get("subtitle_enabled", True), key="batch_sub_toggle")
+                                st.caption(f"Fontes e cores: {_cfg.get('subtitle_font_size', 80)}px • Destaque {_cfg.get('subtitle_highlight_color', '#FFFF00')}")
+    
+                            with st.expander("⚙️ Personalizações da Fase 3 & 4 para o Lote (Headlines, Retenção, Capas & Áudio)", expanded=False):
+                                col_bopt1, col_bopt2 = st.columns(2)
+                                with col_bopt1:
+                                    b_hl_on = st.toggle("🏷️ Headline de Retenção no Topo", value=_cfg.get("headline_enabled", False), key="b_hl_toggle")
+                                    b_em_on = st.toggle("😃 Emojis Contextuais", value=_cfg.get("emojis_enabled", False), key="b_em_toggle")
+                                    b_zp_on = st.toggle("🔍 Zoom Punch Dinâmico", value=_cfg.get("zoom_punch_enabled", False), key="b_zp_toggle")
+                                    b_cz_on = st.toggle("🎯 Zoom de Clímax na Frase Final", value=_cfg.get("climax_zoom_enabled", False), key="b_cz_toggle")
+                                with col_bopt2:
+                                    b_pb_on = st.toggle("⏳ Barra de Progresso no Rodapé", value=_cfg.get("progress_bar_enabled", False), key="b_pb_toggle")
+                                    b_co_on = st.toggle("📌 Banner de Chamada / Callout", value=_cfg.get("callout_enabled", False), key="b_co_toggle")
+                                    b_th_on = st.toggle("🖼️ Gerar Capa / Thumbnail 9:16", value=_cfg.get("thumbnail_enabled", True), key="b_th_toggle")
+                                    b_bgm_on = st.toggle("🎵 Trilha Sonora & Ducking", value=_cfg.get("bg_music_enabled", False), key="b_bgm_toggle")
+                                    if b_bgm_on:
+                                        b_bgm_trk = st.selectbox(
+                                            "Trilha:",
+                                            ["lofi_chill", "dynamic_pulse", "tension_suspense", "inspirational_epic"],
+                                            format_func=lambda x: {"lofi_chill": "🧘 Lo-Fi Chill", "dynamic_pulse": "⚡ Dinâmica", "tension_suspense": "🔥 Tensão", "inspirational_epic": "✨ Inspiracional"}.get(x, x),
+                                            key="b_bgm_trk_sel"
+                                        )
+                                    else:
+                                        b_bgm_trk = _cfg.get("bg_music_track_id", "lofi_chill")
+    
+                            batch_force_rerender = st.checkbox(
+                                "🔄 Forçar Re-renderização de Cortes Já Gerados",
+                                value=False,
+                                help="Por padrão, a aplicação pula e reaproveita cortes que já foram gerados neste formato. Marque para reprocessar tudo."
+                            )
+    
+                            if st.button(f"⚡ Iniciar Renderização em Lote ({len(selected_items)} Cortes)", type="primary", use_container_width=True, key="btn_start_batch"):
+                                _active_u_batch = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                                _vid_id_batch = get_video_id(_active_u_batch)
+                                if not _vid_id_batch:
+                                    st.error("URL do vídeo do YouTube não identificada.")
+                                else:
+                                    prog_bar = st.progress(0)
+                                    status_box = st.empty()
+    
+                                    live_logs_list = []
+    
+                                    def _batch_cb(cur, tot, msg):
+                                        pct = int((cur / max(tot, 1)) * 100)
+                                        prog_bar.progress(min(pct, 100))
+                                        status_box.info(f"**Progresso ({cur}/{tot}):** {msg}")
+    
+                                    def _log_cb(line):
+                                        live_logs_list.append(line)
+    
+                                    batch_params_merged = dict(_cfg)
+                                    batch_params_merged.update({
+                                        "headline_enabled": b_hl_on,
+                                        "emojis_enabled": b_em_on,
+                                        "zoom_punch_enabled": b_zp_on,
+                                        "climax_zoom_enabled": b_cz_on,
+                                        "progress_bar_enabled": b_pb_on,
+                                        "callout_enabled": b_co_on,
+                                        "callout_text": _cfg.get("callout_text", "💬 O que você acha? Comente abaixo!"),
+                                        "thumbnail_enabled": b_th_on,
+                                        "bg_music_enabled": b_bgm_on,
+                                        "bg_music_track_id": b_bgm_trk,
+                                    })
+    
+                                    batch_res = process_batch_cuts(
+                                        video_id=_vid_id_batch,
+                                        active_url=_active_u_batch,
+                                        cut_items=selected_items,
+                                        aspect_ratio_mode=batch_aspect_mode,
+                                        subtitle_enabled=batch_sub_enabled,
+                                        subtitle_highlight_color=_cfg.get("subtitle_highlight_color", "#FFFF00"),
+                                        subtitle_base_color=_cfg.get("subtitle_base_color", "#FFFFFF"),
+                                        subtitle_font_size=_cfg.get("subtitle_font_size", 80),
+                                        ollama_model=ollama_model,
+                                        aspect_params=batch_params_merged,
+                                        force_rerender=batch_force_rerender,
+                                        progress_callback=_batch_cb,
+                                        log_callback=_log_cb
+                                    )
+    
+                                    prog_bar.progress(100)
+    
+                                    # Salva todos os logs completos para visualização e cópia
+                                    full_logs_text = "\n".join(live_logs_list)
+                                    st.session_state["last_batch_logs"] = full_logs_text
+    
+                                    # Agenda o reset limpo dos checkboxes para a próxima renderização
+                                    st.session_state["_reset_batch_selection"] = True
+    
+                                    success_count = sum(1 for r in batch_res if r.get("success"))
+                                    error_items = [r for r in batch_res if r.get("error")]
+    
+                                    if error_items:
+                                        err_details = "\n".join([f"- **{e.get('title', 'Corte')}**: {e.get('error')}" for e in error_items])
+                                        st.session_state["batch_feedback"] = {
+                                            "type": "warning" if success_count > 0 else "error",
+                                            "msg": f"Processamento concluído com {success_count} sucesso(s) e {len(error_items)} erro(s):\n{err_details}"
+                                        }
+                                    else:
+                                        st.session_state["batch_feedback"] = {
+                                            "type": "success",
+                                            "msg": f"🎉 **Renderização em lote concluída com sucesso!** {success_count} cortes gerados e disponíveis na Galeria (Seção 4)."
+                                        }
+                                    st.rerun()
+    
+            # ── TAB 4: SELEÇÃO MANUAL ────────────────────────────────────────────────
+            with tab_manual:
             
-            if mode_manual == "📜 Blocos de Legenda (Estilo YouTube)":
-                if yt_blocks:
-                    block_labels = [
-                        f"[{b['time_label']}]  {b['text'][:90]}..."
-                        for b in yt_blocks
-                    ]
-                    col_s, col_e = st.columns(2)
-                    idx_start = col_s.selectbox("Fala de Início:", range(len(yt_blocks)),
-                                                 format_func=lambda i: block_labels[i], key="yt_block_start")
-                    idx_end = col_e.selectbox("Fala de Fim:", range(len(yt_blocks)),
-                                               format_func=lambda i: block_labels[i],
-                                               index=min(len(yt_blocks)-1, 50), key="yt_block_end")
+                mode_manual = st.radio("Modo de Seleção:", ["📜 Blocos de Legenda (Estilo YouTube)", "⏱️ Intervalos de 1 Minuto"], horizontal=True)
+            
+                if mode_manual == "📜 Blocos de Legenda (Estilo YouTube)":
+                    if yt_blocks:
+                        block_labels = [
+                            f"[{b['time_label']}]  {b['text'][:90]}..."
+                            for b in yt_blocks
+                        ]
+                        col_s, col_e = st.columns(2)
+                        idx_start = col_s.selectbox("Fala de Início:", range(len(yt_blocks)),
+                                                     format_func=lambda i: block_labels[i], key="yt_block_start")
+                        idx_end = col_e.selectbox("Fala de Fim:", range(len(yt_blocks)),
+                                                   format_func=lambda i: block_labels[i],
+                                                   index=min(len(yt_blocks)-1, 50), key="yt_block_end")
                     
-                    if idx_start is not None and idx_end is not None:
-                        if idx_end >= idx_start:
-                            start_s = yt_blocks[idx_start]['start']
-                            end_s = yt_blocks[idx_end]['end']
-                            st.success(f"Trecho Selecionado: **{format_time(start_s)}** → **{format_time(end_s)}** ({(end_s - start_s)/60:.1f} min)")
-                            if st.button("✂️ Usar este trecho na Fábrica de Cortes", key="btn_manual_yt"):
-                                st.session_state.final_start_time = format_time(start_s)
-                                st.session_state.final_end_time = format_time(end_s)
-                                st.session_state.final_corte_title = f"Corte Manual [{yt_blocks[idx_start]['time_label']} - {yt_blocks[idx_end]['time_label']}]"
-                                st.session_state.cut_ready_banner = f"✅ Corte manual: [{format_time(start_s)} → {format_time(end_s)}]"
-                                st.rerun()
-                        else:
-                            st.warning("⚠️ A fala de fim deve ser posterior ou igual à fala de início.")
+                        if idx_start is not None and idx_end is not None:
+                            if idx_end >= idx_start:
+                                start_s = yt_blocks[idx_start]['start']
+                                end_s = yt_blocks[idx_end]['end']
+                                st.success(f"Trecho Selecionado: **{format_time(start_s)}** → **{format_time(end_s)}** ({(end_s - start_s)/60:.1f} min)")
+                                if st.button("✂️ Usar este trecho na Fábrica de Cortes", key="btn_manual_yt"):
+                                    st.session_state.final_start_time = format_time(start_s)
+                                    st.session_state.final_end_time = format_time(end_s)
+                                    st.session_state.final_corte_title = f"Corte Manual [{yt_blocks[idx_start]['time_label']} - {yt_blocks[idx_end]['time_label']}]"
+                                    st.session_state.cut_ready_banner = f"✅ Corte manual: [{format_time(start_s)} → {format_time(end_s)}]"
+                                    st.rerun()
+                            else:
+                                st.warning("⚠️ A fala de fim deve ser posterior ou igual à fala de início.")
+                    else:
+                        st.info("Nenhum bloco de legenda disponível para seleção manual neste vídeo.")
                 else:
-                    st.info("Nenhum bloco de legenda disponível para seleção manual neste vídeo.")
-            else:
-                if chunks_list:
-                    chunk_labels = [
-                        f"[{format_time(c['start'])} - {format_time(c['end'])}]  {c['text'][:80]}..."
-                        for c in chunks_list
-                    ]
-                    col_s, col_e = st.columns(2)
-                    idx_start = col_s.selectbox("Chunk de Início:", range(len(chunks_list)),
-                                                 format_func=lambda i: chunk_labels[i], key="manual_start")
-                    idx_end = col_e.selectbox("Chunk de Fim:", range(len(chunks_list)),
-                                               format_func=lambda i: chunk_labels[i],
-                                               index=min(len(chunks_list)-1, 9), key="manual_end")
+                    if chunks_list:
+                        chunk_labels = [
+                            f"[{format_time(c['start'])} - {format_time(c['end'])}]  {c['text'][:80]}..."
+                            for c in chunks_list
+                        ]
+                        col_s, col_e = st.columns(2)
+                        idx_start = col_s.selectbox("Chunk de Início:", range(len(chunks_list)),
+                                                     format_func=lambda i: chunk_labels[i], key="manual_start")
+                        idx_end = col_e.selectbox("Chunk de Fim:", range(len(chunks_list)),
+                                                   format_func=lambda i: chunk_labels[i],
+                                                   index=min(len(chunks_list)-1, 9), key="manual_end")
                     
-                    if idx_start is not None and idx_end is not None:
-                        if idx_end >= idx_start:
-                            start_s = chunks_list[idx_start]['start']
-                            end_s = chunks_list[idx_end]['end']
-                            st.success(f"Trecho: **{format_time(start_s)}** → **{format_time(end_s)}** ({(end_s - start_s)/60:.1f} min)")
-                            if st.button("✂️ Usar este trecho na Fábrica de Cortes", key="btn_manual"):
-                                st.session_state.final_start_time = format_time(start_s)
-                                st.session_state.final_end_time = format_time(end_s)
-                                st.session_state.final_corte_title = "Corte Manual"
-                                st.session_state.cut_ready_banner = f"✅ Corte manual: [{format_time(start_s)} → {format_time(end_s)}]"
-                                st.rerun()
-                        else:
-                            st.warning("⚠️ O intervalo de fim deve ser posterior ou igual ao intervalo de início.")
-                else:
-                    st.info("Nenhum intervalo disponível para seleção manual.")
+                        if idx_start is not None and idx_end is not None:
+                            if idx_end >= idx_start:
+                                start_s = chunks_list[idx_start]['start']
+                                end_s = chunks_list[idx_end]['end']
+                                st.success(f"Trecho: **{format_time(start_s)}** → **{format_time(end_s)}** ({(end_s - start_s)/60:.1f} min)")
+                                if st.button("✂️ Usar este trecho na Fábrica de Cortes", key="btn_manual"):
+                                    st.session_state.final_start_time = format_time(start_s)
+                                    st.session_state.final_end_time = format_time(end_s)
+                                    st.session_state.final_corte_title = "Corte Manual"
+                                    st.session_state.cut_ready_banner = f"✅ Corte manual: [{format_time(start_s)} → {format_time(end_s)}]"
+                                    st.rerun()
+                            else:
+                                st.warning("⚠️ O intervalo de fim deve ser posterior ou igual ao intervalo de início.")
+                    else:
+                        st.info("Nenhum intervalo disponível para seleção manual.")
     
     
-        if 'ai_raw' in st.session_state and st.session_state.ai_raw:
-            with st.expander("🔍 Detalhes do Log da IA (Debug)"):
-                st.code(st.session_state.ai_raw)
+            if 'ai_raw' in st.session_state and st.session_state.ai_raw:
+                with st.expander("🔍 Detalhes do Log da IA (Debug)"):
+                    st.code(st.session_state.ai_raw)
     
-        st.markdown("---")
-        st.markdown('<div id="secao-fabrica-de-cortes"></div>', unsafe_allow_html=True)
-        if st.session_state.pop("scroll_to_section3", False):
-            st.html("""
-                <script>
-                    setTimeout(() => {
-                        const el = document.getElementById("secao-fabrica-de-cortes");
-                        if (el) {
-                            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        }
-                    }, 120);
-                </script>
-            """, unsafe_allow_javascript=True)
+            st.markdown("---")
+            st.markdown('<div id="secao-fabrica-de-cortes"></div>', unsafe_allow_html=True)
+            if st.session_state.pop("scroll_to_section3", False):
+                st.html("""
+                    <script>
+                        setTimeout(() => {
+                            const el = document.getElementById("secao-fabrica-de-cortes");
+                            if (el) {
+                                el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            }
+                        }, 120);
+                    </script>
+                """, unsafe_allow_javascript=True)
     
-        if workflow_step.startswith('2.'):
-            st.markdown('<br>', unsafe_allow_html=True)
-            col_nav_2to3, _ = st.columns([1.6, 3])
-            with col_nav_2to3:
-                if st.button('✂️ Ir para Fábrica de Enquadramento 9:16 (Seção 3) ➔', type='primary', use_container_width=True, key='btn_nav_s2_to_s3'):
-                    navigate_to_step('3')
-                    st.rerun()
+            if workflow_step.startswith('2.'):
+                st.markdown('<br>', unsafe_allow_html=True)
+                col_nav_2to3, _ = st.columns([1.6, 3])
+                with col_nav_2to3:
+                    if st.button('✂️ Ir para Fábrica de Enquadramento 9:16 (Seção 3) ➔', type='primary', use_container_width=True, key='btn_nav_s2_to_s3'):
+                        navigate_to_step('3')
+                        st.rerun()
 
     if show_sec3:
         sec3_b_text = 'Intervalo Ativo' if st.session_state.get('final_start_time') else 'Fábrica 9:16'
