@@ -4559,26 +4559,86 @@ if _has_media_ready:
                     if s_cur or e_cur:
                         st.caption(f"🎯 **Configurado na Seção 3**: `[{s_cur or '00:00:00.00'} → {e_cur or '...'}]`")
             else:
-                st.warning("⚠️ **Arquivo de vídeo MP4 ainda não baixado para esta pasta.** O áudio e a transcrição estão prontos.")
-                col_down_v1, col_down_v2 = st.columns([1.5, 1])
-                with col_down_v1:
-                    if st.button("⏬ Baixar Vídeo MP4 Completo Agora", key="btn_download_missing_v_s1", type="primary", use_container_width=True):
-                        with st.spinner("⏬ Baixando vídeo Full HD na pasta local..."):
-                            os.makedirs(main_dir, exist_ok=True)
-                            _vres = download_full_video(
-                                active_u_main,
-                                main_video_path,
-                                is_live=False,
-                                start_sec=parse_time_str(st.session_state.get("input_yt_slice_start", "")),
-                                end_sec=parse_time_str(st.session_state.get("input_yt_slice_end", ""))
-                            )
-                        if os.path.exists(main_video_path) and os.path.getsize(main_video_path) > 10240:
-                            st.success("🎥 Vídeo baixado com sucesso!")
-                            st.rerun()
-                        else:
-                            st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
-                with col_down_v2:
-                    st.caption("Ao baixar, você poderá assistir e cortar o vídeo com resolução máxima nesta mesma aba.")
+                _is_live_s1 = False
+                if main_dir and os.path.exists(os.path.join(main_dir, "metadata.json")):
+                    try:
+                        with open(os.path.join(main_dir, "metadata.json"), "r", encoding="utf-8") as _mf:
+                            _is_live_s1 = bool(json.load(_mf).get("is_live", False))
+                    except Exception:
+                        pass
+                if not _is_live_s1:
+                    _is_live_s1 = bool(st.session_state.get("is_live_stream", False))
+
+                if _is_live_s1:
+                    st.warning("🔴 **Transmissão Ao Vivo (LIVE)**: O arquivo de vídeo MP4 ainda não foi capturado. Escolha a janela de tempo com **Freeze Live Edge** (download ultrarrápido sem loops):")
+                    _s1_col1, _s1_col2, _s1_col3, _s1_col4 = st.columns(4)
+                    with _s1_col1:
+                        if st.button("⚡ Últimos 15 min", key="btn_s1_live_15m", type="primary", use_container_width=True):
+                            with st.spinner("🔴 Capturando últimos 15 min da live em alta velocidade..."):
+                                os.makedirs(main_dir, exist_ok=True)
+                                _vres = download_full_video(active_u_main, main_video_path, is_live=True, recent_minutes=15.0)
+                            if os.path.exists(main_video_path) and os.path.getsize(main_video_path) > 10240:
+                                st.success("🎥 Últimos 15 min capturados com sucesso!")
+                                st.rerun()
+                            else:
+                                st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
+                    with _s1_col2:
+                        if st.button("⚡ Últimos 30 min", key="btn_s1_live_30m", use_container_width=True):
+                            with st.spinner("🔴 Capturando últimos 30 min da live em alta velocidade..."):
+                                os.makedirs(main_dir, exist_ok=True)
+                                _vres = download_full_video(active_u_main, main_video_path, is_live=True, recent_minutes=30.0)
+                            if os.path.exists(main_video_path) and os.path.getsize(main_video_path) > 10240:
+                                st.success("🎥 Últimos 30 min capturados com sucesso!")
+                                st.rerun()
+                            else:
+                                st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
+                    with _s1_col3:
+                        if st.button("⏱️ Intervalo Configurado", key="btn_s1_live_interval", use_container_width=True):
+                            with st.spinner("🔴 Capturando intervalo configurado da live..."):
+                                os.makedirs(main_dir, exist_ok=True)
+                                _vres = download_full_video(
+                                    active_u_main,
+                                    main_video_path,
+                                    is_live=True,
+                                    start_sec=parse_time_str(st.session_state.get("input_yt_slice_start", "")),
+                                    end_sec=parse_time_str(st.session_state.get("input_yt_slice_end", ""))
+                                )
+                            if os.path.exists(main_video_path) and os.path.getsize(main_video_path) > 10240:
+                                st.success("🎥 Intervalo capturado com sucesso!")
+                                st.rerun()
+                            else:
+                                st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
+                    with _s1_col4:
+                        if st.button("🔴 Buffer Completo", key="btn_s1_live_full", use_container_width=True):
+                            with st.spinner("🔴 Capturando buffer completo da live até o momento..."):
+                                os.makedirs(main_dir, exist_ok=True)
+                                _vres = download_full_video(active_u_main, main_video_path, is_live=True)
+                            if os.path.exists(main_video_path) and os.path.getsize(main_video_path) > 10240:
+                                st.success("🎥 Buffer completo capturado com sucesso!")
+                                st.rerun()
+                            else:
+                                st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
+                else:
+                    st.warning("⚠️ **Arquivo de vídeo MP4 ainda não baixado para esta pasta.** O áudio e a transcrição estão prontos.")
+                    col_down_v1, col_down_v2 = st.columns([1.5, 1])
+                    with col_down_v1:
+                        if st.button("⏬ Baixar Vídeo MP4 Completo Agora", key="btn_download_missing_v_s1", type="primary", use_container_width=True):
+                            with st.spinner("⏬ Baixando vídeo Full HD na pasta local..."):
+                                os.makedirs(main_dir, exist_ok=True)
+                                _vres = download_full_video(
+                                    active_u_main,
+                                    main_video_path,
+                                    is_live=False,
+                                    start_sec=parse_time_str(st.session_state.get("input_yt_slice_start", "")),
+                                    end_sec=parse_time_str(st.session_state.get("input_yt_slice_end", ""))
+                                )
+                            if os.path.exists(main_video_path) and os.path.getsize(main_video_path) > 10240:
+                                st.success("🎥 Vídeo baixado com sucesso!")
+                                st.rerun()
+                            else:
+                                st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
+                    with col_down_v2:
+                        st.caption("Ao baixar, você poderá assistir e cortar o vídeo com resolução máxima nesta mesma aba.")
 
         if main_audio_path and os.path.exists(main_audio_path) and os.path.getsize(main_audio_path) > 0:
             with st.expander("🎵 Faixa de Áudio Isolada do Vídeo Completo (MP3 de Alta Fidelidade)", expanded=False):

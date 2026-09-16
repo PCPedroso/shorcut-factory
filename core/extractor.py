@@ -508,15 +508,13 @@ def download_audio(
     """
     # 🔴 Para transmissões ao vivo, aciona o snapshot M3U8 de alta velocidade
     if is_live:
-        snap_res = download_live_audio_snapshot(
+        return download_live_audio_snapshot(
             url=url,
             output_path=output_path,
             start_sec=start_sec,
             end_sec=end_sec,
             recent_minutes=recent_minutes
         )
-        if snap_res.get("path") and os.path.exists(snap_res["path"]):
-            return snap_res
 
     ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
     cookie_file = get_cookie_file()

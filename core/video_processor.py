@@ -461,6 +461,10 @@ def download_live_video_snapshot(
 
             if best_v and best_a and best_v.get('url') and best_a.get('url'):
                 # 🔴 MODO HLS SNAPSHOT RÁPIDO COM FREEZE LIVE EDGE
+                import concurrent.futures
+                import shutil
+                import uuid
+
                 req_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
                 
                 v_req = urllib.request.Request(best_v['url'], headers=req_headers)
@@ -498,41 +502,65 @@ def download_live_video_snapshot(
                     if target_start >= target_end:
                         target_start = max(min_base, target_end - max(1, len(pairs_v)))
 
-                    temp_v_m3u8 = os.path.join(out_dir, f"_temp_live_v_{os.getpid()}.m3u8")
-                    temp_a_m3u8 = os.path.join(out_dir, f"_temp_live_a_{os.getpid()}.m3u8")
-                    temp_v_mp4 = os.path.join(out_dir, f"_temp_live_v_{os.getpid()}.mp4")
-                    temp_a_mp4 = os.path.join(out_dir, f"_temp_live_a_{os.getpid()}.mp4")
+                    # Filtra segmentos da janela congelada
+                    v_sub = [
+                        (i, pair) for i, pair in enumerate(pairs_v)
+                        if target_start <= (seq_v + i) < target_end
+                    ]
+                    a_sub = [
+                        (i, pair) for i, pair in enumerate(pairs_a)
+                        if target_start <= (seq_a + i) < target_end
+                    ]
+
+                    # Diretório temporário único para download simultâneo de segmentos
+                    temp_dir = os.path.join(out_dir, f"_temp_live_segs_{os.getpid()}_{uuid.uuid4().hex[:6]}")
+                    os.makedirs(temp_dir, exist_ok=True)
 
                     try:
-                        with open(temp_v_m3u8, 'w', encoding='utf-8') as f:
-                            f.write(build_finite_m3u8(seq_v, dur_v, pairs_v, target_start, target_end))
-                        with open(temp_a_m3u8, 'w', encoding='utf-8') as f:
-                            f.write(build_finite_m3u8(seq_a, dur_a, pairs_a, target_start, target_end))
+                        def _dl_seg_worker(item):
+                            idx, (dur_val, u_val), prefix = item
+                            out_ts = os.path.join(temp_dir, f"{prefix}_{idx:05d}.ts")
+                            seg_req = urllib.request.Request(u_val, headers=req_headers)
+                            for _attempt in range(3):
+                                try:
+                                    with urllib.request.urlopen(seg_req, timeout=15) as _resp:
+                                        data = _resp.read()
+                                        if data:
+                                            with open(out_ts, "wb") as _f_ts:
+                                                _f_ts.write(data)
+                                            return out_ts
+                                except Exception:
+                                    time.sleep(0.3)
+                            return None
 
-                        cmd_v = [
-                            FFMPEG_EXE, '-y',
-                            '-protocol_whitelist', 'file,http,https,tcp,tls',
-                            '-i', temp_v_m3u8,
-                            '-c', 'copy',
-                            temp_v_mp4
-                        ]
-                        subprocess.run(cmd_v, capture_output=True, text=True, timeout=300)
+                        tasks = (
+                            [(idx, p, 'v') for idx, p in v_sub] +
+                            [(idx, p, 'a') for idx, p in a_sub]
+                        )
 
-                        cmd_a = [
-                            FFMPEG_EXE, '-y',
-                            '-protocol_whitelist', 'file,http,https,tcp,tls',
-                            '-i', temp_a_m3u8,
-                            '-c', 'copy',
-                            temp_a_mp4
-                        ]
-                        subprocess.run(cmd_a, capture_output=True, text=True, timeout=300)
+                        # Download paralelo de até 24 fragmentos simultâneos (15 a 40x em tempo real)
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=24) as executor:
+                            dl_results = list(executor.map(_dl_seg_worker, tasks))
 
-                        if os.path.exists(temp_v_mp4) and os.path.getsize(temp_v_mp4) > 1024:
-                            if os.path.exists(temp_a_mp4) and os.path.getsize(temp_a_mp4) > 1024:
+                        v_files = sorted([r for r in dl_results if r and os.path.basename(r).startswith('v_')])
+                        a_files = sorted([r for r in dl_results if r and os.path.basename(r).startswith('a_')])
+
+                        if v_files:
+                            v_list_file = os.path.join(temp_dir, "v_list.txt")
+                            with open(v_list_file, "w", encoding="utf-8") as _vf:
+                                for _vf_path in v_files:
+                                    _vf.write(f"file '{os.path.basename(_vf_path)}'\n")
+
+                            if a_files:
+                                a_list_file = os.path.join(temp_dir, "a_list.txt")
+                                with open(a_list_file, "w", encoding="utf-8") as _af:
+                                    for _af_path in a_files:
+                                        _af.write(f"file '{os.path.basename(_af_path)}'\n")
+
                                 cmd_mux = [
                                     FFMPEG_EXE, '-y',
-                                    '-i', temp_v_mp4,
-                                    '-i', temp_a_mp4,
+                                    '-f', 'concat', '-safe', '0', '-i', 'v_list.txt',
+                                    '-f', 'concat', '-safe', '0', '-i', 'a_list.txt',
                                     '-c:v', 'copy',
                                     '-c:a', 'copy',
                                     '-movflags', '+faststart',
@@ -541,22 +569,18 @@ def download_live_video_snapshot(
                             else:
                                 cmd_mux = [
                                     FFMPEG_EXE, '-y',
-                                    '-i', temp_v_mp4,
+                                    '-f', 'concat', '-safe', '0', '-i', 'v_list.txt',
                                     '-c', 'copy',
                                     '-movflags', '+faststart',
                                     output_path
                                 ]
-                            subprocess.run(cmd_mux, capture_output=True, text=True, timeout=120)
 
-                        if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
-                            return {"path": output_path, "error": None}
+                            subprocess.run(cmd_mux, cwd=temp_dir, capture_output=True, text=True, timeout=180)
+
+                            if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
+                                return {"path": output_path, "error": None}
                     finally:
-                        for _tf in [temp_v_m3u8, temp_a_m3u8, temp_v_mp4, temp_a_mp4]:
-                            if os.path.exists(_tf):
-                                try:
-                                    os.remove(_tf)
-                                except Exception:
-                                    pass
+                        shutil.rmtree(temp_dir, ignore_errors=True)
 
         # Fallback via yt-dlp sem live_from_start
         fallback_opts = {
@@ -607,15 +631,13 @@ def download_full_video(
 
         # 🔴 Se for live ao vivo, aciona o snapshot HLS de alta velocidade com Freeze Live Edge
         if is_live:
-            snap_res = download_live_video_snapshot(
+            return download_live_video_snapshot(
                 url=url,
                 output_path=output_path,
                 start_sec=start_sec,
                 end_sec=end_sec,
                 recent_minutes=recent_minutes
             )
-            if snap_res.get("path") and os.path.exists(snap_res["path"]):
-                return snap_res
 
         if os.path.exists(output_path):
             os.remove(output_path)

@@ -98,7 +98,6 @@ class TestLiveStreamSnapshotEngine(unittest.TestCase):
             ]
         }
 
-        # Mock urllib para retornar o m3u8
         resp_v = MagicMock()
         resp_v.read.return_value = SAMPLE_M3U8_TEXT.encode('utf-8')
         resp_v.__enter__.return_value = resp_v
@@ -107,7 +106,19 @@ class TestLiveStreamSnapshotEngine(unittest.TestCase):
         resp_a.read.return_value = SAMPLE_M3U8_TEXT.encode('utf-8')
         resp_a.__enter__.return_value = resp_a
 
-        mock_urlopen.side_effect = [resp_v, resp_a]
+        resp_seg = MagicMock()
+        resp_seg.read.return_value = b'dummy_ts_data'
+        resp_seg.__enter__.return_value = resp_seg
+
+        def _fake_urlopen(req, *args, **kwargs):
+            url_str = req.full_url if hasattr(req, 'full_url') else str(req)
+            if 'seg_' in url_str:
+                return resp_seg
+            if 'audio' in url_str:
+                return resp_a
+            return resp_v
+
+        mock_urlopen.side_effect = _fake_urlopen
         mock_subproc.return_value = MagicMock(returncode=0)
         mock_exists.return_value = True
         mock_getsize.return_value = 50000000
