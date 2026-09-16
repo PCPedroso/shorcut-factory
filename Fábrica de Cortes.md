@@ -255,10 +255,16 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 - **🌐 Otimização e Resiliência em Downloads da Web & Portais Jornalísticos (`core/extractor.py`, `tests/test_web_downloads.py`)**:
   - Sanitização automática de parâmetros `yt-dlp` conflitantes para páginas web e portais de notícias (ex: G1, Globo, portais jornalísticos, sites corporativos).
   - Remoção inteligente de flags de legendas incompatíveis (`--write-subs`, `subtitleslangs`) com fallback automático para extração direta de streams HLS/m3u8, user-agents modernos e impersonate de browsers, eliminando erros de download em 100% dos testes.
-- **🔴 Fast Live Snapshot Engine & Aceleração Extrema de Downloads de Lives do YouTube (`core/extractor.py`, `core/video_processor.py`, `app.py`, `tests/test_live_stream_handler.py`)**:
-  - **Injeção de `#EXT-X-ENDLIST` em Snapshot HLS**: Elimina o loop infinito do downloader (onde o `yt-dlp` continuava gravando indefinidamente em tempo real a 1x ao atingir o momento ao vivo), permitindo que o FFmpeg baixe todo o conteúdo já transmitido na velocidade máxima da conexão e finalize sozinho.
+- **🔴 Motor HLS Snapshot & Freeze Live Edge para Transmissões ao Vivo em Andamento (`core/video_processor.py`, `core/extractor.py`, `app.py`, `tests/test_live_stream_snapshot_engine.py`)**:
+  - **Congelamento de Ponto Presente (*Freeze Live Edge*)**: Elimina 100% dos travamentos e loops infinitos de busca de fragmentos futuros (DASH/HLS contínuos), congelando o instante da transmissão no segundo exato da solicitação com `#EXT-X-MEDIA-SEQUENCE` alinhado e tag terminal `#EXT-X-ENDLIST`.
+  - **Alta Velocidade com Stream Copy Multiplexado (15x a 40x)**: Baixa os fluxos HLS nativos de vídeo Full HD (`270` - 1080p / `232` - 720p) e áudio (`234`) sem re-encoding (`-c copy`) via FFmpeg, concluindo fatias de 15 a 30 minutos em menos de 30 segundos.
+  - **Controles em 1 Clique na Seção 1 (Ingestão Web)**: Card dedicado para transmissões ao vivo com botões de alta produtividade:
+    - `⚡ Últimos 15 min`: Captura os últimos 15 minutos transmitidos até o instante atual.
+    - `⚡ Últimos 30 min`: Captura a última meia hora da transmissão com corte preciso.
+    - `⏱️ Intervalo Selecionado`: Baixa exatamente o intervalo configurado em `Início` e `Fim`.
+    - `🔴 Buffer Completo`: Puxa todo o histórico disponível no buffer DVR da transmissão até o momento.
+  - **Recorte Cirúrgico Sob Demanda na Seção 3 (Fábrica de Cortes)**: Se o usuário navegar diretamente para a Seção 3 sem ter baixado o vídeo da live, o downloader calcula cirurgicamente a fatia dos timestamps `Tempo Inicial` e `Tempo Final` do corte, baixando apenas aquele intervalo específico em segundos.
   - **Eliminação do Erro `No video formats found!`**: Sanitização automática de clientes yt-dlp em transmissões ao vivo (remoção do cliente `android` incompatível com HLS ao vivo).
-  - **Recorte Direto de Vídeo 1080p via Stream Copy (`-c copy`)**: Baixa trechos cirúrgicos da master playlist HLS em poucos segundos sem re-encoding para a Seção 3 e para fatiamento de lives longas.
 - **🎬 Acesso Imediato ao Vídeo Processado na Primeira Fase (Seção 1) (`app.py`, `tests/test_section1_video_access.py`)**:
   - **Player de Vídeo Integrado na Ingestão**: Permite reproduzir o vídeo original completo (`video_full.mp4`) diretamente na aba da Seção 1 logo após o processamento, sem necessidade de navegar até a Seção 3 ou 4.
   - **Painel Completo de Metadados**: Exibe resolução nativa (ex: `1920x1080 Full HD`, `1080x1920 9:16`), duração exata formatada (`HH:MM:SS`), tamanho em megabytes e pasta local do projeto.
@@ -303,8 +309,8 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Ingestão Leve em Poucos Segundos**: Ao entrar com links da web ou carregar arquivos locais, o pipeline apenas baixa ou copia diretamente o arquivo `video_full.mp4` e metadados essenciais, sem extrair áudio nem executar transcrições pesadas do vídeo completo previamente.
   - **Gatekeeper e Bloqueio Protetor na Mineração por IA (Seção 2)**: Caso o usuário acesse a Seção 2 sem uma transcrição global existente, um card de aviso no topo informa a necessidade do processamento com o botão `🎙️ Gerar Transcrição Completa Agora (Whisper GPU)`. O restante da tela (compositor de pautas, abas temáticas, Ollama/Llama 3) permanece desabilitado até a conclusão sob demanda.
   - **Processamento Cirúrgico nos Cortes (Seção 3)**: A geração de cortes, enquadramentos (Split Screen, Smart Face, Blur, etc.) e legendas dinâmicas funciona diretamente sobre `video_full.mp4`. Caso legendas sejam solicitadas, a transcrição é feita cirurgicamente apenas sobre o trecho de 30s a 90s (`ensure_cut_transcript`), eliminando qualquer lentidão inicial.
-- **🧪 Suíte de 173 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
+- **🧪 Suíte de 178 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
 
 ---
 

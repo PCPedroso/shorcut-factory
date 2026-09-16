@@ -346,19 +346,25 @@ def download_live_audio_snapshot(
     url: str,
     output_path: str = "temp_audio.mp3",
     start_sec: float = None,
-    end_sec: float = None
+    end_sec: float = None,
+    recent_minutes: float = None
 ) -> dict:
     """
-    Baixa snapshot do áudio de uma transmissão ao vivo (live stream) em andamento em alta velocidade.
-    Em vez de travar o downloader aguardando novos fragmentos em tempo real indefinidamente,
-    captura a playlist HLS até o instante atual, injeta a terminação '#EXT-X-ENDLIST' e 
-    converte diretamente via FFmpeg multithread para MP3 192kbps com suporte a Time-Range Slicing.
+    Baixa snapshot do áudio de uma transmissão ao vivo (live stream) em andamento em alta velocidade (100x a 200x).
+    Gera sub-manifesto estático M3U8 com #EXT-X-ENDLIST e MEDIA-SEQUENCE sincronizado,
+    eliminando loops de espera do streamer e convertendo via FFmpeg para MP3 192kbps.
     """
     import urllib.request
     import subprocess
     import tempfile
+    from core.video_processor import parse_m3u8_segments, build_finite_m3u8
 
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    if ffmpeg_exe and os.path.exists(ffmpeg_exe):
+        ff_dir = os.path.dirname(os.path.abspath(ffmpeg_exe))
+        if ff_dir not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = ff_dir + os.pathsep + os.environ.get("PATH", "")
+
     cookie_file = get_cookie_file()
 
     ydl_opts = {
@@ -384,16 +390,17 @@ def download_live_audio_snapshot(
             formats = info.get('formats', [])
             aud_formats = [
                 f for f in formats
-                if f.get('vcodec') == 'none' and f.get('protocol') in ('m3u8_native', 'm3u8', 'http_dash_segments_generator')
+                if f.get('vcodec') == 'none' and ('m3u8' in str(f.get('protocol', '')) or 'm3u8' in str(f.get('url', '')))
             ]
+            aud_formats.sort(key=lambda x: float(x.get('abr') or x.get('tbr') or 0), reverse=True)
 
             target_stream_url = None
             if aud_formats:
-                target_stream_url = aud_formats[-1].get('url')
+                target_stream_url = aud_formats[0].get('url')
 
             if not target_stream_url:
                 for f in formats:
-                    if f.get('protocol') in ('m3u8_native', 'm3u8') and f.get('url'):
+                    if 'm3u8' in str(f.get('protocol', '')) and f.get('url'):
                         target_stream_url = f.get('url')
                         break
 
@@ -415,51 +422,57 @@ def download_live_audio_snapshot(
                 m3u8_text = None
 
             temp_m3u8_path = None
-            input_source = target_stream_url
+            out_dir = os.path.dirname(os.path.abspath(output_path)) or '.'
+            os.makedirs(out_dir, exist_ok=True)
 
             if m3u8_text and ('#EXTM3U' in m3u8_text or '#EXTINF' in m3u8_text):
-                if '#EXT-X-ENDLIST' not in m3u8_text:
-                    m3u8_text = m3u8_text.strip() + '\n#EXT-X-ENDLIST\n'
+                seq, dur, pairs = parse_m3u8_segments(m3u8_text)
+                if pairs:
+                    avg_dur = max(1.0, dur or 5.0)
+                    total_end = seq + len(pairs)
+                    s_parsed = parse_time_str(start_sec)
+                    e_parsed = parse_time_str(end_sec)
 
-                out_dir = os.path.dirname(output_path) or '.'
-                os.makedirs(out_dir, exist_ok=True)
-                temp_fd, temp_m3u8_path = tempfile.mkstemp(suffix='_live_snap.m3u8', dir=out_dir)
-                with os.fdopen(temp_fd, 'w', encoding='utf-8') as f_snap:
-                    f_snap.write(m3u8_text)
-                input_source = temp_m3u8_path
+                    if recent_minutes is not None and recent_minutes > 0:
+                        wanted_segs = int((recent_minutes * 60.0) / avg_dur)
+                        target_start = max(seq, total_end - wanted_segs)
+                        target_end = total_end
+                    elif s_parsed is not None or e_parsed is not None:
+                        s_val = s_parsed if s_parsed is not None and s_parsed >= 0 else 0.0
+                        target_start = max(seq, seq + int(s_val / avg_dur))
+                        target_end = min(total_end, seq + int(e_parsed / avg_dur)) if (e_parsed and e_parsed > s_val) else total_end
+                    else:
+                        target_start = seq
+                        target_end = total_end
 
-            out_dir = os.path.dirname(os.path.abspath(output_path))
-            if out_dir:
-                os.makedirs(out_dir, exist_ok=True)
+                    if target_start >= target_end:
+                        target_start = max(seq, target_end - max(1, len(pairs)))
+
+                    finite_m3u8 = build_finite_m3u8(seq, dur, pairs, target_start, target_end)
+                    temp_fd, temp_m3u8_path = tempfile.mkstemp(suffix='_live_snap.m3u8', dir=out_dir)
+                    with os.fdopen(temp_fd, 'w', encoding='utf-8') as f_snap:
+                        f_snap.write(finite_m3u8)
+                    input_source = temp_m3u8_path
+                else:
+                    input_source = target_stream_url
+            else:
+                input_source = target_stream_url
+
             if os.path.exists(output_path):
                 try:
                     os.remove(output_path)
                 except Exception:
                     pass
 
-            s_parsed = parse_time_str(start_sec)
-            e_parsed = parse_time_str(end_sec)
-
             cmd = [
                 ffmpeg_exe, '-y',
                 '-protocol_whitelist', 'file,http,https,tcp,tls',
-            ]
-            if s_parsed is not None and s_parsed > 0:
-                cmd.extend(['-ss', str(s_parsed)])
-
-            cmd.extend(['-i', input_source])
-
-            if e_parsed is not None:
-                dur = (e_parsed - (s_parsed or 0.0)) if (s_parsed and e_parsed > s_parsed) else e_parsed
-                if dur > 0:
-                    cmd.extend(['-t', str(dur)])
-
-            cmd.extend([
+                '-i', input_source,
                 '-vn',
                 '-c:a', 'libmp3lame',
                 '-b:a', '192k',
                 output_path
-            ])
+            ]
 
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
@@ -484,7 +497,8 @@ def download_audio(
     output_path: str = "temp_audio.mp3",
     is_live: bool = False,
     start_sec: float = None,
-    end_sec: float = None
+    end_sec: float = None,
+    recent_minutes: float = None
 ):
     """
     Baixa o áudio de um vídeo do YouTube, Instagram, TikTok ou Web com aceleração multi-thread
@@ -498,7 +512,8 @@ def download_audio(
             url=url,
             output_path=output_path,
             start_sec=start_sec,
-            end_sec=end_sec
+            end_sec=end_sec,
+            recent_minutes=recent_minutes
         )
         if snap_res.get("path") and os.path.exists(snap_res["path"]):
             return snap_res

@@ -117,15 +117,16 @@ class TestLiveStreamHandler(unittest.TestCase):
     @patch('yt_dlp.YoutubeDL')
     def test_download_live_video_snapshot_uses_yt_dlp(self, mock_ydl_cls):
         """
-        A nova arquitetura usa yt-dlp com live_from_start=True para baixar toda a live
-        do início, em vez de manipular manualmente o manifesto HLS (sliding window).
-        Verifica que ydl.download() é chamado e que download_ranges é configurado
-        quando start_sec/end_sec são fornecidos.
+        Verifica que o fallback de download_live_video_snapshot utiliza yt-dlp
+        com configurações seguras que evitam loops infinitos de fragmentos ao vivo.
         """
         from core.video_processor import download_live_video_snapshot
 
         mock_ydl_instance = MagicMock()
         mock_ydl_cls.return_value.__enter__.return_value = mock_ydl_instance
+        mock_ydl_instance.extract_info.return_value = {
+            'formats': []
+        }
 
         out_path = "scratch/test_live_video_mock.mp4"
         with patch('os.path.exists', side_effect=lambda p: True if p == out_path else False), \
@@ -137,13 +138,11 @@ class TestLiveStreamHandler(unittest.TestCase):
                 end_sec=90.0
             )
             self.assertEqual(res["path"], out_path)
-            # Verifica que o yt-dlp foi invocado (nova arquitetura usa ydl.download)
+            # Verifica que o yt-dlp foi invocado no fallback
             mock_ydl_instance.download.assert_called_once_with(["https://youtu.be/live123"])
-            # Verifica que live_from_start foi configurado nas opções passadas ao construtor
-            ydl_call_kwargs = mock_ydl_cls.call_args[0][0]  # primeiro arg posicional = opts dict
-            self.assertTrue(ydl_call_kwargs.get('live_from_start'), "live_from_start deve ser True")
-            # Verifica que download_ranges foi configurado para o trecho solicitado
-            self.assertIn('download_ranges', ydl_call_kwargs, "download_ranges deve ser definido quando start/end são fornecidos")
+            # Verifica que live_from_start não é True no fallback para prevenir loop infinito
+            ydl_call_kwargs = mock_ydl_cls.call_args[0][0]
+            self.assertFalse(ydl_call_kwargs.get('live_from_start', False), "live_from_start não deve ser True no fallback")
 
 
 if __name__ == '__main__':

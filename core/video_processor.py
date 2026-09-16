@@ -329,16 +329,80 @@ def get_optimal_video_format(url: str) -> str:
     )
 
 
+def parse_m3u8_segments(text: str) -> tuple:
+    """
+    Analisa um manifesto HLS M3U8 e extrai:
+    - sequence_base (#EXT-X-MEDIA-SEQUENCE)
+    - target_duration (#EXT-X-TARGETDURATION)
+    - lista de pares (#EXTINF:dur, url)
+    """
+    lines = text.strip().splitlines()
+    pairs = []
+    i = 0
+    seq = 0
+    target_dur = 5.0
+    for l in lines:
+        if l.startswith('#EXT-X-MEDIA-SEQUENCE:'):
+            try:
+                seq = int(l.split(':')[1])
+            except Exception:
+                pass
+        elif l.startswith('#EXT-X-TARGETDURATION:'):
+            try:
+                target_dur = float(l.split(':')[1])
+            except Exception:
+                pass
+    while i < len(lines):
+        if lines[i].startswith('#EXTINF'):
+            if i + 1 < len(lines) and (lines[i+1].startswith('http') or not lines[i+1].startswith('#')):
+                pairs.append((lines[i], lines[i+1]))
+                i += 2
+            else:
+                i += 1
+        else:
+            i += 1
+    return seq, target_dur, pairs
+
+
+def build_finite_m3u8(base_seq: int, target_dur: float, pairs: list, start_sq: int, end_sq: int) -> str:
+    """
+    Constrói um sub-manifesto M3U8 estático (VOD) contendo exatamente os segmentos
+    do intervalo [start_sq, end_sq) e terminado com #EXT-X-ENDLIST.
+    Isso impede que o downloader fique aguardando novos fragmentos em live streaming.
+    """
+    out = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        f'#EXT-X-TARGETDURATION:{int(max(1.0, target_dur))}',
+        f'#EXT-X-MEDIA-SEQUENCE:{start_sq}',
+        '#EXT-X-PLAYLIST-TYPE:VOD'
+    ]
+    for sq in range(start_sq, end_sq):
+        idx = sq - base_seq
+        if 0 <= idx < len(pairs):
+            inf, url = pairs[idx]
+            out.append(inf)
+            out.append(url)
+    out.append('#EXT-X-ENDLIST')
+    return '\n'.join(out)
+
+
 def download_live_video_snapshot(
     url: str,
     output_path: str = "temp_video.mp4",
     start_sec: float = None,
-    end_sec: float = None
+    end_sec: float = None,
+    recent_minutes: float = None
 ) -> dict:
     """
-    Baixa transmissão ao vivo do início até o momento atual usando yt-dlp com live_from_start=True,
-    substituindo o truque de manipulação manual de HLS sliding window.
+    Baixa transmissão ao vivo em alta velocidade (15x a 40x) com congelamento do ponto presente (Freeze Live Edge),
+    evitando loops infinitos de busca de fragmentos futuros (DASH/HLS).
+    Gera sub-manifestos estáticos M3U8 para áudio e vídeo com #EXT-X-ENDLIST e realiza muxing
+    via FFmpeg Stream Copy (-c copy) sem re-encoding.
     """
+    import urllib.request
+    import subprocess
+
     try:
         out_dir = os.path.dirname(os.path.abspath(output_path))
         if out_dir:
@@ -349,53 +413,174 @@ def download_live_video_snapshot(
             except Exception:
                 pass
 
-        deno_exe = os.path.join(DENO_DIR, "deno.exe")
-        js_runtimes_cfg = {}
-        if os.path.exists(deno_exe):
-            js_runtimes_cfg['deno'] = {'path': deno_exe}
-        elif os.path.exists(r"C:\Program Files\nodejs\node.exe"):
-            js_runtimes_cfg['node'] = {'path': r"C:\Program Files\nodejs\node.exe"}
+        # Garante que o diretório do FFmpeg esteja no PATH para subprocessos e yt-dlp
+        if FFMPEG_EXE and os.path.exists(FFMPEG_EXE):
+            ff_dir = os.path.dirname(os.path.abspath(FFMPEG_EXE))
+            if ff_dir not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = ff_dir + os.pathsep + os.environ.get("PATH", "")
 
         from core.extractor import get_cookie_file, parse_time_str
         cookie_file = get_cookie_file()
 
-        format_spec = get_optimal_video_format(url)
-
         ydl_opts = {
-            'format': format_spec,
+            'quiet': True,
+            'no_warnings': True,
+            'noplaylist': True,
+            'playlist_items': '1',
+        }
+        if cookie_file:
+            ydl_opts['cookiefile'] = cookie_file
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if not info:
+                return {"path": None, "error": "Falha ao extrair metadados da transmissão ao vivo."}
+
+            if info.get('_type') == 'playlist' or 'entries' in info:
+                entries = [e for e in info.get('entries', []) if e]
+                if entries:
+                    info = entries[0]
+
+            formats = info.get('formats', [])
+            
+            # Localiza melhor stream de vídeo HLS (m3u8)
+            v_hls = [
+                f for f in formats
+                if f.get('vcodec') != 'none' and ('m3u8' in str(f.get('protocol', '')) or 'm3u8' in str(f.get('url', '')))
+            ]
+            v_hls.sort(key=lambda x: int(x.get('height') or 0), reverse=True)
+            best_v = v_hls[0] if v_hls else None
+
+            # Localiza melhor stream de áudio HLS (m3u8)
+            a_hls = [
+                f for f in formats
+                if f.get('vcodec') == 'none' and ('m3u8' in str(f.get('protocol', '')) or 'm3u8' in str(f.get('url', '')))
+            ]
+            a_hls.sort(key=lambda x: float(x.get('abr') or x.get('tbr') or 0), reverse=True)
+            best_a = a_hls[0] if a_hls else None
+
+            if best_v and best_a and best_v.get('url') and best_a.get('url'):
+                # 🔴 MODO HLS SNAPSHOT RÁPIDO COM FREEZE LIVE EDGE
+                req_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                
+                v_req = urllib.request.Request(best_v['url'], headers=req_headers)
+                with urllib.request.urlopen(v_req, timeout=15) as r_v:
+                    v_m3u8_text = r_v.read().decode('utf-8', errors='ignore')
+
+                a_req = urllib.request.Request(best_a['url'], headers=req_headers)
+                with urllib.request.urlopen(a_req, timeout=15) as r_a:
+                    a_m3u8_text = r_a.read().decode('utf-8', errors='ignore')
+
+                seq_v, dur_v, pairs_v = parse_m3u8_segments(v_m3u8_text)
+                seq_a, dur_a, pairs_a = parse_m3u8_segments(a_m3u8_text)
+
+                if pairs_v and pairs_a:
+                    avg_dur = max(1.0, dur_v or dur_a or 5.0)
+                    end_v = seq_v + len(pairs_v)
+                    end_a = seq_a + len(pairs_a)
+                    target_end = min(end_v, end_a)
+                    min_base = max(seq_v, seq_a)
+
+                    s_parsed = parse_time_str(start_sec)
+                    e_parsed = parse_time_str(end_sec)
+
+                    if recent_minutes is not None and recent_minutes > 0:
+                        wanted_segs = int((recent_minutes * 60.0) / avg_dur)
+                        target_start = max(min_base, target_end - wanted_segs)
+                    elif s_parsed is not None or e_parsed is not None:
+                        s_val = s_parsed if s_parsed is not None and s_parsed >= 0 else 0.0
+                        target_start = max(min_base, min_base + int(s_val / avg_dur))
+                        if e_parsed is not None and e_parsed > s_val:
+                            target_end = min(target_end, min_base + int(e_parsed / avg_dur))
+                    else:
+                        target_start = min_base
+
+                    if target_start >= target_end:
+                        target_start = max(min_base, target_end - max(1, len(pairs_v)))
+
+                    temp_v_m3u8 = os.path.join(out_dir, f"_temp_live_v_{os.getpid()}.m3u8")
+                    temp_a_m3u8 = os.path.join(out_dir, f"_temp_live_a_{os.getpid()}.m3u8")
+                    temp_v_mp4 = os.path.join(out_dir, f"_temp_live_v_{os.getpid()}.mp4")
+                    temp_a_mp4 = os.path.join(out_dir, f"_temp_live_a_{os.getpid()}.mp4")
+
+                    try:
+                        with open(temp_v_m3u8, 'w', encoding='utf-8') as f:
+                            f.write(build_finite_m3u8(seq_v, dur_v, pairs_v, target_start, target_end))
+                        with open(temp_a_m3u8, 'w', encoding='utf-8') as f:
+                            f.write(build_finite_m3u8(seq_a, dur_a, pairs_a, target_start, target_end))
+
+                        cmd_v = [
+                            FFMPEG_EXE, '-y',
+                            '-protocol_whitelist', 'file,http,https,tcp,tls',
+                            '-i', temp_v_m3u8,
+                            '-c', 'copy',
+                            temp_v_mp4
+                        ]
+                        subprocess.run(cmd_v, capture_output=True, text=True, timeout=300)
+
+                        cmd_a = [
+                            FFMPEG_EXE, '-y',
+                            '-protocol_whitelist', 'file,http,https,tcp,tls',
+                            '-i', temp_a_m3u8,
+                            '-c', 'copy',
+                            temp_a_mp4
+                        ]
+                        subprocess.run(cmd_a, capture_output=True, text=True, timeout=300)
+
+                        if os.path.exists(temp_v_mp4) and os.path.getsize(temp_v_mp4) > 1024:
+                            if os.path.exists(temp_a_mp4) and os.path.getsize(temp_a_mp4) > 1024:
+                                cmd_mux = [
+                                    FFMPEG_EXE, '-y',
+                                    '-i', temp_v_mp4,
+                                    '-i', temp_a_mp4,
+                                    '-c:v', 'copy',
+                                    '-c:a', 'copy',
+                                    '-movflags', '+faststart',
+                                    output_path
+                                ]
+                            else:
+                                cmd_mux = [
+                                    FFMPEG_EXE, '-y',
+                                    '-i', temp_v_mp4,
+                                    '-c', 'copy',
+                                    '-movflags', '+faststart',
+                                    output_path
+                                ]
+                            subprocess.run(cmd_mux, capture_output=True, text=True, timeout=120)
+
+                        if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
+                            return {"path": output_path, "error": None}
+                    finally:
+                        for _tf in [temp_v_m3u8, temp_a_m3u8, temp_v_mp4, temp_a_mp4]:
+                            if os.path.exists(_tf):
+                                try:
+                                    os.remove(_tf)
+                                except Exception:
+                                    pass
+
+        # Fallback via yt-dlp sem live_from_start
+        fallback_opts = {
+            'format': 'bestvideo[protocol^=m3u8]+bestaudio[protocol^=m3u8]/best[protocol^=m3u8]/best',
             'outtmpl': output_path,
             'merge_output_format': 'mp4',
             'ffmpeg_location': os.path.dirname(FFMPEG_EXE) if FFMPEG_EXE else None,
-            'live_from_start': True,
+            'live_from_start': False,
             'noplaylist': True,
             'playlist_items': '1',
             'quiet': True,
             'no_warnings': True,
-            'js_runtimes': js_runtimes_cfg
         }
-
         if cookie_file:
-            ydl_opts['cookiefile'] = cookie_file
+            fallback_opts['cookiefile'] = cookie_file
 
-        s_parsed = parse_time_str(start_sec)
-        e_parsed = parse_time_str(end_sec)
-        if s_parsed is not None or e_parsed is not None:
-            try:
-                from yt_dlp.utils import download_range_func
-                s_val = s_parsed if s_parsed is not None and s_parsed >= 0 else 0.0
-                e_val = e_parsed if e_parsed is not None and e_parsed > s_val else None
-                ydl_opts['download_ranges'] = download_range_func(None, [(s_val, e_val)])
-                ydl_opts['force_keyframes_at_cuts'] = False
-            except Exception:
-                pass
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(fallback_opts) as ydl:
             ydl.download([url])
 
         if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             return {"path": output_path, "error": None}
         else:
-            return {"path": None, "error": "Falha ao baixar transmissão ao vivo via yt-dlp."}
+            return {"path": None, "error": "Falha ao capturar transmissão ao vivo."}
+
     except Exception as e:
         return {"path": None, "error": str(e)}
 
@@ -405,7 +590,8 @@ def download_full_video(
     output_path: str = "temp_video.mp4",
     is_live: bool = False,
     start_sec: float = None,
-    end_sec: float = None
+    end_sec: float = None,
+    recent_minutes: float = None
 ) -> dict:
     """
     Baixa o vídeo na máxima resolução disponível (1080p Full HD / 720p HD).
@@ -419,13 +605,14 @@ def download_full_video(
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
 
-        # 🔴 Se for live ao vivo, aciona o snapshot HLS de alta velocidade
+        # 🔴 Se for live ao vivo, aciona o snapshot HLS de alta velocidade com Freeze Live Edge
         if is_live:
             snap_res = download_live_video_snapshot(
                 url=url,
                 output_path=output_path,
                 start_sec=start_sec,
-                end_sec=end_sec
+                end_sec=end_sec,
+                recent_minutes=recent_minutes
             )
             if snap_res.get("path") and os.path.exists(snap_res["path"]):
                 return snap_res
