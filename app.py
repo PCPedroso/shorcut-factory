@@ -3027,6 +3027,13 @@ if show_sec1:
                                         st.rerun()
                                     else:
                                         st.error(f"Erro: {_vres.get('error')}")
+                                if st.button("⚡ Últimos 60 min (1h)", key="btn_top_live_60m", use_container_width=True):
+                                    with st.spinner("🔴 Capturando última 1 hora da live..."):
+                                        _vres = download_full_video(video_url, target_vfull, is_live=True, recent_minutes=60.0)
+                                    if os.path.exists(target_vfull):
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Erro: {_vres.get('error')}")
                                 if st.button("🔴 Buffer Completo até Agora", key="btn_top_live_full", use_container_width=True):
                                     with st.spinner("🔴 Capturando buffer completo da live até o momento..."):
                                         _vres = download_full_video(video_url, target_vfull, is_live=True)
@@ -3490,6 +3497,13 @@ if show_sec1:
                                                 st.rerun()
                                             else:
                                                 st.error(f"Erro: {_vres.get('error')}")
+                                        if st.button("⚡ Últimos 60 min (1h)", key="btn_inc_live_60m", use_container_width=True):
+                                            with st.spinner("🔴 Capturando última 1 hora da live..."):
+                                                _vres = download_full_video(video_url, _vfull_cache_path, is_live=True, recent_minutes=60.0)
+                                            if os.path.exists(_vfull_cache_path):
+                                                st.rerun()
+                                            else:
+                                                st.error(f"Erro: {_vres.get('error')}")
                                         if st.button("🔴 Buffer Completo até Agora", key="btn_inc_live_full", use_container_width=True):
                                             with st.spinner("🔴 Capturando buffer completo da live até o momento..."):
                                                 _vres = download_full_video(video_url, _vfull_cache_path, is_live=True)
@@ -3674,7 +3688,7 @@ if show_sec1:
                             st.markdown("### 🔴 Transmissão Ao Vivo (LIVE) Detectada")
                             st.caption("O ViralCut utiliza o motor **HLS Snapshot com Freeze Live Edge**, capturando trechos estáticos em segundos com multiplexação de stream sem loops infinitos.")
                             
-                            live_col1, live_col2, live_col3, live_col4 = st.columns(4)
+                            live_col1, live_col2, live_col3, live_col4, live_col5 = st.columns(5)
                             with live_col1:
                                 if st.button("⚡ Últimos 15 min", key="btn_live_15m_fresh", use_container_width=True, help="Baixa em alta velocidade os últimos 15 minutos transmitidos na live até o momento atual."):
                                     with st.spinner("🔴 Capturando últimos 15 minutos da live com Freeze Live Edge..."):
@@ -3708,6 +3722,22 @@ if show_sec1:
                                     else:
                                         st.error(f"Erro: {_vres.get('error', 'Falha ao baixar')}")
                             with live_col3:
+                                if st.button("⚡ Últimos 60 min (1h)", key="btn_live_60m_fresh", use_container_width=True, help="Baixa em alta velocidade a última 1 hora transmitida na live até o momento atual."):
+                                    with st.spinner("🔴 Capturando última 1 hora da live com Freeze Live Edge..."):
+                                        _vres = download_full_video(
+                                            video_url,
+                                            _vfull_path,
+                                            is_live=True,
+                                            recent_minutes=60.0
+                                        )
+                                    if os.path.exists(_vfull_path):
+                                        _sz_mb = os.path.getsize(_vfull_path) / (1024 * 1024)
+                                        _res = get_video_resolution(_vfull_path)
+                                        st.success(f"🎥 Última 1 hora capturada com sucesso ({_sz_mb:.1f} MB, {_res})!")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Erro: {_vres.get('error', 'Falha ao baixar')}")
+                            with live_col4:
                                 if st.button("⏱️ Intervalo Selecionado", key="btn_live_interval_fresh", use_container_width=True, help="Baixa o intervalo configurado nos campos de início e fim da ingestão."):
                                     with st.spinner("🔴 Capturando intervalo da live..."):
                                         _vres = download_full_video(
@@ -3724,7 +3754,7 @@ if show_sec1:
                                         st.rerun()
                                     else:
                                         st.error(f"Erro: {_vres.get('error', 'Falha ao baixar')}")
-                            with live_col4:
+                            with live_col5:
                                 if st.button("🔴 Buffer Completo", key="btn_live_full_fresh", use_container_width=True, help="Captura todo o histórico disponível no buffer da live até este instante exato."):
                                     with st.spinner("🔴 Capturando buffer completo da live até o momento..."):
                                         _vres = download_full_video(
@@ -4571,7 +4601,7 @@ if _has_media_ready:
 
                 if _is_live_s1:
                     st.warning("🔴 **Transmissão Ao Vivo (LIVE)**: O arquivo de vídeo MP4 ainda não foi capturado. Escolha a janela de tempo com **Freeze Live Edge** (download ultrarrápido sem loops):")
-                    _s1_col1, _s1_col2, _s1_col3, _s1_col4 = st.columns(4)
+                    _s1_col1, _s1_col2, _s1_col3, _s1_col4, _s1_col5 = st.columns(5)
                     with _s1_col1:
                         if st.button("⚡ Últimos 15 min", key="btn_s1_live_15m", type="primary", use_container_width=True):
                             with st.spinner("🔴 Capturando últimos 15 min da live em alta velocidade..."):
@@ -4593,6 +4623,16 @@ if _has_media_ready:
                             else:
                                 st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
                     with _s1_col3:
+                        if st.button("⚡ Últimos 60 min (1h)", key="btn_s1_live_60m", use_container_width=True):
+                            with st.spinner("🔴 Capturando última 1 hora da live em alta velocidade..."):
+                                os.makedirs(main_dir, exist_ok=True)
+                                _vres = download_full_video(active_u_main, main_video_path, is_live=True, recent_minutes=60.0)
+                            if os.path.exists(main_video_path) and os.path.getsize(main_video_path) > 10240:
+                                st.success("🎥 Última 1 hora capturada com sucesso!")
+                                st.rerun()
+                            else:
+                                st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
+                    with _s1_col4:
                         if st.button("⏱️ Intervalo Configurado", key="btn_s1_live_interval", use_container_width=True):
                             with st.spinner("🔴 Capturando intervalo configurado da live..."):
                                 os.makedirs(main_dir, exist_ok=True)
@@ -4608,7 +4648,7 @@ if _has_media_ready:
                                 st.rerun()
                             else:
                                 st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
-                    with _s1_col4:
+                    with _s1_col5:
                         if st.button("🔴 Buffer Completo", key="btn_s1_live_full", use_container_width=True):
                             with st.spinner("🔴 Capturando buffer completo da live até o momento..."):
                                 os.makedirs(main_dir, exist_ok=True)

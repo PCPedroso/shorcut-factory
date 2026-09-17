@@ -67,6 +67,21 @@ class TestLiveStreamSnapshotEngine(unittest.TestCase):
         self.assertIn("https://example.com/live/seg_259.ts", finite)
         self.assertNotIn("https://example.com/live/seg_235.ts", finite)
 
+        # Pede os últimos 60 minutos (1 hora = 3600s = 720 segmentos de 5s)
+        # Se a live tiver 1000 segmentos disponíveis (5000s)
+        long_pairs = [(f"#EXTINF:5.0,", f"https://example.com/live/seg_{i}.ts") for i in range(1000, 2000)]
+        long_seq = 1000
+        wanted_1h_segs = int((60.0 * 60.0) / dur) # 720
+        target_1h_end = long_seq + len(long_pairs) # 2000
+        target_1h_start = max(long_seq, target_1h_end - wanted_1h_segs) # 1280
+
+        finite_1h = build_finite_m3u8(long_seq, dur, long_pairs, target_1h_start, target_1h_end)
+        self.assertIn("#EXT-X-MEDIA-SEQUENCE:1280", finite_1h)
+        self.assertIn("#EXT-X-ENDLIST", finite_1h)
+        self.assertIn("https://example.com/live/seg_1280.ts", finite_1h)
+        self.assertIn("https://example.com/live/seg_1999.ts", finite_1h)
+        self.assertNotIn("https://example.com/live/seg_1279.ts", finite_1h)
+
     @patch('yt_dlp.YoutubeDL')
     @patch('urllib.request.urlopen')
     @patch('subprocess.run')

@@ -575,7 +575,7 @@ def download_live_video_snapshot(
                                     output_path
                                 ]
 
-                            subprocess.run(cmd_mux, cwd=temp_dir, capture_output=True, text=True, timeout=180)
+                            subprocess.run(cmd_mux, cwd=temp_dir, capture_output=True, text=True, timeout=300)
 
                             if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
                                 return {"path": output_path, "error": None}
