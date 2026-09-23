@@ -18,7 +18,7 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
 | **Processamento de Vídeo** | `FFmpeg` (com `libass` e NVENC) | Recorte, filtros complexos, sidechain compress, equalização e queima de legendas/overlays |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
-| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (193 testes) |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (196 testes) |
 
 ---
 
@@ -31,7 +31,8 @@ shorcut-factory/
 ├── assets/
 │   ├── audio/                 # Trilhas sonoras royalty-free categorizadas (.wav / .mp3)
 │   └── fonts/                 # Tipografias bundled (Montserrat-ExtraBold)
-├── tests/                     # Suíte de Testes Unitários Automatizados (193 testes)
+├── tests/                     # Suíte de Testes Unitários Automatizados (196 testes)
+│   ├── test_static_image_video.py# Testes de substituição de vídeo por imagem estática mantendo áudio e backup
 │   ├── test_frame_capturer.py    # Testes de extração de frames, conversão de tempo, thumbnails e base64
 │   ├── test_quick_editor.py      # Testes de duração, trim, corte cirúrgico e concatenação
 │   ├── test_thumbnail_generator.py # Testes de frames, nitidez e capas 9:16
@@ -324,11 +325,14 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
     - **⭐ Salvar como Capa Oficial**: Define o frame exato diretamente como a `thumbnail.jpg` e `thumbnail_1.jpg` do corte, atualizando `cuts_catalog.json`.
     - **🎨 Criar 3 Capas com IA**: Utiliza o frame capturado como orador principal, remove o fundo com Rembg e gera as variações virais (*Impacto Neon*, *Clean Focus 3D*, *Moldura Dinâmica HDR*).
     - **💾 Baixar (JPG)**: Download direto do frame capturado.
-- **🏷️ Headline de Topo - Novo Efeito "Texto Estático com Explosão" e Layout Expandido (`core/headline_drawer.py`, `app.py`, `tests/test_headline_drawer.py`)**:
-  - Novo efeito de transição `static_explode`: o texto da headline permanece estático desde o início do vídeo e, no encerramento configurado, se fragmenta em milhares de partículas com física radial e dissolução Alpha.
-  - Layout responsivo da Seção 3: container de configurações da Headline expandido para ocupar todo o espaço horizontal disponível à direita, eliminando o aperto visual dos sliders e campos.
-- **🧪 Suíte de 193 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
+- **🖼️ Substituição do Vídeo Completo por Imagem Estática com Áudio Preservado (`core/video_processor.py`, `app.py`, `tests/test_static_image_video.py`)**:
+  - Permite na **Seção 1** (logo abaixo dos botões de definição de tempo inicial e final) fazer o upload de uma imagem do computador (`PNG`, `JPG`, `WEBP`) e substituir o stream de vídeo de `video_full.mp4` por uma imagem estática contínua.
+  - Preserva 100% da faixa de áudio original e sua duração exata utilizando FFmpeg com `-loop 1`, `-tune stillimage`, `-pix_fmt yuv420p`, `-shortest` e `-movflags +faststart`.
+  - Ajusta automaticamente dimensões ímpares de imagens via filtro `scale=trunc(iw/2)*2:trunc(ih/2)*2` para compatibilidade total de codec e streaming web.
+  - **Preservação e Restauração Segura**: Gera backup seguro automático (`video_full_original_backup.mp4`) antes de sobrescrever.
+  - **Botão `↩️ Restaurar Vídeo Original com Movimento`**: Permite reverter instantaneamente para o vídeo com movimento original a qualquer momento.
+- **🧪 Suíte de 196 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (static image video replacement, frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
 
 ---
 

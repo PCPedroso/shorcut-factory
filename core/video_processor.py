@@ -1999,3 +1999,129 @@ def split_video_smart(
 
     except Exception as exc:
         return {"parts": [], "error": str(exc)}
+
+
+def has_original_video_backup(video_path: str) -> bool:
+    """Verifica se existe backup do vídeo original salvo em disco."""
+    if not video_path:
+        return False
+    base, _ = os.path.splitext(video_path)
+    backup_path = base + "_original_backup.mp4"
+    return os.path.exists(backup_path) and os.path.getsize(backup_path) > 1024
+
+
+def restore_original_video_from_backup(video_path: str) -> dict:
+    """
+    Restaura o vídeo original a partir do backup seguro (_original_backup.mp4).
+    """
+    if not video_path:
+        return {"success": False, "error": "Caminho do vídeo inválido."}
+    
+    base, _ = os.path.splitext(video_path)
+    backup_path = base + "_original_backup.mp4"
+
+    if not os.path.exists(backup_path) or os.path.getsize(backup_path) <= 1024:
+        return {"success": False, "error": f"Arquivo de backup não encontrado: {backup_path}"}
+
+    try:
+        shutil.copy2(backup_path, video_path)
+        return {
+            "success": True,
+            "video_path": video_path,
+            "restored_from": backup_path,
+            "error": None
+        }
+    except Exception as exc:
+        return {"success": False, "error": f"Falha ao restaurar backup: {str(exc)}"}
+
+
+def replace_video_with_static_image(
+    video_path: str,
+    image_path: str,
+    backup: bool = True
+) -> dict:
+    """
+    Substitui o stream de vídeo completo de um arquivo MP4 por uma imagem estática contínua,
+    preservando 100% do áudio original e sua duração exata.
+    
+    - Cria backup do vídeo original em video_path + '_original_backup.mp4' (se backup=True e não existir).
+    - Executa FFmpeg otimizado com libx264 -tune stillimage, -shortest e -movflags +faststart.
+    - Garante que a resolução tenha dimensões pares compatíveis com pix_fmt yuv420p.
+    - Sobrescreve video_path atomicamente com o novo vídeo estático.
+    """
+    if not video_path or not os.path.exists(video_path):
+        return {"success": False, "error": f"Vídeo original não encontrado: {video_path}"}
+    if not image_path or not os.path.exists(image_path):
+        return {"success": False, "error": f"Arquivo de imagem não encontrado: {image_path}"}
+
+    # Verifica se o vídeo possui stream de áudio
+    if not check_has_audio_stream(video_path):
+        # Tenta verificar se há audio.mp3 na mesma pasta como fallback
+        v_dir = os.path.dirname(os.path.abspath(video_path))
+        cand_audio = os.path.join(v_dir, "audio.mp3")
+        if os.path.exists(cand_audio):
+            audio_source = cand_audio
+        else:
+            return {"success": False, "error": "O vídeo original não possui faixa de áudio detectável."}
+    else:
+        audio_source = video_path
+
+    base, _ = os.path.splitext(video_path)
+    backup_path = base + "_original_backup.mp4"
+
+    if backup and not os.path.exists(backup_path):
+        try:
+            shutil.copy2(video_path, backup_path)
+        except Exception as exc_b:
+            print(f"[WARN] Falha ao criar backup de {video_path}: {exc_b}")
+
+    out_dir = os.path.dirname(os.path.abspath(video_path))
+    temp_output = os.path.join(out_dir, f"temp_static_{os.getpid()}.mp4")
+    if os.path.exists(temp_output):
+        try:
+            os.remove(temp_output)
+        except Exception:
+            pass
+
+    cmd = [
+        FFMPEG_EXE, "-y",
+        "-loop", "1",
+        "-i", image_path,
+        "-i", audio_source,
+        "-c:v", "libx264",
+        "-tune", "stillimage",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-pix_fmt", "yuv420p",
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-shortest",
+        "-movflags", "+faststart",
+        temp_output
+    ]
+
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            err_msg = res.stderr[-500:] if res.stderr else "Erro desconhecido no FFmpeg"
+            return {"success": False, "error": f"FFmpeg falhou ao gerar vídeo com imagem estática: {err_msg}"}
+
+        if not os.path.exists(temp_output) or os.path.getsize(temp_output) == 0:
+            return {"success": False, "error": "Arquivo temporário não foi gerado ou está vazio."}
+
+        # Substituição atômica
+        os.replace(temp_output, video_path)
+
+        return {
+            "success": True,
+            "video_path": video_path,
+            "backup_path": backup_path if os.path.exists(backup_path) else None,
+            "error": None
+        }
+    except Exception as exc:
+        if os.path.exists(temp_output):
+            try:
+                os.remove(temp_output)
+            except Exception:
+                pass
+        return {"success": False, "error": f"Erro inesperado: {str(exc)}"}
+
