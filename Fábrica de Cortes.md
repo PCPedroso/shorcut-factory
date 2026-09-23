@@ -325,14 +325,16 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
     - **⭐ Salvar como Capa Oficial**: Define o frame exato diretamente como a `thumbnail.jpg` e `thumbnail_1.jpg` do corte, atualizando `cuts_catalog.json`.
     - **🎨 Criar 3 Capas com IA**: Utiliza o frame capturado como orador principal, remove o fundo com Rembg e gera as variações virais (*Impacto Neon*, *Clean Focus 3D*, *Moldura Dinâmica HDR*).
     - **💾 Baixar (JPG)**: Download direto do frame capturado.
-- **🖼️ Substituição do Vídeo Completo por Imagem Estática com Áudio Preservado (`core/video_processor.py`, `app.py`, `tests/test_static_image_video.py`)**:
-  - Permite na **Seção 1** (logo abaixo dos botões de definição de tempo inicial e final) fazer o upload de uma imagem do computador (`PNG`, `JPG`, `WEBP`) e substituir o stream de vídeo de `video_full.mp4` por uma imagem estática contínua.
-  - Preserva 100% da faixa de áudio original e sua duração exata utilizando FFmpeg com `-loop 1`, `-tune stillimage`, `-pix_fmt yuv420p`, `-shortest` e `-movflags +faststart`.
-  - Ajusta automaticamente dimensões ímpares de imagens via filtro `scale=trunc(iw/2)*2:trunc(ih/2)*2` para compatibilidade total de codec e streaming web.
-  - **Preservação e Restauração Segura**: Gera backup seguro automático (`video_full_original_backup.mp4`) antes de sobrescrever.
-  - **Botão `↩️ Restaurar Vídeo Original com Movimento`**: Permite reverter instantaneamente para o vídeo com movimento original a qualquer momento.
-- **🧪 Suíte de 196 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (static image video replacement, frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
+- **🖼️ Ferramenta de Imagem Estática com Áudio no Editor Rápido (`core/quick_editor.py`, `app.py`, `tests/test_quick_editor.py`)**:
+  - Nova aba **`🖼️ Imagem Estática`** adicionada ao painel do **Editor Rápido** em qualquer corte renderizado (Galeria de Cortes na Seção 4 e Instância Existente na Seção 3).
+  - Permite transformar o corte já finalizado (com duração, áudio e efeitos prontos) em um vídeo com **imagem estática contínua**, preservando 100% do áudio editado original.
+  - **Uploader Simples & Prévia Instantânea**: Upload de imagem do computador (`PNG`, `JPG`, `WEBP`) com exibição de prévia em tempo real.
+  - **Opção de Sincronização de Capa**: Checkbox opcional para atualizar simultaneamente o arquivo `thumbnail.jpg` da pasta do corte.
+  - **Compatibilidade com Modos de Salvamento**: Funciona tanto no modo `🔄 Substituir o vídeo atual` (substituição in-place segura) quanto em `✨ Salvar como um novo vídeo` (gerando arquivo com sufixo personalizado, ex: `_com_imagem_estatica`).
+  - **Enquadramento Proporcional FFmpeg (`apply_static_image_to_video`)**: Adapta a imagem às dimensões exatas do corte (ex: 1080x1920 ou 1920x1080) com escala proporcional e padding sem distorções, usando `-tune stillimage`, `-pix_fmt yuv420p` e `-movflags +faststart`.
+  - **Histórico & Limpeza**: Registrado no histórico persistente (`historico_edicoes.json`) com suporte ao gerenciador de versões secundárias.
+- **🧪 Suíte de 199 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (quick editor static image, frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
 
 ---
 

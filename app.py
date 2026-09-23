@@ -96,7 +96,8 @@ from core.quick_editor import (
     change_video_speed, list_edited_video_versions, delete_edited_video_version,
     cleanup_all_edited_versions, load_edit_history, record_quick_edit,
     add_viral_hook_to_video, create_hook_badge_image, apply_hook_style_to_frame,
-    overlay_badge_on_frame, HOOK_STYLES, HOOK_BADGE_PRESETS, HOOK_TRANSITIONS
+    overlay_badge_on_frame, HOOK_STYLES, HOOK_BADGE_PRESETS, HOOK_TRANSITIONS,
+    apply_static_image_to_video
 )
 from core.overlay_manager import apply_overlay_to_video, generate_overlay_preview, OVERLAY_PRESETS
 from core.audio_processor import (
@@ -1815,14 +1816,15 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     help="Remove automaticamente versões editadas anteriores desta pasta ao salvar a nova versão para não deixar vestígios."
                 )
 
-        tab_trim, tab_snip, tab_speed, tab_hook, tab_overlay, tab_headline, tab_audio = st.tabs([
+        tab_trim, tab_snip, tab_speed, tab_hook, tab_overlay, tab_headline, tab_audio, tab_static = st.tabs([
             "✂️ Aparar (Trim)", 
             "🗑️ Remover Trecho",
             "⚡ Velocidade",
             "🎣 Gancho Viral (Hook)",
             "🎨 Banner (Overlay)",
             "🏷️ Headline de Topo",
-            "🎙️ Equalizador & Áudio"
+            "🎙️ Equalizador & Áudio",
+            "🖼️ Imagem Estática"
         ])
 
         with tab_trim:
@@ -3125,6 +3127,90 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         if out_target_eq:
                             st.session_state[f"last_edited_video_{unique_key}"] = out_target_eq
                         st.rerun(scope="app")
+
+        # ── TAB 8: IMAGEM ESTÁTICA COM ÁUDIO DO CORTE ───────────────────────────
+        with tab_static:
+            st.markdown("##### 🖼️ Imagem Estática (Áudio do Corte)")
+            st.caption(
+                f"Substitua o vídeo por uma **imagem estática contínua** durante toda a duração deste corte ({dur:.1f}s), "
+                "mantendo 100% do áudio editado original."
+            )
+
+            up_static_img = st.file_uploader(
+                "Selecionar Imagem do Computador (PNG, JPG, WEBP):",
+                type=["png", "jpg", "jpeg", "webp"],
+                key=f"file_uploader_quick_static_{unique_key}",
+                help="A imagem será ajustada proporcionalmente às dimensões deste corte e exibida continuamente mantendo o áudio original."
+            )
+
+            update_cut_thumb = st.checkbox(
+                "🖼️ Atualizar Capa (Thumbnail) deste corte com a imagem selecionada",
+                value=True,
+                key=f"chk_update_thumb_static_{unique_key}",
+                help="Salva também esta imagem como a thumbnail.jpg da pasta do corte, sincronizando a visualização na galeria."
+            )
+
+            if up_static_img is not None:
+                try:
+                    bytes_img = up_static_img.getvalue()
+                    if bytes_img:
+                        safe_display_image(bytes_img, caption="Prévia da Imagem Selecionada", use_container_width=True)
+
+                        btn_label_static = "🖼️ Salvar como Novo Vídeo com Imagem Estática" if "Salvar como um novo vídeo" in save_mode else "🖼️ Aplicar Imagem Estática no Vídeo Atual"
+                        if st.button(btn_label_static, key=f"btn_apply_quick_static_{unique_key}", type="primary", use_container_width=True):
+                            with st.spinner("Substituindo vídeo pela imagem estática com áudio..."):
+                                v_dir = os.path.dirname(video_path)
+                                tmp_img_save = os.path.join(v_dir, f"temp_static_up_{up_static_img.name}")
+                                with open(tmp_img_save, "wb") as f_up:
+                                    f_up.write(bytes_img)
+
+                                out_target = None
+                                if "Salvar como um novo vídeo" in save_mode:
+                                    b_name, ext = os.path.splitext(os.path.basename(video_path))
+                                    suf = custom_suffix if custom_suffix else "_com_imagem_estatica"
+                                    out_target = os.path.join(v_dir, f"{b_name}{suf}{ext}")
+
+                                static_res = apply_static_image_to_video(
+                                    video_path=video_path,
+                                    image_path=tmp_img_save,
+                                    output_path=out_target
+                                )
+
+                                if os.path.exists(tmp_img_save):
+                                    try:
+                                        os.remove(tmp_img_save)
+                                    except Exception:
+                                        pass
+
+                                if static_res.get("error"):
+                                    st.error(f"Erro ao aplicar imagem estática: {static_res['error']}")
+                                else:
+                                    # Se solicitado, atualiza thumbnail.jpg do corte
+                                    if update_cut_thumb:
+                                        thumb_target = os.path.join(v_dir, "thumbnail.jpg")
+                                        try:
+                                            with open(thumb_target, "wb") as f_th:
+                                                f_th.write(bytes_img)
+                                        except Exception:
+                                            pass
+
+                                    if "Salvar como um novo vídeo" in save_mode and clean_previous and out_target:
+                                        cleanup_all_edited_versions(video_path, keep_path=out_target)
+
+                                    entry = record_quick_edit(
+                                        video_path=video_path,
+                                        action_name="🖼️ Imagem Estática",
+                                        details=f"Imagem: '{up_static_img.name}' | Resolução: {static_res.get('resolution', 'N/A')} | Duração: {dur:.1f}s (Áudio Preservado)",
+                                        output_path=out_target
+                                    )
+                                    st.session_state[f"last_edit_status_{unique_key}"] = entry
+                                    st.session_state[f"just_edited_{unique_key}"] = True
+                                    if out_target:
+                                        st.session_state[f"last_edited_video_{unique_key}"] = out_target
+                                    st.toast("🎉 Imagem estática aplicada com sucesso no corte!")
+                                    st.rerun(scope="app")
+                except Exception as e_st_img:
+                    st.error(f"Erro ao processar imagem: {e_st_img}")
 
         # Se uma nova versão foi gerada recentemente para este componente, exibe player e download
         last_new_v = st.session_state.get(f"last_edited_video_{unique_key}")
@@ -5076,67 +5162,7 @@ if _has_media_ready:
                     if s_cur or e_cur:
                         st.caption(f"🎯 **Configurado na Seção 3**: `[{s_cur or '00:00:00.00'} → {e_cur or '...'}]`")
 
-                    # ── 🖼️ Substituição do Vídeo Completo por Imagem Estática (Apenas Áudio) ──
-                    st.markdown("---")
-                    with st.expander("🖼️ Substituir Vídeo por Imagem Estática (Manter Áudio)", expanded=False):
-                        st.caption(
-                            "Escolha uma imagem do computador para substituir o vídeo original completo por uma imagem estática contínua, "
-                            "preservando 100% do áudio original e sua duração."
-                        )
 
-                        _up_img_s1 = st.file_uploader(
-                            "Selecionar Imagem (PNG, JPG, WEBP):",
-                            type=["png", "jpg", "jpeg", "webp"],
-                            key=f"file_uploader_static_img_{v_id_main}",
-                            help="A imagem estática será exibida durante todo o vídeo. Um backup do vídeo original é criado automaticamente."
-                        )
-
-                        if _up_img_s1 is not None:
-                            try:
-                                _bytes_data = _up_img_s1.getvalue()
-                                if _bytes_data:
-                                    safe_display_image(_bytes_data, caption="Prévia da Imagem Selecionada", use_container_width=True)
-
-                                    if st.button("🔄 Substituir Vídeo Completo por esta Imagem", key=f"btn_apply_static_img_{v_id_main}", type="primary", use_container_width=True):
-                                        with st.spinner("Substituindo vídeo completo pela imagem estática com áudio..."):
-                                            _tmp_img_path = os.path.join(main_dir, f"temp_user_static_{_up_img_s1.name}")
-                                            with open(_tmp_img_path, "wb") as _f_img:
-                                                _f_img.write(_bytes_data)
-
-                                            _res_rep = replace_video_with_static_image(
-                                                video_path=main_video_path,
-                                                image_path=_tmp_img_path,
-                                                backup=True
-                                            )
-
-                                            if os.path.exists(_tmp_img_path):
-                                                try:
-                                                    os.remove(_tmp_img_path)
-                                                except Exception:
-                                                    pass
-
-                                            if _res_rep.get("success"):
-                                                st.session_state["video_seek_time"] = 0
-                                                st.success("🎉 Vídeo completo substituído com sucesso pela imagem estática!")
-                                                st.toast("✅ Vídeo atualizado com imagem estática e áudio preservado!")
-                                                st.rerun()
-                                            else:
-                                                st.error(f"Erro ao substituir vídeo: {_res_rep.get('error')}")
-                            except Exception as _e_up:
-                                st.error(f"Erro ao carregar imagem: {_e_up}")
-
-                        if has_original_video_backup(main_video_path):
-                            st.markdown("")
-                            if st.button("↩️ Restaurar Vídeo Original com Movimento", key=f"btn_restore_vorig_{v_id_main}", use_container_width=True, help="Reverte a imagem estática de volta para o vídeo original com movimento."):
-                                with st.spinner("Restaurando vídeo original a partir do backup seguro..."):
-                                    _res_rest = restore_original_video_from_backup(main_video_path)
-                                    if _res_rest.get("success"):
-                                        st.session_state["video_seek_time"] = 0
-                                        st.success("✅ Vídeo original restaurado com sucesso!")
-                                        st.toast("Vídeo original restaurado!")
-                                        st.rerun()
-                                    else:
-                                        st.error(f"Erro ao restaurar vídeo: {_res_rest.get('error')}")
             else:
                 _is_live_s1 = False
                 if main_dir and os.path.exists(os.path.join(main_dir, "metadata.json")):

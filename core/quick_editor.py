@@ -888,6 +888,117 @@ def add_viral_hook_to_video(
         return {"path": None, "error": err_msg}
 
 
+def apply_static_image_to_video(
+    video_path: str,
+    image_path: str,
+    output_path: str = None
+) -> dict:
+    """
+    Substitui a faixa de vídeo do corte por uma imagem estática contínua,
+    preservando 100% do áudio do corte e sua duração exata.
+    
+    - Mantém a resolução e proporção original do corte (ex: 1080x1920 ou 1920x1080)
+    - Enquadra a imagem sem distorções com scale proporcional e pad
+    - Utiliza codificação rápida libx264 com tune stillimage e web streaming faststart
+    - Suporta substituição direta no vídeo atual ou criação de nova versão
+    """
+    if not video_path or not os.path.exists(video_path):
+        return {"path": None, "error": "Arquivo de vídeo de origem não encontrado."}
+    if not image_path or not os.path.exists(image_path):
+        return {"path": None, "error": "Arquivo de imagem não encontrado."}
+
+    dur = get_video_duration(video_path)
+    if dur <= 0:
+        return {"path": None, "error": "Não foi possível obter a duração do vídeo de origem."}
+
+    # Detecta resolução do vídeo original
+    w, h = 1080, 1920
+    try:
+        cap = cv2.VideoCapture(video_path)
+        if cap.isOpened():
+            orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
+            if orig_w > 0 and orig_h > 0:
+                w, h = orig_w, orig_h
+    except Exception:
+        pass
+
+    # Garante dimensões pares
+    if w % 2 != 0:
+        w -= 1
+    if h % 2 != 0:
+        h -= 1
+
+    target_out = output_path
+    is_in_place = False
+    if not target_out:
+        target_out = video_path
+        is_in_place = True
+
+    tmp_out = target_out + ".static_tmp.mp4"
+    if os.path.exists(tmp_out):
+        try:
+            os.remove(tmp_out)
+        except Exception:
+            pass
+
+    vf_filter = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
+
+    cmd = [
+        FFMPEG_EXE, "-y",
+        "-loop", "1",
+        "-t", f"{dur:.3f}",
+        "-i", image_path,
+        "-i", video_path,
+        "-filter_complex", f"[0:v]{vf_filter}[v]",
+        "-map", "[v]",
+        "-map", "1:a:0?",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-tune", "stillimage",
+        "-crf", "20",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-pix_fmt", "yuv420p",
+        "-shortest",
+        "-movflags", "+faststart",
+        tmp_out
+    ]
+
+    res = subprocess.run(cmd, capture_output=True, text=True)
+
+    if res.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
+        if is_in_place and os.path.exists(target_out):
+            try:
+                os.remove(target_out)
+            except Exception:
+                pass
+        os.replace(tmp_out, target_out)
+
+        # Limpa caches em memória
+        if target_out in _DUR_CACHE:
+            _DUR_CACHE.pop(target_out, None)
+        _FRAME_CACHE.clear()
+        _VERSIONS_CACHE.clear()
+
+        new_dur = get_video_duration(target_out)
+        return {
+            "path": target_out,
+            "error": None,
+            "new_duration": new_dur,
+            "resolution": f"{w}x{h}"
+        }
+    else:
+        if os.path.exists(tmp_out):
+            try:
+                os.remove(tmp_out)
+            except Exception:
+                pass
+        err_msg = res.stderr[-1200:] if res.stderr else "Erro desconhecido no FFmpeg ao aplicar imagem estática."
+        return {"path": None, "error": err_msg}
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Histórico de Ajustes e Sinalização de Conclusão da Edição Rápida
 # ──────────────────────────────────────────────────────────────────────────────

@@ -7,7 +7,8 @@ from core.quick_editor import (
     extract_frame_at_timestamp,
     trim_video,
     remove_snippet_and_merge,
-    change_video_speed
+    change_video_speed,
+    apply_static_image_to_video
 )
 
 
@@ -147,6 +148,52 @@ class TestQuickEditor(unittest.TestCase):
         self.assertFalse(os.path.exists(v3))
         self.assertTrue(os.path.exists(self.sample_video))
 
+    def test_apply_static_image_to_video_new_file(self):
+        img_path = os.path.join(self.test_dir, "sample_img.jpg")
+        img = np.zeros((500, 500, 3), dtype=np.uint8)
+        img[:, :] = (255, 120, 0)
+        cv2.imwrite(img_path, img)
+
+        out_static = os.path.join(self.test_dir, "sample_static.mp4")
+        res = apply_static_image_to_video(self.sample_video, img_path, output_path=out_static)
+        self.assertIsNone(res.get("error"))
+        self.assertTrue(os.path.exists(out_static))
+
+        dur = get_video_duration(out_static)
+        self.assertAlmostEqual(dur, 6.0, delta=0.5)
+
+        cap = cv2.VideoCapture(out_static)
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+        self.assertEqual(w, 640)
+        self.assertEqual(h, 360)
+
+    def test_apply_static_image_to_video_in_place(self):
+        import shutil
+        temp_copy = os.path.join(self.test_dir, "sample_inplace.mp4")
+        shutil.copy2(self.sample_video, temp_copy)
+
+        img_path = os.path.join(self.test_dir, "sample_img_inplace.png")
+        img = np.zeros((300, 300, 3), dtype=np.uint8)
+        img[:, :] = (0, 255, 100)
+        cv2.imwrite(img_path, img)
+
+        res = apply_static_image_to_video(temp_copy, img_path)
+        self.assertIsNone(res.get("error"))
+        self.assertTrue(os.path.exists(temp_copy))
+
+        dur = get_video_duration(temp_copy)
+        self.assertAlmostEqual(dur, 6.0, delta=0.5)
+
+    def test_apply_static_image_missing_files(self):
+        res1 = apply_static_image_to_video("inexistente.mp4", "img.jpg")
+        self.assertIsNotNone(res1.get("error"))
+
+        res2 = apply_static_image_to_video(self.sample_video, "inexistente.jpg")
+        self.assertIsNotNone(res2.get("error"))
+
 
 if __name__ == '__main__':
     unittest.main()
+
