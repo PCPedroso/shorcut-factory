@@ -838,7 +838,7 @@ def add_viral_hook_to_video(
         tmp_out
     ])
 
-    res = subprocess.run(cmd_gpu, capture_output=True, text=True)
+    res = _run_ffmpeg_command(cmd_gpu, timeout=300)
 
     # 2. Fallback resiliente com CPU libx264 se GPU falhar
     if res.returncode != 0 or not os.path.exists(tmp_out) or os.path.getsize(tmp_out) == 0:
@@ -851,7 +851,7 @@ def add_viral_hook_to_video(
             "-movflags", "+faststart",
             tmp_out
         ])
-        res = subprocess.run(cmd_cpu, capture_output=True, text=True)
+        res = _run_ffmpeg_command(cmd_cpu, timeout=300)
 
     if badge_png and os.path.exists(badge_png):
         try:
@@ -944,6 +944,69 @@ def detect_cut_aspect_mode(video_path: str) -> str:
     return "9:16_blur"
 
 
+def _run_ffmpeg_command(cmd, timeout: int = 300):
+    """
+    Executa comando FFmpeg com mitigação contra [WinError 8] (ERROR_NOT_ENOUGH_MEMORY) no Windows:
+    1. Coleta forçada de lixo (gc.collect) para liberar heap C++ de OpenCV e PyTorch
+    2. CREATE_NO_WINDOW para evitar esgotamento de Desktop Heap / Console Station
+    3. Redirecionamento de stdout para DEVNULL e captura controlada de stderr
+    4. Fallback automático para shell=True se CreateProcessW direto falhar por recursos
+    """
+    import gc
+    gc.collect()
+
+    creationflags = 0
+    if os.name == "nt":
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
+    try:
+        res = subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+            creationflags=creationflags
+        )
+        return res
+    except OSError as e:
+        # Se ocorrer WinError 8 (ERROR_NOT_ENOUGH_MEMORY) ou erro de criação de processo
+        if getattr(e, "winerror", None) == 8 or "WinError 8" in str(e) or getattr(e, "errno", None) == 12:
+            import time
+            gc.collect()
+            time.sleep(0.5)
+            try:
+                cmd_str = subprocess.list2cmdline(cmd) if isinstance(cmd, list) else cmd
+                res = subprocess.run(
+                    cmd_str,
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=timeout,
+                    creationflags=creationflags
+                )
+                return res
+            except Exception as e_fallback:
+                class DummyResult:
+                    returncode = 1
+                    stdout = ""
+                    stderr = f"Falha de recursos do sistema Windows ao iniciar FFmpeg: {e_fallback}"
+                return DummyResult()
+        else:
+            class DummyErr:
+                returncode = 1
+                stdout = ""
+                stderr = f"Erro de sistema operacional ao executar FFmpeg: {e}"
+            return DummyErr()
+    except Exception as e_gen:
+        class DummyGenErr:
+            returncode = 1
+            stdout = ""
+            stderr = f"Exceção inesperada ao executar FFmpeg: {e_gen}"
+        return DummyGenErr()
+
+
 def build_static_image_filter(
     image_path: str,
     aspect_mode: str = "9:16_blur",
@@ -954,14 +1017,23 @@ def build_static_image_filter(
     Constrói o filtro FFmpeg filter_complex para adaptar a imagem estática
     ao formato de corte desejado sem distorções (Fundo Desfocado / Blur, Corte Central 100%, 16:9, etc.).
     """
+    import gc
     img_w, img_h = 1920, 1080
-    img = None
+
+    # Obter dimensões sem decodificar todos os pixels na RAM via PIL
     try:
-        img = cv2.imread(image_path)
-        if img is not None:
-            img_h, img_w = img.shape[:2]
+        from PIL import Image
+        with Image.open(image_path) as im:
+            img_w, img_h = im.size
     except Exception:
-        img = None
+        try:
+            img = cv2.imread(image_path)
+            if img is not None:
+                img_h, img_w = img.shape[:2]
+                del img
+                gc.collect()
+        except Exception:
+            pass
 
     # Modo 1: 9:16 com Fundo Desfocado (Blur) - Padrão Shorts / TikTok / Reels
     if aspect_mode == "9:16_blur":
@@ -969,9 +1041,13 @@ def build_static_image_filter(
         if img_h > 0 and abs((img_w / img_h) - (9.0 / 16.0)) < 0.03:
             return f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black[v]"
         else:
+            if img_w > 0 and img_h > 0 and (img_w / img_h) >= (target_w / target_h):
+                fg_scale = f"scale={target_w}:-2"
+            else:
+                fg_scale = f"scale=-2:{target_h}"
             return (
                 f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h},boxblur=25:5,eq=brightness=-0.10[bg];"
-                f"[0:v]scale={target_w}:-2[fg];"
+                f"[0:v]{fg_scale}[fg];"
                 f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
             )
 
@@ -982,23 +1058,37 @@ def build_static_image_filter(
     # Modo 3: 9:16 Rastreamento Inteligente de Rosto (Auto-Reframing)
     elif aspect_mode == "9:16_smart_face":
         crop_x = None
-        if img is not None and img_h > 0:
-            try:
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        try:
+            img = cv2.imread(image_path)
+            if img is not None and img_h > 0:
+                # Otimização de memória: redimensiona cópia reduzida para detecção facial rápida
+                h_det, w_det = img.shape[:2]
+                det_scale = 1.0
+                if max(h_det, w_det) > 800:
+                    det_scale = 800.0 / max(h_det, w_det)
+                    small = cv2.resize(img, (int(w_det * det_scale), int(h_det * det_scale)))
+                else:
+                    small = img
+                gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
                 cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
                 if os.path.exists(cascade_path):
                     face_cascade = cv2.CascadeClassifier(cascade_path)
                     faces = face_cascade.detectMultiScale(gray, 1.1, 4)
                     if len(faces) > 0:
                         fx, fy, fw, fh = max(faces, key=lambda f: f[2] * f[3])
+                        fx, fw = fx / det_scale, fw / det_scale
                         scale_factor = float(target_h) / float(img_h)
                         scaled_w = float(img_w) * scale_factor
                         scaled_face_x = (fx + fw / 2.0) * scale_factor
                         left_x = int(scaled_face_x - (target_w / 2.0))
                         left_x = max(0, min(int(scaled_w - target_w), left_x))
                         crop_x = left_x
-            except Exception:
-                crop_x = None
+                del small
+                del gray
+                del img
+                gc.collect()
+        except Exception:
+            crop_x = None
 
         if crop_x is not None:
             return f"[0:v]scale=-2:{target_h},crop={target_w}:{target_h}:{crop_x}:0[v]"
@@ -1007,9 +1097,13 @@ def build_static_image_filter(
 
     # Modo 4: 9:16 Layout Dividido (Split Screen)
     elif aspect_mode == "9:16_split":
+        if img_w > 0 and img_h > 0 and (img_w / img_h) >= (target_w / target_h):
+            fg_scale = f"scale={target_w}:-2"
+        else:
+            fg_scale = f"scale=-2:{target_h}"
         return (
             f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h},boxblur=25:5,eq=brightness=-0.10[bg];"
-            f"[0:v]scale={target_w}:-2[fg];"
+            f"[0:v]{fg_scale}[fg];"
             f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
         )
 
@@ -1041,6 +1135,9 @@ def apply_static_image_to_video(
     preservando 100% do áudio do corte e sua duração exata, adaptando-se
     ao formato de exportação original do corte (Blur 9:16, Corte Central 100%, 16:9, etc.).
     """
+    import gc
+    gc.collect()
+
     if not video_path or not os.path.exists(video_path):
         return {"path": None, "error": "Arquivo de vídeo de origem não encontrado."}
     if not image_path or not os.path.exists(image_path):
@@ -1100,28 +1197,50 @@ def apply_static_image_to_video(
         target_h=h
     )
 
-    cmd = [
+    cmd_base = [
         FFMPEG_EXE, "-y",
         "-loop", "1",
+        "-framerate", "30",
         "-t", f"{dur:.3f}",
         "-i", image_path,
         "-i", video_path,
         "-filter_complex", filter_complex_str,
         "-map", "[v]",
         "-map", "1:a:0?",
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-tune", "stillimage",
-        "-crf", "20",
         "-c:a", "aac",
         "-b:a", "192k",
         "-pix_fmt", "yuv420p",
-        "-shortest",
-        "-movflags", "+faststart",
-        tmp_out
+        "-shortest"
     ]
 
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    # 1. Tentativa com GPU NVENC (Ultra-rápido, alivia recursos do sistema)
+    cmd_gpu = list(cmd_base)
+    cmd_gpu.extend([
+        "-c:v", "h264_nvenc",
+        "-preset", "p4",
+        "-b:v", "8M",
+        "-movflags", "+faststart",
+        tmp_out
+    ])
+    res = _run_ffmpeg_command(cmd_gpu, timeout=300)
+
+    # 2. Fallback resiliente com CPU libx264 se GPU falhar
+    if res.returncode != 0 or not os.path.exists(tmp_out) or os.path.getsize(tmp_out) == 0:
+        if os.path.exists(tmp_out):
+            try:
+                os.remove(tmp_out)
+            except Exception:
+                pass
+        cmd_cpu = list(cmd_base)
+        cmd_cpu.extend([
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-tune", "stillimage",
+            "-crf", "20",
+            "-movflags", "+faststart",
+            tmp_out
+        ])
+        res = _run_ffmpeg_command(cmd_cpu, timeout=300)
 
     if res.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
         if is_in_place and os.path.exists(target_out):
@@ -1136,6 +1255,7 @@ def apply_static_image_to_video(
             _DUR_CACHE.pop(target_out, None)
         _FRAME_CACHE.clear()
         _VERSIONS_CACHE.clear()
+        gc.collect()
 
         new_dur = get_video_duration(target_out)
         return {
@@ -1151,7 +1271,7 @@ def apply_static_image_to_video(
                 os.remove(tmp_out)
             except Exception:
                 pass
-        err_msg = res.stderr[-1200:] if res.stderr else "Erro desconhecido no FFmpeg ao aplicar imagem estática."
+        err_msg = res.stderr[-1200:] if getattr(res, "stderr", None) else "Erro desconhecido no FFmpeg ao aplicar imagem estática."
         return {"path": None, "error": err_msg}
 
 

@@ -3195,8 +3195,13 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         btn_label_static = "🖼️ Salvar como Novo Vídeo com Imagem Estática" if "Salvar como um novo vídeo" in save_mode else "🖼️ Aplicar Imagem Estática no Vídeo Atual"
                         if st.button(btn_label_static, key=f"btn_apply_quick_static_{unique_key}", type="primary", use_container_width=True):
                             with st.spinner(f"Aplicando imagem estática no formato {opt_labels.get(sel_aspect, sel_aspect)} com áudio..."):
+                                import gc
+                                gc.collect()
                                 v_dir = os.path.dirname(video_path)
-                                tmp_img_save = os.path.join(v_dir, f"temp_static_up_{up_static_img.name}")
+                                safe_base = "".join(c for c in up_static_img.name if c.isalnum() or c in "._-")
+                                if not safe_base:
+                                    safe_base = "upload.png"
+                                tmp_img_save = os.path.join(v_dir, f"temp_static_up_{safe_base}")
                                 with open(tmp_img_save, "wb") as f_up:
                                     f_up.write(bytes_img)
 
@@ -3247,6 +3252,8 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                                     st.toast("🎉 Imagem estática aplicada com sucesso no formato do corte!")
                                     st.rerun(scope="app")
                 except Exception as e_st_img:
+                    import logging
+                    logging.exception("Erro ao processar imagem estática no corte")
                     st.error(f"Erro ao processar imagem: {e_st_img}")
 
         # Se uma nova versão foi gerada recentemente para este componente, exibe player e download
