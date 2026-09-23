@@ -125,3 +125,32 @@ def remove_video_from_library(video_id: str, delete_folder: bool = True) -> bool
             shutil.rmtree(v_dir, ignore_errors=True)
 
     return True
+
+
+def update_video_thumbnail_in_library(video_id: str, thumbnail_path: str) -> bool:
+    """Atualiza o caminho da thumbnail de um vídeo existente na biblioteca e em seu metadata.json."""
+    if not video_id:
+        return False
+    lib = get_library()
+    updated = False
+    for item in lib:
+        if item.get("video_id") == video_id:
+            item["thumbnail"] = thumbnail_path
+            updated = True
+            break
+    if updated:
+        save_library_list(lib)
+
+    v_dir = os.path.join(DATA_DIR, video_id)
+    meta_path = os.path.join(v_dir, "metadata.json")
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            meta["thumbnail"] = thumbnail_path
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=4)
+        except Exception:
+            pass
+    return True
+

@@ -18,7 +18,7 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
 | **Processamento de Vídeo** | `FFmpeg` (com `libass` e NVENC) | Recorte, filtros complexos, sidechain compress, equalização e queima de legendas/overlays |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
-| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (166 testes) |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (193 testes) |
 
 ---
 
@@ -31,7 +31,8 @@ shorcut-factory/
 ├── assets/
 │   ├── audio/                 # Trilhas sonoras royalty-free categorizadas (.wav / .mp3)
 │   └── fonts/                 # Tipografias bundled (Montserrat-ExtraBold)
-├── tests/                     # Suíte de Testes Unitários Automatizados (166 testes)
+├── tests/                     # Suíte de Testes Unitários Automatizados (193 testes)
+│   ├── test_frame_capturer.py    # Testes de extração de frames, conversão de tempo, thumbnails e base64
 │   ├── test_quick_editor.py      # Testes de duração, trim, corte cirúrgico e concatenação
 │   ├── test_thumbnail_generator.py # Testes de frames, nitidez e capas 9:16
 │   ├── test_headline_drawer.py   # Testes de headlines, quebras, presets ASS e overlay visual
@@ -47,6 +48,7 @@ shorcut-factory/
 │   ├── test_ui_theme.py          # Testes de tokens de design system, badges e stepper
 │   └── test_web_downloads.py     # Testes de resiliência em downloads de portais de notícias e web
 ├── core/
+│   ├── frame_capturer.py      # Motor de captura de frames pausados em alta resolução e gestão de capas/thumbnails
 │   ├── ui_theme.py            # Design System Studio: tokens CSS, Glassmorphism, stepper, badges e componentes
 │   ├── quick_editor.py        # Edição rápida / ajuste fino: Trim, Snip & Merge, Speed Up (1.0x-1.5x) e Limpeza de Versões
 │   ├── audio_processor.py     # Equalização, anti-estouro (de-clipping/limiter), nivelador dinâmico de voz/torcida
@@ -309,8 +311,24 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Ingestão Leve em Poucos Segundos**: Ao entrar com links da web ou carregar arquivos locais, o pipeline apenas baixa ou copia diretamente o arquivo `video_full.mp4` e metadados essenciais, sem extrair áudio nem executar transcrições pesadas do vídeo completo previamente.
   - **Gatekeeper e Bloqueio Protetor na Mineração por IA (Seção 2)**: Caso o usuário acesse a Seção 2 sem uma transcrição global existente, um card de aviso no topo informa a necessidade do processamento com o botão `🎙️ Gerar Transcrição Completa Agora (Whisper GPU)`. O restante da tela (compositor de pautas, abas temáticas, Ollama/Llama 3) permanece desabilitado até a conclusão sob demanda.
   - **Processamento Cirúrgico nos Cortes (Seção 3)**: A geração de cortes, enquadramentos (Split Screen, Smart Face, Blur, etc.) e legendas dinâmicas funciona diretamente sobre `video_full.mp4`. Caso legendas sejam solicitadas, a transcrição é feita cirurgicamente apenas sobre o trecho de 30s a 90s (`ensure_cut_transcript`), eliminando qualquer lentidão inicial.
-- **🧪 Suíte de 178 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
+- **📸 Captura Instantânea de Frame Pausado em Todos os Players (`inject_video_snapshot_js`, `app.py`)**:
+  - Monitoramento global de todos os elementos `<video>` no DOM (`window.parent.document`).
+  - Ao pausar qualquer vídeo na aplicação, um botão flutuante estilizado `📸 Print` acende com destaque laranja vibrante, efeito de pulso e timestamp exato formatado (`00:01:23`).
+  - Modal Glassmorphism de alta resolução que captura o frame via HTML5 Canvas diretamente na resolução nativa do vídeo (`video.videoWidth` × `video.videoHeight`) sem perdas por escala do navegador.
+  - Ações em 1 clique: **💾 Baixar Imagem (JPG)**, **📋 Copiar Imagem** para a área de transferência do Windows (`navigator.clipboard.write`) e **⏱️ Usar como Minutagem** (preenche campos de tempo automaticamente).
+- **🖼️ Motor de Captura de Frame do Corte e Definição de Thumbnail (`core/frame_capturer.py`, `app.py`, `tests/test_frame_capturer.py`)**:
+  - Extração de frames em alta fidelidade via OpenCV (`CAP_PROP_POS_MSEC`) com fallback em FFmpeg.
+  - Suporte a formatos de minutagem `HH:MM:SS.ms`, `MM:SS.ms` e segundos numéricos.
+  - Integrado ao gerenciador de capa de cada formato na **Galeria de Cortes (Seção 4)** e na **Seção 3 (Instância Existente)**:
+    - Prévia visual do frame capturado em tempo real com dimensões e tempo exato.
+    - **⭐ Salvar como Capa Oficial**: Define o frame exato diretamente como a `thumbnail.jpg` e `thumbnail_1.jpg` do corte, atualizando `cuts_catalog.json`.
+    - **🎨 Criar 3 Capas com IA**: Utiliza o frame capturado como orador principal, remove o fundo com Rembg e gera as variações virais (*Impacto Neon*, *Clean Focus 3D*, *Moldura Dinâmica HDR*).
+    - **💾 Baixar (JPG)**: Download direto do frame capturado.
+- **🏷️ Headline de Topo - Novo Efeito "Texto Estático com Explosão" e Layout Expandido (`core/headline_drawer.py`, `app.py`, `tests/test_headline_drawer.py`)**:
+  - Novo efeito de transição `static_explode`: o texto da headline permanece estático desde o início do vídeo e, no encerramento configurado, se fragmenta em milhares de partículas com física radial e dissolução Alpha.
+  - Layout responsivo da Seção 3: container de configurações da Headline expandido para ocupar todo o espaço horizontal disponível à direita, eliminando o aperto visual dos sliders e campos.
+- **🧪 Suíte de 193 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
 
 ---
 

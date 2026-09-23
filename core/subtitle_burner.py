@@ -687,13 +687,15 @@ def generate_cut_subtitle_files(
     end_time_str: str,
     output_dir: str,
     base_filename: str = "legendas",
-    max_words_per_line: int = 6
+    max_words_per_line: int = 6,
+    preserve_existing_txt: bool = False
 ) -> dict:
     """
     Extrai o trecho do transcript correspondente ao corte e gera:
     1. `<base_filename>.srt` (e cópia `legendas.srt`)
     2. `<base_filename>.vtt`
     3. `transcricao_corte.txt` (texto corrido da fala)
+    Se preserve_existing_txt=True e `transcricao_corte.txt` já existir, mantém intacto.
     Retorna dicionário com os caminhos dos arquivos gerados.
     """
     result = {
@@ -734,8 +736,11 @@ def generate_cut_subtitle_files(
 
         # 3. Arquivo .TXT com texto corrido falado no corte
         txt_file = os.path.join(output_dir, "transcricao_corte.txt")
-        if export_subtitles_to_txt(lines, txt_file):
+        if preserve_existing_txt and os.path.exists(txt_file) and os.path.getsize(txt_file) > 0:
             result["txt_path"] = txt_file
+        else:
+            if export_subtitles_to_txt(lines, txt_file):
+                result["txt_path"] = txt_file
 
         result["line_count"] = len(lines)
         result["word_count"] = len(words)
@@ -743,4 +748,126 @@ def generate_cut_subtitle_files(
         pass
 
     return result
+
+
+def align_edited_words_with_timestamps(original_words: list, edited_text: str) -> list:
+    """
+    Alinha o texto editado manualmente pelo usuário (em transcricao_corte.txt)
+    com a lista original de palavras e timestamps (Whisper).
+    Preserva a cronologia temporal original das palavras inalteradas e interpola
+    proporcionalmente timestamps para palavras substituídas, inseridas ou alteradas.
+    """
+    import difflib
+    if not edited_text or not str(edited_text).strip():
+        return original_words or []
+    if not original_words:
+        return []
+
+    edited_tokens = [w for w in str(edited_text).strip().split() if w]
+    if not edited_tokens:
+        return original_words
+
+    orig_tokens = [w.get("word", "").strip() for w in original_words]
+
+    matcher = difflib.SequenceMatcher(None, [t.lower() for t in orig_tokens], [t.lower() for t in edited_tokens])
+    aligned_words = []
+
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == 'equal':
+            for orig_idx, edit_idx in zip(range(i1, i2), range(j1, j2)):
+                orig_item = dict(original_words[orig_idx])
+                orig_item["word"] = edited_tokens[edit_idx]
+                aligned_words.append(orig_item)
+        elif tag == 'replace':
+            t_start = original_words[i1].get("start", 0.0)
+            t_end = original_words[i2 - 1].get("end", t_start + 1.0)
+            n_new = j2 - j1
+            chunk_dur = (t_end - t_start) / max(1, n_new)
+            for k, edit_idx in enumerate(range(j1, j2)):
+                aligned_words.append({
+                    "word": edited_tokens[edit_idx],
+                    "start": round(t_start + k * chunk_dur, 3),
+                    "end": round(t_start + (k + 1) * chunk_dur, 3),
+                    "break_before": bool(original_words[i1].get("break_before", False)) if k == 0 else False
+                })
+        elif tag == 'insert':
+            prev_t = aligned_words[-1]["end"] if aligned_words else original_words[0].get("start", 0.0)
+            next_t = original_words[i1].get("start", prev_t + 1.0) if i1 < len(original_words) else (prev_t + 1.0)
+            if next_t <= prev_t:
+                next_t = prev_t + 1.0
+            n_new = j2 - j1
+            chunk_dur = max(0.05, (next_t - prev_t) / max(1, n_new))
+            for k, edit_idx in enumerate(range(j1, j2)):
+                aligned_words.append({
+                    "word": edited_tokens[edit_idx],
+                    "start": round(prev_t + k * chunk_dur, 3),
+                    "end": round(prev_t + (k + 1) * chunk_dur, 3),
+                    "break_before": False
+                })
+        elif tag == 'delete':
+            pass
+
+    return aligned_words
+
+
+def apply_edited_transcript_to_json(transcript_json_path: str, edited_text: str, output_json_path: str = None) -> str:
+    """
+    Carrega o JSON de transcrição (ex: _cut_tr_{start}_{end}.json ou transcript.json),
+    alinha com o texto editado manualmente de transcricao_corte.txt e salva um JSON
+    atualizado com os novos segmentos e palavras para uso em legendas e renderização.
+    Retorna o caminho do arquivo JSON salvo (ou o original em caso de falha).
+    """
+    if not transcript_json_path or not os.path.exists(transcript_json_path) or not edited_text or not str(edited_text).strip():
+        return transcript_json_path
+
+    try:
+        with open(transcript_json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        orig_segments = data.get("segments") or data.get("transcript_segments") or []
+        all_orig_words = []
+        for seg in orig_segments:
+            if "words" in seg and seg["words"]:
+                all_orig_words.extend(seg["words"])
+            else:
+                s_words = seg.get("text", "").split()
+                s_dur = max(0.5, seg.get("end", 0.0) - seg.get("start", 0.0))
+                w_dur = s_dur / max(1, len(s_words))
+                for idx, sw in enumerate(s_words):
+                    all_orig_words.append({
+                        "word": sw,
+                        "start": round(seg.get("start", 0.0) + idx * w_dur, 3),
+                        "end": round(seg.get("start", 0.0) + (idx + 1) * w_dur, 3)
+                    })
+
+        aligned_words = align_edited_words_with_timestamps(all_orig_words, edited_text)
+        if not aligned_words:
+            return transcript_json_path
+
+        new_lines = group_words_into_lines(aligned_words, max_words_per_line=6)
+        new_segments = []
+        for l in new_lines:
+            new_segments.append({
+                "start": l["line_start"],
+                "end": l["line_end"],
+                "text": l["text"],
+                "words": l["words"]
+            })
+
+        data["full_text"] = str(edited_text).strip()
+        data["segments"] = new_segments
+        if "transcript_segments" in data:
+            data["transcript_segments"] = new_segments
+
+        out_path = output_json_path
+        if not out_path:
+            base, ext = os.path.splitext(transcript_json_path)
+            out_path = f"{base}_manual{ext}"
+
+        with open(out_path, "w", encoding="utf-8") as f_out:
+            json.dump(data, f_out, ensure_ascii=False, indent=2)
+
+        return out_path
+    except Exception:
+        return transcript_json_path
 

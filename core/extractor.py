@@ -1,6 +1,9 @@
 import yt_dlp
 import os
 import re
+import io
+import requests
+from PIL import Image
 import imageio_ffmpeg
 
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
@@ -605,6 +608,8 @@ def get_video_components_status(video_id: str, data_dir: str = "data", remote_du
         "has_video": False,
         "video_size_mb": 0.0,
         "video_resolution": None,
+        "has_thumbnail": False,
+        "thumbnail_path": None,
         "has_ai_analysis": False,
         "pautas_count": 0,
         "shorts_count": 0,
@@ -614,7 +619,7 @@ def get_video_components_status(video_id: str, data_dir: str = "data", remote_du
         "can_process_incrementally": False
     }
     if not res["exists_dir"]:
-        res["missing_components"] = ["audio", "transcript", "video", "ai_analysis"]
+        res["missing_components"] = ["audio", "transcript", "video", "ai_analysis", "thumbnail"]
         return res
 
     # 1. Metadados
@@ -690,7 +695,22 @@ def get_video_components_status(video_id: str, data_dir: str = "data", remote_du
     else:
         res["missing_components"].append("ai_analysis")
 
-    # 6. Minutos adicionais se for Live
+    # 6. Thumbnail Oficial
+    thumb_path = os.path.join(v_dir, "thumbnail.jpg")
+    if os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 1000:
+        res["has_thumbnail"] = True
+        res["thumbnail_path"] = thumb_path
+    else:
+        for _ext in [".png", ".webp", ".jpeg"]:
+            _cand = os.path.join(v_dir, f"thumbnail{_ext}")
+            if os.path.exists(_cand) and os.path.getsize(_cand) > 1000:
+                res["has_thumbnail"] = True
+                res["thumbnail_path"] = _cand
+                break
+    if not res["has_thumbnail"]:
+        res["missing_components"].append("thumbnail")
+
+    # 7. Minutos adicionais se for Live
     if res["is_live"] and res["last_transcript_sec"] is not None and remote_duration:
         try:
             diff_sec = float(remote_duration) - float(res["last_transcript_sec"])
@@ -702,4 +722,84 @@ def get_video_components_status(video_id: str, data_dir: str = "data", remote_du
 
     res["can_process_incrementally"] = bool(res["has_transcript"] and len(res["missing_components"]) > 0)
     return res
+
+
+def download_video_thumbnail(url: str, output_path: str, thumbnail_url: str = None) -> dict:
+    """
+    Baixa a thumbnail oficial de um vídeo (YouTube ou web) e salva como JPEG de alta qualidade.
+    - Se thumbnail_url for fornecido, tenta baixá-la primeiro.
+    - Se for vídeo do YouTube, testa as opções de CDN em alta resolução (maxresdefault, sddefault, hqdefault).
+    - Se falhar, tenta extrair os metadados via yt-dlp para obter a melhor URL de thumbnail.
+    - Como fallback final, se houver um video_full.mp4 local na mesma pasta, extrai um frame representativo.
+    - Converte a imagem para RGB e salva em JPEG de alta qualidade (Pillow).
+    """
+    if not output_path:
+        return {"success": False, "path": None, "error": "Caminho de saída não fornecido"}
+
+    out_dir = os.path.dirname(os.path.abspath(output_path))
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+    }
+
+    candidate_urls = []
+    if thumbnail_url and str(thumbnail_url).startswith("http"):
+        candidate_urls.append(thumbnail_url)
+
+    yt_id = None
+    if url:
+        yt_id = get_video_id(url)
+        if yt_id and not yt_id.startswith(('local_', 'ig_', 'tt_', 'tw_', 'fb_', 'web_')) and len(yt_id) == 11:
+            candidate_urls.extend([
+                f"https://img.youtube.com/vi/{yt_id}/maxresdefault.jpg",
+                f"https://img.youtube.com/vi/{yt_id}/sddefault.jpg",
+                f"https://img.youtube.com/vi/{yt_id}/hqdefault.jpg",
+                f"https://img.youtube.com/vi/{yt_id}/0.jpg"
+            ])
+
+    # 1. Tenta baixar pelas URLs candidatas
+    for c_url in candidate_urls:
+        try:
+            resp = requests.get(c_url, headers=headers, timeout=12)
+            if resp.status_code == 200 and len(resp.content) > 1000:
+                img = Image.open(io.BytesIO(resp.content))
+                img = img.convert("RGB")
+                img.save(output_path, format="JPEG", quality=95)
+                if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+                    return {"success": True, "path": output_path, "error": None}
+        except Exception:
+            continue
+
+    # 2. Se ainda não conseguiu e temos URL do vídeo, tenta extrair via yt-dlp
+    if url and str(url).startswith("http"):
+        try:
+            meta = get_video_metadata(url)
+            remote_thumb = meta.get("thumbnail")
+            if remote_thumb and remote_thumb not in candidate_urls and str(remote_thumb).startswith("http"):
+                resp = requests.get(remote_thumb, headers=headers, timeout=12)
+                if resp.status_code == 200 and len(resp.content) > 1000:
+                    img = Image.open(io.BytesIO(resp.content))
+                    img = img.convert("RGB")
+                    img.save(output_path, format="JPEG", quality=95)
+                    if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+                        return {"success": True, "path": output_path, "error": None}
+        except Exception:
+            pass
+
+    # 3. Fallback final: se existir video_full.mp4 localmente, extrai frame com ffmpeg
+    local_vfull = os.path.join(out_dir, "video_full.mp4")
+    if os.path.exists(local_vfull) and os.path.getsize(local_vfull) > 10240:
+        try:
+            from core.video_processor import extract_thumbnail_from_video
+            f_res = extract_thumbnail_from_video(local_vfull, output_path, timestamp_sec=2.0)
+            if f_res.get("path") and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+                return {"success": True, "path": output_path, "error": None}
+        except Exception:
+            pass
+
+    return {"success": False, "path": None, "error": "Não foi possível baixar ou extrair a thumbnail do vídeo."}
+
 

@@ -708,16 +708,17 @@ def generate_headline_preview(
     y_shift = 0
     slide_dist = max(250, int(frame.shape[0] * 0.22))
 
-    if trans_type == "slide_explode":
+    if trans_type in ("slide_explode", "static_explode"):
         f_count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
         total_dur = float(f_count / fps) if (fps > 0 and f_count > 0) else 0.0
         expl_dur = max(0.3, trans_dur)
+        min_start_expl = (start_offset + trans_dur) if trans_type == "slide_explode" else start_offset
         if end_offset > 0.05:
             expl_end = end_offset
-            expl_start = max(start_offset + trans_dur, expl_end - expl_dur)
+            expl_start = max(min_start_expl, expl_end - expl_dur)
         else:
             expl_end = total_dur if total_dur > 0 else (start_offset + 10.0)
-            expl_start = max(start_offset + trans_dur, expl_end - expl_dur)
+            expl_start = max(min_start_expl, expl_end - expl_dur)
 
         # 1. Totalmente antes do início
         if start_offset > 0.05 and timestamp_s < (start_offset - 0.01):
@@ -735,13 +736,13 @@ def generate_headline_preview(
             particles = extract_particles_from_overlay(overlay_rgba)
             return draw_particle_explosion_on_frame(frame, particles, p_expl)
 
-        # 4. Durante o slide de entrada
-        if start_offset <= timestamp_s < (start_offset + trans_dur):
+        # 4. Durante o slide de entrada (exclusivo para slide_explode)
+        if trans_type == "slide_explode" and start_offset <= timestamp_s < (start_offset + trans_dur):
             p_in = max(0.0, min(1.0, (timestamp_s - start_offset) / trans_dur))
             y_shift = int(-slide_dist * (1.0 - p_in))
             return draw_headline_on_frame(frame, text, cfg, alpha_multiplier=1.0, y_shift=y_shift)
 
-        # 5. Durante o período estável da headline
+        # 5. Durante o período estável da headline (estática desde o início no static_explode)
         return draw_headline_on_frame(frame, text, cfg, alpha_multiplier=1.0, y_shift=0)
 
     if trans_type in ["fade", "slide", "slide_fade"] and trans_dur > 0.05:
@@ -779,7 +780,7 @@ def apply_headline_to_video(
     Suporta período configurável de início e término, e efeitos de transição de entrada/saída (fade, slide, slide_fade).
     - start_offset_s: Segundo em que a Headline inicia.
     - end_offset_s: Segundo em que a Headline encerra (0.0 = permanece até o final do vídeo).
-    - transition_type: 'fade', 'slide', 'slide_fade' ou 'none'.
+    - transition_type: 'static_explode', 'slide_explode', 'fade', 'slide', 'slide_fade' ou 'none'.
     - transition_dur_s: Duração em segundos da transição (ex: 0.5s).
     """
     if not video_path or not os.path.exists(video_path):
@@ -845,14 +846,15 @@ def apply_headline_to_video(
     input_extra = []
     temp_expl_dir = None
 
-    if trans_type == "slide_explode":
+    if trans_type in ("slide_explode", "static_explode"):
         expl_dur = max(0.3, trans_dur)
+        min_start_expl = (start_s + trans_dur) if trans_type == "slide_explode" else start_s
         if end_s > 0.05:
             expl_end = end_s
-            expl_start = max(start_s + trans_dur, expl_end - expl_dur)
+            expl_start = max(min_start_expl, expl_end - expl_dur)
         else:
             expl_end = total_dur if total_dur > 0 else (start_s + 10.0)
-            expl_start = max(start_s + trans_dur, expl_end - expl_dur)
+            expl_start = max(min_start_expl, expl_end - expl_dur)
 
         # Gera frames da explosão em pasta temporária
         temp_expl_dir = os.path.join(temp_dir, f"expl_{int(time.time()*1000)}_{os.getpid()}")
@@ -864,12 +866,20 @@ def apply_headline_to_video(
             p_frame = render_particle_explosion_frame(particles, p, vw, vh)
             Image.fromarray(p_frame).save(os.path.join(temp_expl_dir, f"frame_{fi:03d}.png"), format="PNG")
 
-        y_expr = f"'if(lte(t,{start_s + trans_dur:.3f}), -{slide_dist}*(1-(t-{start_s:.3f})/{trans_dur:.3f}), 0)'"
-        filter_complex = (
-            f"[0:v][1:v]overlay=x=0:y={y_expr}:enable='between(t,{start_s:.3f},{expl_start:.3f})'[v1];"
-            f"[2:v]setpts=PTS-STARTPTS+{expl_start:.3f}/TB[expl];"
-            f"[v1][expl]overlay=x=0:y=0:enable='between(t,{expl_start:.3f},{expl_end:.3f})':eof_action=pass[outv]"
-        )
+        if trans_type == "slide_explode":
+            y_expr = f"'if(lte(t,{start_s + trans_dur:.3f}), -{slide_dist}*(1-(t-{start_s:.3f})/{trans_dur:.3f}), 0)'"
+            filter_complex = (
+                f"[0:v][1:v]overlay=x=0:y={y_expr}:enable='between(t,{start_s:.3f},{expl_start:.3f})'[v1];"
+                f"[2:v]setpts=PTS-STARTPTS+{expl_start:.3f}/TB[expl];"
+                f"[v1][expl]overlay=x=0:y=0:enable='between(t,{expl_start:.3f},{expl_end:.3f})':eof_action=pass[outv]"
+            )
+        else:
+            # static_explode: texto estático fixo desde o início (sem deslocamento) até o momento da explosão
+            filter_complex = (
+                f"[0:v][1:v]overlay=x=0:y=0:enable='between(t,{start_s:.3f},{expl_start:.3f})'[v1];"
+                f"[2:v]setpts=PTS-STARTPTS+{expl_start:.3f}/TB[expl];"
+                f"[v1][expl]overlay=x=0:y=0:enable='between(t,{expl_start:.3f},{expl_end:.3f})':eof_action=pass[outv]"
+            )
         input_extra = [
             "-framerate", str(int(round(fps))),
             "-start_number", "0",

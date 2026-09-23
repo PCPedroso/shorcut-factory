@@ -5,6 +5,7 @@ import re
 import json
 import importlib
 import numpy as np
+import cv2
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime
 
@@ -23,6 +24,7 @@ import core.audio_mixer
 import core.retention_effects
 import core.integrations
 import core.thumbnail_generator
+import core.frame_capturer
 import core.quick_editor
 import core.overlay_manager
 import core.ui_theme
@@ -42,6 +44,7 @@ importlib.reload(core.audio_mixer)
 importlib.reload(core.retention_effects)
 importlib.reload(core.integrations)
 importlib.reload(core.thumbnail_generator)
+importlib.reload(core.frame_capturer)
 importlib.reload(core.quick_editor)
 importlib.reload(core.overlay_manager)
 importlib.reload(core.ui_theme)
@@ -77,6 +80,13 @@ from core.audio_mixer import list_available_tracks, DUCKING_PRESETS, register_cu
 from core.music_recognizer import identify_song_from_audio_and_meta
 from core.retention_effects import PROGRESS_BAR_COLORS, ENGAGEMENT_CALLOUT_PRESETS
 from core.thumbnail_generator import create_cut_thumbnail
+from core.frame_capturer import (
+    extract_frame_at_timestamp as extract_capture_frame,
+    save_captured_frame_as_thumbnail,
+    save_base64_data_as_image,
+    parse_time_str_to_seconds,
+    format_seconds_to_time_str
+)
 from core.integrations import (
     get_youtube_auth_status, authenticate_youtube_oauth, upload_to_youtube_shorts, send_to_webhook
 )
@@ -376,6 +386,478 @@ def inject_video_time_sync_js():
     st.html(sync_script, unsafe_allow_javascript=True)
 
 inject_video_time_sync_js()
+
+def inject_video_snapshot_js():
+    """
+    Injeta JavaScript para permitir captura instantânea de print do frame exato
+    em qualquer player de vídeo / prévia da aplicação quando o vídeo estiver pausado.
+    Permite copiar para área de transferência, baixar JPG e preencher minutagem.
+    """
+    snap_script = """
+    <script>
+    (function() {
+        function formatSecToHHMMSS(sec) {
+            if (isNaN(sec) || sec < 0) sec = 0;
+            const h = Math.floor(sec / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            const s = Math.floor(sec % 60);
+            let ms = Math.round((sec - Math.floor(sec)) * 100);
+            if (ms >= 100) ms = 99;
+            const hh = String(h).padStart(2, '0');
+            const mm = String(m).padStart(2, '0');
+            const ss = String(s).padStart(2, '0');
+            const mss = String(ms).padStart(2, '0');
+            return `${hh}:${mm}:${ss}.${mss}`;
+        }
+
+        function ensureSnapshotUI() {
+            try {
+                const pDoc = (window.parent && window.parent.document) || document;
+                if (!pDoc || !pDoc.body) return null;
+
+                // 1. Injeta CSS
+                if (!pDoc.getElementById('viralcut-snapshot-styles')) {
+                    const style = pDoc.createElement('style');
+                    style.id = 'viralcut-snapshot-styles';
+                    style.innerHTML = `
+                        .viralcut-snap-overlay {
+                            position: fixed;
+                            top: 0; left: 0; width: 100vw; height: 100vh;
+                            background: rgba(8, 9, 15, 0.85);
+                            backdrop-filter: blur(8px);
+                            -webkit-backdrop-filter: blur(8px);
+                            z-index: 999999;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            opacity: 0;
+                            pointer-events: none;
+                            transition: opacity 0.25s ease;
+                        }
+                        .viralcut-snap-overlay.active {
+                            opacity: 1;
+                            pointer-events: auto;
+                        }
+                        .viralcut-snap-modal {
+                            background: #141522;
+                            border: 1px solid rgba(255, 107, 0, 0.5);
+                            border-radius: 16px;
+                            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.9), 0 0 30px rgba(255, 107, 0, 0.2);
+                            max-width: 920px;
+                            width: 92vw;
+                            max-height: 92vh;
+                            display: flex;
+                            flex-direction: column;
+                            overflow: hidden;
+                            color: #ffffff;
+                            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                            transform: scale(0.95);
+                            transition: transform 0.25s ease;
+                        }
+                        .viralcut-snap-overlay.active .viralcut-snap-modal {
+                            transform: scale(1);
+                        }
+                        .viralcut-snap-header {
+                            display: flex;
+                            align-items: center;
+                            justify-content: space-between;
+                            padding: 16px 20px;
+                            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                            background: rgba(25, 26, 38, 0.9);
+                        }
+                        .viralcut-snap-title {
+                            font-size: 16px;
+                            font-weight: 700;
+                            color: #fff;
+                            display: flex;
+                            align-items: center;
+                            gap: 10px;
+                        }
+                        .viralcut-snap-badge {
+                            background: rgba(255, 107, 0, 0.2);
+                            color: #ff6b00;
+                            border: 1px solid rgba(255, 107, 0, 0.5);
+                            padding: 2px 8px;
+                            border-radius: 6px;
+                            font-size: 13px;
+                            font-family: monospace;
+                        }
+                        .viralcut-snap-close {
+                            background: transparent;
+                            border: none;
+                            color: #aaa;
+                            font-size: 24px;
+                            cursor: pointer;
+                            line-height: 1;
+                            padding: 4px 8px;
+                            border-radius: 6px;
+                            transition: all 0.2s;
+                        }
+                        .viralcut-snap-close:hover {
+                            color: #fff;
+                            background: rgba(255, 255, 255, 0.1);
+                        }
+                        .viralcut-snap-body {
+                            padding: 20px;
+                            display: flex;
+                            flex-direction: column;
+                            align-items: center;
+                            justify-content: center;
+                            overflow-y: auto;
+                            background: #0d0e17;
+                        }
+                        .viralcut-snap-img-preview {
+                            max-width: 100%;
+                            max-height: 56vh;
+                            border-radius: 8px;
+                            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+                            border: 1px solid rgba(255, 255, 255, 0.15);
+                            object-fit: contain;
+                        }
+                        .viralcut-snap-footer {
+                            padding: 14px 20px;
+                            background: rgba(25, 26, 38, 0.95);
+                            border-top: 1px solid rgba(255, 255, 255, 0.1);
+                            display: flex;
+                            flex-wrap: wrap;
+                            align-items: center;
+                            justify-content: space-between;
+                            gap: 12px;
+                        }
+                        .viralcut-snap-actions {
+                            display: flex;
+                            gap: 10px;
+                            flex-wrap: wrap;
+                        }
+                        .viralcut-snap-btn-action {
+                            padding: 8px 16px;
+                            border-radius: 8px;
+                            font-size: 13px;
+                            font-weight: 600;
+                            cursor: pointer;
+                            display: flex;
+                            align-items: center;
+                            gap: 6px;
+                            transition: all 0.2s;
+                            border: none;
+                        }
+                        .viralcut-snap-btn-primary {
+                            background: linear-gradient(135deg, #ff6b00 0%, #ff8800 100%);
+                            color: #fff;
+                            box-shadow: 0 4px 14px rgba(255, 107, 0, 0.4);
+                        }
+                        .viralcut-snap-btn-primary:hover {
+                            transform: translateY(-1px);
+                            box-shadow: 0 6px 20px rgba(255, 107, 0, 0.6);
+                        }
+                        .viralcut-snap-btn-secondary {
+                            background: rgba(255, 255, 255, 0.08);
+                            color: #e0e0e0;
+                            border: 1px solid rgba(255, 255, 255, 0.15);
+                        }
+                        .viralcut-snap-btn-secondary:hover {
+                            background: rgba(255, 255, 255, 0.15);
+                            color: #fff;
+                        }
+                        .viralcut-snap-toast {
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: #4ade80;
+                            opacity: 0;
+                            transition: opacity 0.3s;
+                        }
+                        .viralcut-snap-toast.show {
+                            opacity: 1;
+                        }
+                        .viralcut-video-snap-trigger {
+                            position: absolute;
+                            top: 10px;
+                            right: 10px;
+                            z-index: 99;
+                            background: rgba(18, 19, 29, 0.85);
+                            backdrop-filter: blur(8px);
+                            -webkit-backdrop-filter: blur(8px);
+                            border: 1px solid rgba(255, 107, 0, 0.6);
+                            color: #ffffff;
+                            font-size: 12px;
+                            font-weight: 600;
+                            padding: 6px 14px;
+                            border-radius: 20px;
+                            cursor: pointer;
+                            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6);
+                            display: flex;
+                            align-items: center;
+                            gap: 6px;
+                            transition: all 0.25s ease;
+                            opacity: 0.65;
+                            user-select: none;
+                            line-height: 1;
+                        }
+                        .viralcut-video-snap-trigger:hover {
+                            opacity: 1 !important;
+                            background: #ff6b00;
+                            border-color: #ff9800;
+                            color: #ffffff;
+                            transform: scale(1.05);
+                            box-shadow: 0 6px 20px rgba(255, 107, 0, 0.7);
+                        }
+                        .viralcut-video-snap-trigger.is-paused {
+                            opacity: 1 !important;
+                            background: rgba(255, 107, 0, 0.92);
+                            border-color: #ffbb66;
+                            box-shadow: 0 0 16px rgba(255, 107, 0, 0.8);
+                            animation: viralcut-snap-pulse 2s infinite;
+                        }
+                        @keyframes viralcut-snap-pulse {
+                            0% { box-shadow: 0 0 0 0 rgba(255, 107, 0, 0.7); }
+                            70% { box-shadow: 0 0 0 8px rgba(255, 107, 0, 0); }
+                            100% { box-shadow: 0 0 0 0 rgba(255, 107, 0, 0); }
+                        }
+                    `;
+                    pDoc.head.appendChild(style);
+                }
+
+                // 2. Injeta Modal no body se não existir
+                let overlay = pDoc.getElementById('viralcut-snapshot-modal-overlay');
+                if (!overlay) {
+                    overlay = pDoc.createElement('div');
+                    overlay.id = 'viralcut-snapshot-modal-overlay';
+                    overlay.className = 'viralcut-snap-overlay';
+                    overlay.innerHTML = `
+                        <div class="viralcut-snap-modal">
+                            <div class="viralcut-snap-header">
+                                <div class="viralcut-snap-title">
+                                    <span>📸 Frame Pausado</span>
+                                    <span class="viralcut-snap-badge" id="viralcut-snap-time-badge">00:00:00.00</span>
+                                    <span class="viralcut-snap-badge" id="viralcut-snap-res-badge">1920x1080</span>
+                                </div>
+                                <button type="button" class="viralcut-snap-close" id="viralcut-snap-close-btn">&times;</button>
+                            </div>
+                            <div class="viralcut-snap-body">
+                                <img id="viralcut-snap-preview-img" class="viralcut-snap-img-preview" src="" alt="Frame Pausado" />
+                            </div>
+                            <div class="viralcut-snap-footer">
+                                <div class="viralcut-snap-toast" id="viralcut-snap-toast-msg"></div>
+                                <div class="viralcut-snap-actions">
+                                    <button type="button" class="viralcut-snap-btn-action viralcut-snap-btn-secondary" id="viralcut-snap-fill-inputs-btn">
+                                        ⏱️ Usar como Minutagem
+                                    </button>
+                                    <button type="button" class="viralcut-snap-btn-action viralcut-snap-btn-secondary" id="viralcut-snap-copy-btn">
+                                        📋 Copiar Imagem
+                                    </button>
+                                    <button type="button" class="viralcut-snap-btn-action viralcut-snap-btn-primary" id="viralcut-snap-download-btn">
+                                        💾 Baixar Imagem (JPG)
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    pDoc.body.appendChild(overlay);
+
+                    const closeModal = () => overlay.classList.remove('active');
+                    overlay.querySelector('#viralcut-snap-close-btn').addEventListener('click', closeModal);
+                    overlay.addEventListener('click', (e) => {
+                        if (e.target === overlay) closeModal();
+                    });
+                    pDoc.addEventListener('keydown', (e) => {
+                        if (e.key === 'Escape' && overlay.classList.contains('active')) {
+                            closeModal();
+                        }
+                    });
+                }
+                return overlay;
+            } catch(e) {
+                return null;
+            }
+        }
+
+        function openSnapshotModal(canvas, curSec, formattedTime, width, height) {
+            const pDoc = (window.parent && window.parent.document) || document;
+            const overlay = pDoc.getElementById('viralcut-snapshot-modal-overlay');
+            if (!overlay) return;
+
+            let dataUrl;
+            try {
+                dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+            } catch(err) {
+                alert('Não foi possível exportar frame: ' + err.message);
+                return;
+            }
+
+            const img = pDoc.getElementById('viralcut-snap-preview-img');
+            const timeBadge = pDoc.getElementById('viralcut-snap-time-badge');
+            const resBadge = pDoc.getElementById('viralcut-snap-res-badge');
+            const toast = pDoc.getElementById('viralcut-snap-toast-msg');
+
+            if (img) img.src = dataUrl;
+            if (timeBadge) timeBadge.innerText = formattedTime;
+            if (resBadge) resBadge.innerText = `${width}x${height}`;
+            if (toast) {
+                toast.className = 'viralcut-snap-toast';
+                toast.innerText = '';
+            }
+
+            const showToast = (msg) => {
+                if (!toast) return;
+                toast.innerText = msg;
+                toast.classList.add('show');
+                setTimeout(() => toast.classList.remove('show'), 3000);
+            };
+
+            const dlBtn = pDoc.getElementById('viralcut-snap-download-btn');
+            if (dlBtn) {
+                dlBtn.onclick = () => {
+                    const a = pDoc.createElement('a');
+                    a.href = dataUrl;
+                    const cleanTime = formattedTime.replace(/[:.]/g, '-');
+                    a.download = `corte_frame_${cleanTime}.jpg`;
+                    pDoc.body.appendChild(a);
+                    a.click();
+                    pDoc.body.removeChild(a);
+                    showToast('💾 Imagem baixada com sucesso!');
+                };
+            }
+
+            const copyBtn = pDoc.getElementById('viralcut-snap-copy-btn');
+            if (copyBtn) {
+                copyBtn.onclick = () => {
+                    try {
+                        canvas.toBlob((blob) => {
+                            if (!blob) {
+                                showToast('⚠️ Falha ao criar imagem para clipboard.');
+                                return;
+                            }
+                            if (navigator.clipboard && navigator.clipboard.write) {
+                                navigator.clipboard.write([
+                                    new ClipboardItem({ 'image/png': blob })
+                                ]).then(() => {
+                                    showToast('✅ Imagem copiada para a área de transferência!');
+                                }).catch(() => {
+                                    showToast('⚠️ Permissão negada para copiar imagem.');
+                                });
+                            } else {
+                                showToast('⚠️ Navegador não suporta cópia direta.');
+                            }
+                        }, 'image/png');
+                    } catch(e) {
+                        showToast('⚠️ Erro ao copiar imagem.');
+                    }
+                };
+            }
+
+            const fillBtn = pDoc.getElementById('viralcut-snap-fill-inputs-btn');
+            if (fillBtn) {
+                fillBtn.onclick = () => {
+                    try {
+                        const inputs = pDoc.querySelectorAll('input[type="text"]');
+                        let count = 0;
+                        inputs.forEach(inp => {
+                            const label = (inp.getAttribute('aria-label') || '').toLowerCase();
+                            const val = inp.value || '';
+                            if (label.includes('momento') || label.includes('frame') || label.includes('minutagem') || label.includes('player_synced') || label.includes('tempo')) {
+                                const lastVal = inp.value;
+                                inp.value = formattedTime;
+                                const tracker = inp._valueTracker;
+                                if (tracker) tracker.setValue(lastVal);
+                                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                                inp.dispatchEvent(new Event('change', { bubbles: true }));
+                                count++;
+                            }
+                        });
+                        showToast(`⏱️ Minutagem ${formattedTime} preenchida nos campos!`);
+                    } catch(e) {
+                        showToast('⏱️ Erro ao atualizar campos.');
+                    }
+                };
+            }
+
+            overlay.classList.add('active');
+        }
+
+        function scanAndBindSnapshotButtons() {
+            try {
+                const pDoc = (window.parent && window.parent.document) || document;
+                if (!pDoc) return;
+                ensureSnapshotUI();
+
+                const videos = pDoc.querySelectorAll('video');
+                videos.forEach(v => {
+                    const wrapper = v.parentElement;
+                    if (!wrapper) return;
+
+                    // Garante que o wrapper seja posicionado relativamente
+                    if (wrapper.style.position !== 'relative') {
+                        wrapper.style.position = 'relative';
+                    }
+
+                    if (v.dataset.snapBound && wrapper.querySelector('.viralcut-video-snap-trigger')) {
+                        return;
+                    }
+                    v.dataset.snapBound = "true";
+
+                    let snapTrigger = wrapper.querySelector('.viralcut-video-snap-trigger');
+                    if (!snapTrigger) {
+                        snapTrigger = pDoc.createElement('button');
+                        snapTrigger.type = 'button';
+                        snapTrigger.className = 'viralcut-video-snap-trigger';
+                        snapTrigger.title = '📸 Tirar Print do Frame Pausado (Alta Resolução)';
+                        snapTrigger.innerHTML = '📸 Print';
+                        wrapper.appendChild(snapTrigger);
+                    }
+
+                    const updateTriggerState = () => {
+                        if (v.paused) {
+                            snapTrigger.classList.add('is-paused');
+                            const formatted = formatSecToHHMMSS(v.currentTime);
+                            snapTrigger.innerHTML = `📸 Print (${formatted.split('.')[0]})`;
+                        } else {
+                            snapTrigger.classList.remove('is-paused');
+                            snapTrigger.innerHTML = '📸 Print';
+                        }
+                    };
+
+                    v.addEventListener('pause', updateTriggerState);
+                    v.addEventListener('play', updateTriggerState);
+                    v.addEventListener('seeked', updateTriggerState);
+                    updateTriggerState();
+
+                    snapTrigger.onclick = (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        try {
+                            const w = v.videoWidth || v.clientWidth || 1280;
+                            const h = v.videoHeight || v.clientHeight || 720;
+                            const canvas = pDoc.createElement('canvas');
+                            canvas.width = w;
+                            canvas.height = h;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(v, 0, 0, w, h);
+                            const curSec = v.currentTime || 0;
+                            const formatted = formatSecToHHMMSS(curSec);
+                            openSnapshotModal(canvas, curSec, formatted, w, h);
+                        } catch(err) {
+                            console.error('Snapshot capture error:', err);
+                        }
+                    };
+                });
+            } catch(e) {}
+        }
+
+        try {
+            const rootWin = window.parent || window;
+            if (rootWin && !rootWin.__viralcutSnapshotLoopAttached) {
+                rootWin.__viralcutSnapshotLoopAttached = true;
+                setInterval(scanAndBindSnapshotButtons, 700);
+            }
+        } catch (e) {}
+
+        scanAndBindSnapshotButtons();
+    })();
+    </script>
+    """
+    st.html(snap_script, unsafe_allow_javascript=True)
+
+inject_video_snapshot_js()
 
 def safe_display_image(img_source, caption=None, use_container_width=True, width=None):
     """
@@ -834,9 +1316,10 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
             with col_b_tr1:
                 sel_b_trans_type = st.selectbox(
                     "✨ Efeito de Transição (Entrada e Saída):",
-                    options=["slide_explode", "fade", "slide", "slide_fade", "none"],
+                    options=["slide_explode", "static_explode", "fade", "slide", "slide_fade", "none"],
                     format_func=lambda x: {
                         "slide_explode": "💥 Deslizar + Explosão em Partículas (Viral)",
+                        "static_explode": "💥 Estático + Explosão em Partículas (Início Fixo)",
                         "fade": "🌫️ Suave (Fade In / Fade Out)",
                         "slide": "⬇️ Deslizar (Slide do Topo)",
                         "slide_fade": "🌟 Deslizar + Fade (Combo Premium)",
@@ -844,7 +1327,7 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
                     }.get(x, x),
                     index=0,
                     key="batch_hl_trans_type",
-                    help="Efeito de animação ao entrar e sair da tela. A opção 'Deslizar + Explosão' desce a headline do topo e a desintegra em partículas brilhantes ao final."
+                    help="Efeito de animação ao entrar e sair da tela. 'Deslizar + Explosão' entra deslizando do topo e explode em partículas. 'Estático + Explosão' inicia fixo/estático desde o primeiro frame e desintegra em partículas brilhantes após o tempo configurado."
                 )
             with col_b_tr2:
                 sel_b_trans_dur = st.slider(
@@ -1302,7 +1785,7 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     st.toast(f"🧹 {clean_r.get('deleted_count', 0)} versão(ões) editada(s) removida(s)!")
                     st.rerun(scope="app")
 
-        col_mode, col_suf = st.columns([1.5, 1.0])
+        col_mode, col_suf, col_clean = st.columns([1.5, 1.0, 1.4])
         with col_mode:
             save_mode = st.radio(
                 "Destino do vídeo editado:",
@@ -1311,10 +1794,10 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 horizontal=True,
                 key=f"edit_save_mode_{unique_key}"
             )
-        with col_suf:
-            custom_suffix = ""
-            clean_previous = False
-            if "Salvar como um novo vídeo" in save_mode:
+        custom_suffix = ""
+        clean_previous = False
+        if "Salvar como um novo vídeo" in save_mode:
+            with col_suf:
                 custom_suffix = st.text_input(
                     "Sufixo da nova versão:",
                     value="_editado",
@@ -1322,6 +1805,8 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 ).strip()
                 if not custom_suffix.startswith("_"):
                     custom_suffix = f"_{custom_suffix}"
+            with col_clean:
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                 clean_previous = st.checkbox(
                     "🗑️ Deletar versões editadas antigas",
                     value=True,
@@ -2304,9 +2789,10 @@ def render_quick_editor_component(video_path: str, unique_key: str):
             with col_hl_tr1:
                 sel_hl_trans_type = st.selectbox(
                     "✨ Efeito de Transição (Entrada e Saída):",
-                    options=["slide_explode", "fade", "slide", "slide_fade", "none"],
+                    options=["slide_explode", "static_explode", "fade", "slide", "slide_fade", "none"],
                     format_func=lambda x: {
                         "slide_explode": "💥 Deslizar + Explosão em Partículas (Viral)",
+                        "static_explode": "💥 Estático + Explosão em Partículas (Início Fixo)",
                         "fade": "🌫️ Suave (Fade In / Fade Out)",
                         "slide": "⬇️ Deslizar (Slide do Topo)",
                         "slide_fade": "🌟 Deslizar + Fade (Combo Premium)",
@@ -2314,7 +2800,7 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     }.get(x, x),
                     index=0,
                     key=f"hl_trans_type_{unique_key}",
-                    help="Efeito de animação ao entrar e sair da tela. A opção 'Deslizar + Explosão' desce a headline do topo e a desintegra em partículas brilhantes ao final."
+                    help="Efeito de animação ao entrar e sair da tela. 'Deslizar + Explosão' entra deslizando do topo e explode em partículas. 'Estático + Explosão' inicia fixo/estático desde o primeiro frame e desintegra em partículas brilhantes após o tempo configurado."
                 )
             with col_hl_tr2:
                 sel_hl_trans_dur = st.slider(
@@ -7208,6 +7694,99 @@ if _has_media_ready:
                                     key=f"btn_dl_var_cached_{v_i}",
                                     use_container_width=True
                                 )
+
+            # Captura de Frame do Corte Existente para Thumbnail
+            with st.expander("📸 Capturar Frame deste Corte como Capa / Thumbnail", expanded=False):
+                st.caption("Passe a minutagem ou pause o vídeo acima para selecionar o frame exato da capa.")
+                col_cap_s1, col_cap_s2 = st.columns([2, 1])
+                with col_cap_s1:
+                    snap_time_inst_inp = st.text_input(
+                        "Tempo do Frame (HH:MM:SS.ms ou segundos):",
+                        value="00:00:01.00",
+                        key=f"snap_time_inst_{_vid_id_cat}_{selected_aspect}",
+                        help="Exemplo: 00:00:02.50 ou 2.5. Sincronizado automaticamente ao pausar o vídeo ou clicar no print do player."
+                    )
+                with col_cap_s2:
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                    btn_prev_inst_snap = st.button("👁️ Prévia do Frame", key=f"btn_prev_inst_snap_{_vid_id_cat}_{selected_aspect}", use_container_width=True)
+
+                snap_inst_store_key = f"snap_cached_inst_{_vid_id_cat}_{selected_aspect}"
+                if btn_prev_inst_snap:
+                    _inst_vpath = existing_inst.get("video_path")
+                    if _inst_vpath and os.path.exists(_inst_vpath):
+                        with st.spinner("Extraindo frame em alta resolução..."):
+                            ts_sec = parse_time_str_to_seconds(snap_time_inst_inp)
+                            ext_res = extract_capture_frame(_inst_vpath, ts_sec)
+                            if ext_res.get("error") or ext_res.get("frame") is None:
+                                st.error(f"Erro ao capturar frame: {ext_res.get('error')}")
+                            else:
+                                st.session_state[snap_inst_store_key] = {
+                                    "frame": ext_res["frame"],
+                                    "time_str": ext_res.get("time_str", snap_time_inst_inp),
+                                    "resolution": ext_res.get("resolution", (0, 0))
+                                }
+                    else:
+                        st.warning("Vídeo da instância não encontrado.")
+
+                if snap_inst_store_key in st.session_state and st.session_state[snap_inst_store_key].get("frame") is not None:
+                    sdata = st.session_state[snap_inst_store_key]
+                    s_bgr = sdata["frame"]
+                    s_rgb = cv2.cvtColor(s_bgr, cv2.COLOR_BGR2RGB)
+                    w_s, h_s = sdata["resolution"]
+                    st.caption(f"Prévia do Frame Capturado ({w_s}x{h_s} aos `{sdata['time_str']}`):")
+                    safe_display_image(s_rgb, use_container_width=True)
+
+                    c_act1, c_act2, c_act3 = st.columns([1.5, 1.5, 1.0])
+                    with c_act1:
+                        if st.button("⭐ Salvar como Capa Oficial", key=f"btn_save_inst_clean_{_vid_id_cat}_{selected_aspect}", type="primary", use_container_width=True, help="Define este frame diretamente como a capa oficial (thumbnail.jpg) do corte"):
+                            with st.spinner("Salvando frame como capa oficial..."):
+                                s_res = save_captured_frame_as_thumbnail(
+                                    source_video_or_frame=s_bgr,
+                                    output_thumbnail_path=cached_thumb,
+                                    video_id=_vid_id_cat,
+                                    start_time=start_time,
+                                    end_time=end_time,
+                                    aspect_mode=selected_aspect,
+                                    generate_ai_variations=False
+                                )
+                                if s_res.get("success"):
+                                    st.session_state.pop(snap_inst_store_key, None)
+                                    st.success("✅ Frame salvo com sucesso como Capa Oficial!")
+                                    st.rerun()
+                                else:
+                                    st.error(f"Erro ao salvar: {s_res.get('error')}")
+
+                    with c_act2:
+                        if st.button("🎨 Criar 3 Capas com IA", key=f"btn_save_inst_ai_{_vid_id_cat}_{selected_aspect}", use_container_width=True, help="Usa este frame como orador principal, remove o fundo com Rembg e gera as 3 variações virais"):
+                            with st.spinner("Gerando 3 variações com IA (Rembg)..."):
+                                s_res = save_captured_frame_as_thumbnail(
+                                    source_video_or_frame=s_bgr,
+                                    output_thumbnail_path=cached_thumb,
+                                    video_id=_vid_id_cat,
+                                    start_time=start_time,
+                                    end_time=end_time,
+                                    aspect_mode=selected_aspect,
+                                    generate_ai_variations=True,
+                                    headline_text=cut_headline_val or cut_title_val or ""
+                                )
+                                if s_res.get("success"):
+                                    st.session_state.pop(snap_inst_store_key, None)
+                                    st.success("🎉 3 Capas com IA geradas com sucesso a partir deste frame!")
+                                    st.rerun()
+                                else:
+                                    st.error(f"Erro ao gerar com IA: {s_res.get('error')}")
+
+                    with c_act3:
+                        r_enc, b_enc = cv2.imencode(".jpg", s_bgr)
+                        if r_enc:
+                            st.download_button(
+                                "💾 Baixar",
+                                data=b_enc.tobytes(),
+                                file_name=f"frame_capturado_{sdata['time_str'].replace(':', '-')}.jpg",
+                                mime="image/jpeg",
+                                key=f"dl_snap_inst_{_vid_id_cat}_{selected_aspect}",
+                                use_container_width=True
+                            )
     
             col_dl1, col_dl_fol, col_dl2 = st.columns([1.5, 1.2, 1.2] if has_cached_thumb else [1.5, 1.2, 0.001])
             with col_dl1:
@@ -8291,206 +8870,341 @@ if _has_media_ready:
                         formats_dict = cut_item.get("formats", {})
                         if formats_dict:
                             num_fmt = len(formats_dict)
-                            if num_fmt == 1:
-                                f_cols = st.columns([1.3, 2.7])
-                            elif num_fmt == 2:
-                                f_cols = st.columns([1.3, 1.3, 1.4])
-                            elif num_fmt == 3:
-                                f_cols = st.columns([1.1, 1.1, 1.1, 0.7])
-                            else:
-                                f_cols = st.columns(num_fmt)
-    
-                            for f_idx, (fmt_key, fmt_data) in enumerate(formats_dict.items()):
-                                with f_cols[f_idx]:
-                                    fmt_badge = {
-                                        "9:16_smart_face": "📱 9:16 Smart Face (VRIRA)",
-                                        "9:16_split": "📱 9:16 Split Screen (VLDSS)",
-                                        "9:16_blur": "📱 9:16 Blur (VFDBS)",
-                                        "9:16_crop": "📱 9:16 Crop (VCCFT)",
-                                        "16:9": "💻 16:9 Original (HOFHD)"
-                                    }.get(fmt_key, fmt_key)
-                                    
-                                    st.markdown(f"**{fmt_badge}**")
-                                    v_file = fmt_data.get("video_path")
-                                    g_thumb = fmt_data.get("thumbnail_path") or os.path.join(fmt_data.get("folder_path", ""), "thumbnail.jpg")
-                                    has_g_thumb = g_thumb and os.path.exists(g_thumb)
-    
-                                    if v_file and os.path.exists(v_file):
-                                        safe_display_video(v_file)
-                                        
-                                        if has_g_thumb:
-                                            g_folder = fmt_data.get("folder_path", "")
-                                            g_var_list = []
-                                            for v_i, v_name in [(1, "⚡ Impacto Neon (Glow)"), (2, "✨ Clean Focus (Sombra 3D)"), (3, "🎬 Moldura Dinâmica (HDR)")]:
-                                                v_p = os.path.join(g_folder, f"thumbnail_{v_i}.jpg")
-                                                if os.path.exists(v_p):
-                                                    g_var_list.append((v_i, v_name, v_p))
-    
-                                            with st.expander(f"🖼️ Visualizar Capa / Thumbnail ({'16:9' if fmt_key == '16:9' else '9:16'})", expanded=False):
-                                                safe_display_image(g_thumb, caption="Capa Principal Ativa", use_container_width=True)
-                                                if len(g_var_list) > 1:
-                                                    st.markdown("##### 🎨 Variações de Capa:")
-                                                    g_vcols = st.columns(len(g_var_list))
-                                                    active_g_var = fmt_data.get("active_variation", 1)
-                                                    for g_vi, (gv_id, gv_name, gv_path) in enumerate(g_var_list):
-                                                        with g_vcols[g_vi]:
-                                                            is_g_act = (gv_id == active_g_var)
-                                                            st.caption(f"**{gv_name}**" + (" ⭐" if is_g_act else ""))
-                                                            safe_display_image(gv_path, use_container_width=True)
-                                                            col_g1, col_g2 = st.columns(2)
-                                                            with col_g1:
-                                                                if not is_g_act:
-                                                                    if st.button("⭐ Ativar", key=f"btn_set_gvar_{c_idx}_{f_idx}_{gv_id}", use_container_width=True):
-                                                                        set_active_thumbnail_variation(_vid_id_gal, cut_item.get('start_time'), cut_item.get('end_time'), fmt_key, gv_id)
-                                                                        st.success(f"Capa {gv_id} ativada!")
-                                                                        st.rerun()
-                                                                else:
-                                                                    st.button("✅", disabled=True, key=f"btn_act_gvar_{c_idx}_{f_idx}_{gv_id}", use_container_width=True)
-                                                            with col_g2:
-                                                                st.download_button(
-                                                                    label="⬇️",
-                                                                    data=get_file_bytes_loader(gv_path),
-                                                                    file_name=f"thumbnail_{gv_id}.jpg",
-                                                                    mime="image/jpeg",
-                                                                    key=f"dl_gvar_{c_idx}_{f_idx}_{gv_id}",
-                                                                    use_container_width=True
-                                                                )
-                                                else:
-                                                    st.download_button(
-                                                        label="💾 Baixar Thumbnail (JPG)",
-                                                        data=get_file_bytes_loader(g_thumb),
-                                                        file_name="thumbnail.jpg",
-                                                        mime="image/jpeg",
-                                                        key=f"dl_thumb_gal_{c_idx}_{f_idx}",
-                                                        use_container_width=True
-                                                    )
-    
-                                                st.markdown("")
-                                                if st.button("🔄 Recriar 3 Capas com IA (Sem Renderizar Vídeo)", key=f"btn_regen_gal_{c_idx}_{f_idx}", use_container_width=True):
-                                                    v_full_gal = os.path.join("data", _vid_id_gal, "video_full.mp4")
-                                                    if os.path.exists(v_full_gal):
-                                                        with st.spinner("Recriando capas com Rembg e IA..."):
-                                                            th_g_res = create_cut_thumbnail(
-                                                                source_video_or_frame=v_full_gal,
-                                                                headline_text=cut_item.get("title", ""),
-                                                                output_path=g_thumb,
-                                                                start_time_str=cut_item.get("start_time"),
-                                                                end_time_str=cut_item.get("end_time"),
-                                                                aspect_mode=fmt_key
-                                                            )
-                                                            if th_g_res.get("error"):
-                                                                st.error(f"Erro ao recriar: {th_g_res['error']}")
-                                                            else:
-                                                                update_cut_thumbnail_in_catalog(
-                                                                    video_id=_vid_id_gal,
-                                                                    start_time=cut_item.get("start_time"),
-                                                                    end_time=cut_item.get("end_time"),
-                                                                    aspect_mode=fmt_key,
-                                                                    thumbnail_path=g_thumb,
-                                                                    variations=th_g_res.get("variations", [])
-                                                                )
-                                                                st.success("Capas recriadas com sucesso!")
+
+                            def _render_thumb_box(_fk, _fd, _fi, _exp=False):
+                                _gt = _fd.get("thumbnail_path") or os.path.join(_fd.get("folder_path", ""), "thumbnail.jpg")
+                                _gfol = _fd.get("folder_path", "")
+                                _gvars = []
+                                for _vi, _vname in [(1, "⚡ Impacto Neon (Glow)"), (2, "✨ Clean Focus (Sombra 3D)"), (3, "🎬 Moldura Dinâmica (HDR)")]:
+                                    _vp = os.path.join(_gfol, f"thumbnail_{_vi}.jpg")
+                                    if os.path.exists(_vp):
+                                        _gvars.append((_vi, _vname, _vp))
+
+                                with st.expander(f"🖼️ Gerenciar Capa / Thumbnail ({'16:9' if _fk == '16:9' else '9:16'})", expanded=_exp):
+                                    if _gt and os.path.exists(_gt):
+                                        safe_display_image(_gt, caption="Capa Principal Ativa", use_container_width=True)
+                                        if len(_gvars) > 1:
+                                            st.markdown("##### 🎨 Variações de Capa:")
+                                            _gvcols = st.columns(len(_gvars))
+                                            _act_gvar = _fd.get("active_variation", 1)
+                                            for _gvi, (_gvid, _gvnm, _gvpath) in enumerate(_gvars):
+                                                with _gvcols[_gvi]:
+                                                    _is_act = (_gvid == _act_gvar)
+                                                    st.caption(f"**{_gvnm}**" + (" ⭐" if _is_act else ""))
+                                                    safe_display_image(_gvpath, use_container_width=True)
+                                                    _cg1, _cg2 = st.columns(2)
+                                                    with _cg1:
+                                                        if not _is_act:
+                                                            if st.button("⭐ Ativar", key=f"btn_set_gvar_{c_idx}_{_fi}_{_gvid}", use_container_width=True):
+                                                                set_active_thumbnail_variation(_vid_id_gal, cut_item.get('start_time'), cut_item.get('end_time'), _fk, _gvid)
+                                                                st.success(f"Capa {_gvid} ativada!")
                                                                 st.rerun()
-                                                    else:
-                                                        st.warning("Vídeo original não encontrado em data.")
-    
-                                        col_b_dl, col_b_fol, col_b_yt, col_b_wh, col_b_del = st.columns([1.5, 1.2, 1.0, 1.0, 0.6])
-                                        with col_b_dl:
+                                                        else:
+                                                            st.button("✅", disabled=True, key=f"btn_act_gvar_{c_idx}_{_fi}_{_gvid}", use_container_width=True)
+                                                    with _cg2:
+                                                        st.download_button(
+                                                            label="⬇️",
+                                                            data=get_file_bytes_loader(_gvpath),
+                                                            file_name=f"thumbnail_{_gvid}.jpg",
+                                                            mime="image/jpeg",
+                                                            key=f"dl_gvar_{c_idx}_{_fi}_{_gvid}",
+                                                            use_container_width=True
+                                                        )
+                                        else:
                                             st.download_button(
-                                                label=f"💾 Baixar ({fmt_data.get('resolution', 'HD')})",
-                                                data=get_file_bytes_loader(v_file),
-                                                file_name=fmt_data.get("video_filename", f"{fmt_key}.mp4"),
-                                                mime="video/mp4",
-                                                key=f"dl_gal_{c_idx}_{f_idx}",
+                                                label="💾 Baixar Thumbnail (JPG)",
+                                                data=get_file_bytes_loader(_gt),
+                                                file_name="thumbnail.jpg",
+                                                mime="image/jpeg",
+                                                key=f"dl_thumb_gal_{c_idx}_{_fi}",
                                                 use_container_width=True
                                             )
-                                        with col_b_fol:
-                                            if st.button("📂 Abrir Pasta", key=f"btn_open_fol_gal_{c_idx}_{f_idx}", use_container_width=True, help="Abre a pasta deste corte no Explorador de Arquivos do Windows"):
-                                                open_in_file_explorer(fmt_data.get("folder_path") or v_file)
-                                        with col_b_yt:
-                                            with st.popover("🔴 Shorts", use_container_width=True, help="Publicar no YouTube Shorts"):
-                                                st.markdown(f"##### 🚀 Upload: {cut_item.get('title', 'Corte')[:30]}...")
-                                                g_yt_priv = st.selectbox(
-                                                    "Privacidade:",
-                                                    ["unlisted", "private", "public"],
-                                                    format_func=lambda x: {"unlisted": "🔗 Não Listado", "private": "🔒 Privado", "public": "🌍 Público"}[x],
-                                                    key=f"yt_priv_gal_{c_idx}_{f_idx}"
-                                                )
-                                                if st.button("Enviar", key=f"btn_send_yt_gal_{c_idx}_{f_idx}", type="primary", use_container_width=True):
-                                                    with st.spinner("Enviando vídeo para o YouTube..."):
-                                                        yt_res = upload_to_youtube_shorts(
-                                                            video_path=v_file,
-                                                            title=cut_item.get('title', 'Corte'),
-                                                            description=cut_item.get('description', ''),
-                                                            tags=cut_item.get('hashtags', []),
-                                                            privacy_status=g_yt_priv,
-                                                            client_secrets_path=_cfg.get("youtube_client_secrets_path")
-                                                        )
-                                                        if yt_res.get("success"):
-                                                            st.success(f"🎉 Publicado! [Ver Shorts]({yt_res.get('url')})")
-                                                        else:
-                                                            st.error(f"Erro: {yt_res.get('error')}")
-                                        with col_b_wh:
-                                            if st.button("📡 Webhook", key=f"btn_wh_gal_{c_idx}_{f_idx}", use_container_width=True, help="Disparar para Webhook (n8n/Make)"):
-                                                wh_url = _cfg.get("webhook_url", "")
-                                                if not wh_url:
-                                                    st.warning("Configure o Webhook na barra lateral.")
-                                                else:
-                                                    with st.spinner("Enviando..."):
-                                                        wh_payload = {
-                                                            "event": "cut_ready",
-                                                            "video_id": _vid_id_gal,
-                                                            "title": cut_item.get('title', 'Corte'),
-                                                            "description": cut_item.get('description', ''),
-                                                            "hashtags": cut_item.get('hashtags', []),
-                                                            "tags_seo": cut_item.get('tags_seo', ''),
-                                                            "start_time": cut_item.get('start_time'),
-                                                            "end_time": cut_item.get('end_time'),
-                                                            "aspect_mode": fmt_key,
-                                                            "video_path": v_file,
-                                                            "video_filename": fmt_data.get("video_filename"),
-                                                            "folder_path": fmt_data.get("folder_path")
-                                                        }
-                                                        wh_res = send_to_webhook(wh_url, wh_payload, auth_header=_cfg.get("webhook_auth_header", ""))
-                                                        if wh_res.get("success"):
-                                                            st.success(f"✅ OK! HTTP {wh_res.get('status_code')}")
-                                                        else:
-                                                            st.error(f"Falha: {wh_res.get('error')}")
-                                        with col_b_del:
-                                            with st.popover("🗑️", use_container_width=True, help=f"Excluir este vídeo ({fmt_key})"):
-                                                st.markdown(f"⚠️ **Excluir {fmt_badge}?**")
-                                                is_carrossel_fmt = fmt_data.get("folder_name") == "carrossel" or "carrossel" in str(fmt_data.get("folder_path", "")).lower()
-                                                del_opts = [
-                                                    "🎬 Apenas este Vídeo (.mp4)\n*(Preserva textos e kit)*",
-                                                    "💥 Pasta e Kit deste formato"
-                                                ]
-                                                if is_carrossel_fmt:
-                                                    del_opts.append("🎞️ Excluir Carrossel Completo (Todas as Partes)")
-                                                del_fmt_choice = st.radio(
-                                                    "Opção de exclusão:",
-                                                    del_opts,
-                                                    key=f"rad_del_fmt_{c_idx}_{f_idx}"
-                                                )
-                                                if st.button("Confirmar", key=f"btn_cnf_fmt_del_{c_idx}_{f_idx}", type="primary", use_container_width=True):
-                                                    if "Carrossel Completo" in del_fmt_choice:
-                                                        delete_entire_carrossel(_vid_id_gal, delete_raw_splits=True)
-                                                        st.session_state.pop("_carrossel_batch_results", None)
-                                                        st.success("Carrossel completo excluído com sucesso.")
+
+                                        st.markdown("")
+                                        if st.button("🔄 Recriar 3 Capas com IA (Sem Renderizar Vídeo)", key=f"btn_regen_gal_{c_idx}_{_fi}", use_container_width=True):
+                                            _vfg = os.path.join("data", _vid_id_gal, "video_full.mp4")
+                                            if os.path.exists(_vfg):
+                                                with st.spinner("Recriando capas com Rembg e IA..."):
+                                                    _th_res = create_cut_thumbnail(
+                                                        source_video_or_frame=_vfg,
+                                                        headline_text=cut_item.get("title", ""),
+                                                        output_path=_gt,
+                                                        start_time_str=cut_item.get("start_time"),
+                                                        end_time_str=cut_item.get("end_time"),
+                                                        aspect_mode=_fk
+                                                    )
+                                                    if _th_res.get("error"):
+                                                        st.error(f"Erro ao recriar: {_th_res['error']}")
                                                     else:
-                                                        is_full = "Pasta e Kit" in del_fmt_choice
-                                                        delete_format_instance(_vid_id_gal, cut_item.get('start_time'), cut_item.get('end_time'), fmt_key, delete_publication_kit=is_full)
-                                                        st.success("Excluído com sucesso.")
-                                                    st.rerun()
-                                        abs_fol_g = os.path.abspath(fmt_data.get("folder_path", ""))
-                                        link_fol_g = abs_fol_g.replace('\\', '/')
-                                        st.markdown(f"📁 **Pasta Local:** [{fmt_data.get('folder_name', 'Abrir Pasta')}](file:///{link_fol_g}) &nbsp; `📁 {abs_fol_g}`", unsafe_allow_html=True)
-                                        with st.expander("🛠️ Editor Rápido & Ajustes Finos deste Corte (Headline, Gancho, Áudio...)", expanded=(len(catalog_gal) == 1)):
-                                            render_quick_editor_component(v_file, f"gal_{_vid_id_gal}_{c_idx}_{f_idx}")
+                                                        update_cut_thumbnail_in_catalog(
+                                                            video_id=_vid_id_gal,
+                                                            start_time=cut_item.get("start_time"),
+                                                            end_time=cut_item.get("end_time"),
+                                                            aspect_mode=_fk,
+                                                            thumbnail_path=_gt,
+                                                            variations=_th_res.get("variations", [])
+                                                        )
+                                                        st.success("Capas recriadas com sucesso!")
+                                                        st.rerun()
+                                            else:
+                                                st.warning("Vídeo original não encontrado em data.")
+                                    else:
+                                        st.caption("ℹ️ Nenhuma capa gerada para este formato ainda.")
+
+                                    # Seção de Captura de Frame do Corte para Thumbnail
+                                    st.markdown("---")
+                                    st.markdown("##### 📸 Capturar Frame do Corte como Thumbnail:")
+                                    st.caption("Defina o segundo desejado ou pause o player ao lado para capturar o frame exato.")
+
+                                    col_cap_t1, col_cap_t2 = st.columns([2, 1])
+                                    with col_cap_t1:
+                                        snap_time_inp = st.text_input(
+                                            "Tempo do Frame (HH:MM:SS.ms ou segundos):",
+                                            value="00:00:01.00",
+                                            key=f"snap_time_gal_{c_idx}_{_fi}",
+                                            help="Exemplo: 00:00:02.50 ou 2.5. Sincronizado automaticamente ao pausar o vídeo ou clicar no print do player."
+                                        )
+                                    with col_cap_t2:
+                                        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                                        btn_prev_frame = st.button("👁️ Prévia do Frame", key=f"btn_prev_snap_{c_idx}_{_fi}", use_container_width=True)
+
+                                    _cut_vpath = _fd.get("video_path")
+                                    if not _cut_vpath or not os.path.exists(_cut_vpath):
+                                        _cut_vpath = os.path.join("data", _vid_id_gal, "video_full.mp4")
+
+                                    snap_store_key = f"snap_cached_bgr_{c_idx}_{_fi}"
+                                    if btn_prev_frame:
+                                        if _cut_vpath and os.path.exists(_cut_vpath):
+                                            with st.spinner("Extraindo frame em alta resolução..."):
+                                                ts_sec = parse_time_str_to_seconds(snap_time_inp)
+                                                ext_res = extract_capture_frame(_cut_vpath, ts_sec)
+                                                if ext_res.get("error") or ext_res.get("frame") is None:
+                                                    st.error(f"Erro ao capturar frame: {ext_res.get('error')}")
+                                                else:
+                                                    st.session_state[snap_store_key] = {
+                                                        "frame": ext_res["frame"],
+                                                        "time_str": ext_res.get("time_str", snap_time_inp),
+                                                        "resolution": ext_res.get("resolution", (0, 0))
+                                                    }
+                                        else:
+                                            st.warning("Arquivo de vídeo do corte não encontrado em disco.")
+
+                                    if snap_store_key in st.session_state and st.session_state[snap_store_key].get("frame") is not None:
+                                        snap_data = st.session_state[snap_store_key]
+                                        snap_bgr = snap_data["frame"]
+                                        snap_rgb = cv2.cvtColor(snap_bgr, cv2.COLOR_BGR2RGB)
+                                        w_snap, h_snap = snap_data["resolution"]
+                                        st.caption(f"Prévia do Frame Capturado ({w_snap}x{h_snap} aos `{snap_data['time_str']}`):")
+                                        safe_display_image(snap_rgb, use_container_width=True)
+
+                                        col_act1, col_act2, col_act3 = st.columns([1.5, 1.5, 1.0])
+                                        with col_act1:
+                                            if st.button("⭐ Salvar como Capa Oficial", key=f"btn_save_thumb_clean_{c_idx}_{_fi}", type="primary", use_container_width=True, help="Define este frame diretamente como a capa oficial (thumbnail.jpg) do corte"):
+                                                with st.spinner("Salvando frame como capa oficial..."):
+                                                    save_res = save_captured_frame_as_thumbnail(
+                                                        source_video_or_frame=snap_bgr,
+                                                        output_thumbnail_path=_gt,
+                                                        video_id=_vid_id_gal,
+                                                        start_time=cut_item.get("start_time"),
+                                                        end_time=cut_item.get("end_time"),
+                                                        aspect_mode=_fk,
+                                                        generate_ai_variations=False
+                                                    )
+                                                    if save_res.get("success"):
+                                                        st.session_state.pop(snap_store_key, None)
+                                                        st.success("✅ Frame salvo com sucesso como Capa Oficial!")
+                                                        st.rerun()
+                                                    else:
+                                                        st.error(f"Erro ao salvar: {save_res.get('error')}")
+
+                                        with col_act2:
+                                            if st.button("🎨 Criar 3 Capas com IA", key=f"btn_save_thumb_ai_{c_idx}_{_fi}", use_container_width=True, help="Usa este frame como orador principal, remove o fundo com Rembg e gera as 3 variações virais"):
+                                                with st.spinner("Gerando 3 variações com IA (Rembg)..."):
+                                                    save_res = save_captured_frame_as_thumbnail(
+                                                        source_video_or_frame=snap_bgr,
+                                                        output_thumbnail_path=_gt,
+                                                        video_id=_vid_id_gal,
+                                                        start_time=cut_item.get("start_time"),
+                                                        end_time=cut_item.get("end_time"),
+                                                        aspect_mode=_fk,
+                                                        generate_ai_variations=True,
+                                                        headline_text=cut_item.get("headline") or cut_item.get("title", "")
+                                                    )
+                                                    if save_res.get("success"):
+                                                        st.session_state.pop(snap_store_key, None)
+                                                        st.success("🎉 3 Capas com IA geradas com sucesso a partir deste frame!")
+                                                        st.rerun()
+                                                    else:
+                                                        st.error(f"Erro ao gerar com IA: {save_res.get('error')}")
+
+                                        with col_act3:
+                                            ret_enc, buf_enc = cv2.imencode(".jpg", snap_bgr)
+                                            if ret_enc:
+                                                st.download_button(
+                                                    "💾 Baixar",
+                                                    data=buf_enc.tobytes(),
+                                                    file_name=f"frame_capturado_{snap_data['time_str'].replace(':', '-')}.jpg",
+                                                    mime="image/jpeg",
+                                                    key=f"dl_snap_frame_{c_idx}_{_fi}",
+                                                    use_container_width=True
+                                                )
+
+                            def _render_actions_box(_vf, _fk, _fd, _fb, _fi):
+                                col_b_dl, col_b_fol, col_b_yt, col_b_wh, col_b_del = st.columns([1.5, 1.2, 1.0, 1.0, 0.6])
+                                with col_b_dl:
+                                    st.download_button(
+                                        label=f"💾 Baixar ({_fd.get('resolution', 'HD')})",
+                                        data=get_file_bytes_loader(_vf),
+                                        file_name=_fd.get("video_filename", f"{_fk}.mp4"),
+                                        mime="video/mp4",
+                                        key=f"dl_gal_{c_idx}_{_fi}",
+                                        use_container_width=True
+                                    )
+                                with col_b_fol:
+                                    if st.button("📂 Abrir Pasta", key=f"btn_open_fol_gal_{c_idx}_{_fi}", use_container_width=True, help="Abre a pasta deste corte no Explorador de Arquivos do Windows"):
+                                        open_in_file_explorer(_fd.get("folder_path") or _vf)
+                                with col_b_yt:
+                                    with st.popover("🔴 Shorts", use_container_width=True, help="Publicar no YouTube Shorts"):
+                                        st.markdown(f"##### 🚀 Upload: {cut_item.get('title', 'Corte')[:30]}...")
+                                        g_yt_priv = st.selectbox(
+                                            "Privacidade:",
+                                            ["unlisted", "private", "public"],
+                                            format_func=lambda x: {"unlisted": "🔗 Não Listado", "private": "🔒 Privado", "public": "🌍 Público"}[x],
+                                            key=f"yt_priv_gal_{c_idx}_{_fi}"
+                                        )
+                                        if st.button("Enviar", key=f"btn_send_yt_gal_{c_idx}_{_fi}", type="primary", use_container_width=True):
+                                            with st.spinner("Enviando vídeo para o YouTube..."):
+                                                yt_res = upload_to_youtube_shorts(
+                                                    video_path=_vf,
+                                                    title=cut_item.get('title', 'Corte'),
+                                                    description=cut_item.get('description', ''),
+                                                    tags=cut_item.get('hashtags', []),
+                                                    privacy_status=g_yt_priv,
+                                                    client_secrets_path=_cfg.get("youtube_client_secrets_path")
+                                                )
+                                                if yt_res.get("success"):
+                                                    st.success(f"🎉 Publicado! [Ver Shorts]({yt_res.get('url')})")
+                                                else:
+                                                    st.error(f"Erro: {yt_res.get('error')}")
+                                with col_b_wh:
+                                    if st.button("📡 Webhook", key=f"btn_wh_gal_{c_idx}_{_fi}", use_container_width=True, help="Disparar para Webhook (n8n/Make)"):
+                                        wh_url = _cfg.get("webhook_url", "")
+                                        if not wh_url:
+                                            st.warning("Configure o Webhook na barra lateral.")
+                                        else:
+                                            with st.spinner("Enviando..."):
+                                                wh_payload = {
+                                                    "event": "cut_ready",
+                                                    "video_id": _vid_id_gal,
+                                                    "title": cut_item.get('title', 'Corte'),
+                                                    "description": cut_item.get('description', ''),
+                                                    "hashtags": cut_item.get('hashtags', []),
+                                                    "tags_seo": cut_item.get('tags_seo', ''),
+                                                    "start_time": cut_item.get('start_time'),
+                                                    "end_time": cut_item.get('end_time'),
+                                                    "aspect_mode": _fk,
+                                                    "video_path": _vf,
+                                                    "video_filename": _fd.get("video_filename"),
+                                                    "folder_path": _fd.get("folder_path")
+                                                }
+                                                wh_res = send_to_webhook(wh_url, wh_payload, auth_header=_cfg.get("webhook_auth_header", ""))
+                                                if wh_res.get("success"):
+                                                    st.success(f"✅ OK! HTTP {wh_res.get('status_code')}")
+                                                else:
+                                                    st.error(f"Falha: {wh_res.get('error')}")
+                                with col_b_del:
+                                    with st.popover("🗑️", use_container_width=True, help=f"Excluir este vídeo ({_fk})"):
+                                        st.markdown(f"⚠️ **Excluir {_fb}?**")
+                                        is_carrossel_fmt = _fd.get("folder_name") == "carrossel" or "carrossel" in str(_fd.get("folder_path", "")).lower()
+                                        del_opts = [
+                                            "🎬 Apenas este Vídeo (.mp4)\n*(Preserva textos e kit)*",
+                                            "💥 Pasta e Kit deste formato"
+                                        ]
+                                        if is_carrossel_fmt:
+                                            del_opts.append("🎞️ Excluir Carrossel Completo (Todas as Partes)")
+                                        del_fmt_choice = st.radio(
+                                            "Opção de exclusão:",
+                                            del_opts,
+                                            key=f"rad_del_fmt_{c_idx}_{_fi}"
+                                        )
+                                        if st.button("Confirmar", key=f"btn_cnf_fmt_del_{c_idx}_{_fi}", type="primary", use_container_width=True):
+                                            if "Carrossel Completo" in del_fmt_choice:
+                                                delete_entire_carrossel(_vid_id_gal, delete_raw_splits=True)
+                                                st.session_state.pop("_carrossel_batch_results", None)
+                                                st.success("Carrossel completo excluído com sucesso.")
+                                            else:
+                                                is_full = "Pasta e Kit" in del_fmt_choice
+                                                delete_format_instance(_vid_id_gal, cut_item.get('start_time'), cut_item.get('end_time'), _fk, delete_publication_kit=is_full)
+                                                st.success("Excluído com sucesso.")
+                                            st.rerun()
+                                abs_fol_g = os.path.abspath(_fd.get("folder_path", ""))
+                                link_fol_g = abs_fol_g.replace('\\', '/')
+                                st.markdown(f"📁 **Pasta Local:** [{_fd.get('folder_name', 'Abrir Pasta')}](file:///{link_fol_g}) &nbsp; `📁 {abs_fol_g}`", unsafe_allow_html=True)
+
+                            if num_fmt == 1:
+                                fmt_key, fmt_data = next(iter(formats_dict.items()))
+                                f_idx = 0
+                                fmt_badge = {
+                                    "9:16_smart_face": "📱 9:16 Smart Face (VRIRA)",
+                                    "9:16_split": "📱 9:16 Split Screen (VLDSS)",
+                                    "9:16_blur": "📱 9:16 Blur (VFDBS)",
+                                    "9:16_crop": "📱 9:16 Crop (VCCFT)",
+                                    "16:9": "💻 16:9 Original (HOFHD)"
+                                }.get(fmt_key, fmt_key)
+                                v_file = fmt_data.get("video_path")
+
+                                col_vid, col_side = st.columns([1.4, 2.6])
+                                with col_vid:
+                                    st.markdown(f"**{fmt_badge}**")
+                                    if v_file and os.path.exists(v_file):
+                                        safe_display_video(v_file)
+                                        _render_actions_box(v_file, fmt_key, fmt_data, fmt_badge, f_idx)
                                     else:
                                         st.warning("Vídeo excluído / não encontrado.")
                                         if st.button("🗑️ Remover do Catálogo", key=f"btn_clean_fmt_{c_idx}_{f_idx}"):
                                             delete_format_instance(_vid_id_gal, cut_item.get('start_time'), cut_item.get('end_time'), fmt_key, delete_publication_kit=True)
                                             st.rerun()
+
+                                with col_side:
+                                    if v_file and os.path.exists(v_file):
+                                        _render_thumb_box(fmt_key, fmt_data, f_idx, _exp=True)
+
+                                if v_file and os.path.exists(v_file):
+                                    with st.expander("🛠️ Editor Rápido & Ajustes Finos deste Corte (Headline, Gancho, Áudio...)", expanded=(len(catalog_gal) == 1)):
+                                        render_quick_editor_component(v_file, f"gal_{_vid_id_gal}_{c_idx}_{f_idx}")
+                            else:
+                                f_cols = st.columns(num_fmt)
+                                for f_idx, (fmt_key, fmt_data) in enumerate(formats_dict.items()):
+                                    with f_cols[f_idx]:
+                                        fmt_badge = {
+                                            "9:16_smart_face": "📱 9:16 Smart Face (VRIRA)",
+                                            "9:16_split": "📱 9:16 Split Screen (VLDSS)",
+                                            "9:16_blur": "📱 9:16 Blur (VFDBS)",
+                                            "9:16_crop": "📱 9:16 Crop (VCCFT)",
+                                            "16:9": "💻 16:9 Original (HOFHD)"
+                                        }.get(fmt_key, fmt_key)
+                                        st.markdown(f"**{fmt_badge}**")
+                                        v_file = fmt_data.get("video_path")
+                                        if v_file and os.path.exists(v_file):
+                                            safe_display_video(v_file)
+                                            _render_thumb_box(fmt_key, fmt_data, f_idx, _exp=False)
+                                            _render_actions_box(v_file, fmt_key, fmt_data, fmt_badge, f_idx)
+                                        else:
+                                            st.warning("Vídeo excluído / não encontrado.")
+                                            if st.button("🗑️ Remover do Catálogo", key=f"btn_clean_fmt_{c_idx}_{f_idx}"):
+                                                delete_format_instance(_vid_id_gal, cut_item.get('start_time'), cut_item.get('end_time'), fmt_key, delete_publication_kit=True)
+                                                st.rerun()
+
+                                with st.expander("🛠️ Editor Rápido & Ajustes Finos deste Corte (Headline, Gancho, Áudio...)", expanded=(len(catalog_gal) == 1)):
+                                    q_fmt_keys = list(formats_dict.keys())
+                                    q_tabs = st.tabs([f"📱 {k}" if "9:16" in k else f"💻 {k}" for k in q_fmt_keys])
+                                    for q_idx, q_k in enumerate(q_fmt_keys):
+                                        with q_tabs[q_idx]:
+                                            q_v_file = formats_dict[q_k].get("video_path")
+                                            if q_v_file and os.path.exists(q_v_file):
+                                                render_quick_editor_component(q_v_file, f"gal_{_vid_id_gal}_{c_idx}_{q_idx}")
+                                            else:
+                                                st.warning("Vídeo não encontrado.")
     
                         with st.expander("📝 Visualizar Textos e Tags de Publicação"):
                             st.markdown(f"**Legenda:**\n```\n{cut_item.get('description', '')}\n```")

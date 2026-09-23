@@ -106,6 +106,8 @@ def create_viral_package(
     transcript_path: str = None,
     start_time_str: str = None,
     end_time_str: str = None,
+    preserve_existing_transcript: bool = False,
+    existing_folder_path: str = None,
 ) -> dict:
     """
     Cria a pasta estruturada do corte dentro de data/<video_id>/<PREFIXO>_<Palavras>_<Minutagem>/
@@ -116,11 +118,25 @@ def create_viral_package(
     4. info_publicacao.txt (guia completo de postagem + dados do vídeo original)
     5. descricao.txt (apenas a legenda pronta para colar)
     6. tags.txt (hashtags e tags SEO)
+    Se preserve_existing_transcript=True, mantém o arquivo transcricao_corte.txt/.json existente.
     """
     try:
         folder_name = build_cut_folder_name(aspect_mode, title, start_time_str=start_time_str, end_time_str=end_time_str)
         package_dir = os.path.join(output_base_dir, folder_name)
         os.makedirs(package_dir, exist_ok=True)
+
+        # Se solicitado para preservar transcrição existente do corte, garante cópia da pasta anterior se mudou
+        if preserve_existing_transcript:
+            src_dirs = [p for p in [existing_folder_path, package_dir] if p and os.path.isdir(p)]
+            for s_dir in src_dirs:
+                for f_name in ["transcricao_corte.txt", "transcricao_corte.json"]:
+                    src_f = os.path.join(s_dir, f_name)
+                    dst_f = os.path.join(package_dir, f_name)
+                    if os.path.exists(src_f) and os.path.getsize(src_f) > 0 and src_f != dst_f:
+                        try:
+                            shutil.copy2(src_f, dst_f)
+                        except Exception:
+                            pass
 
         # 1. Copia o vídeo renderizado com o nome padronizado
         video_filename = f"{folder_name}.mp4"
@@ -175,7 +191,8 @@ def create_viral_package(
                     start_time_str=start_time_str,
                     end_time_str=end_time_str,
                     output_dir=package_dir,
-                    base_filename=folder_name
+                    base_filename=folder_name,
+                    preserve_existing_txt=preserve_existing_transcript
                 )
             except Exception:
                 pass

@@ -249,6 +249,68 @@ class TestHeadlineDrawer(unittest.TestCase):
             fc_arg = called_cmd[called_cmd.index("-filter_complex") + 1]
             self.assertIn("eof_action=pass", fc_arg)
 
+    def test_static_explode_preview(self):
+        """Valida que static_explode exibe texto estático sem slide no início e partículas na explosão."""
+        from core.headline_drawer import generate_headline_preview
+        from unittest.mock import patch, MagicMock
+        import numpy as np
+
+        with patch("cv2.VideoCapture") as mock_vc, \
+             patch("os.path.exists", return_value=True):
+            mock_cap = MagicMock()
+            mock_cap.isOpened.return_value = True
+            mock_cap.get.side_effect = lambda prop: 300 if prop == 7 else 30.0
+            mock_cap.read.return_value = (True, np.zeros((1920, 1080, 3), dtype=np.uint8))
+            mock_vc.return_value = mock_cap
+
+            cfg = {
+                "start_offset_s": 0.0,
+                "end_offset_s": 5.0,
+                "transition_type": "static_explode",
+                "transition_dur_s": 0.8
+            }
+
+            # Durante o período fixo/estático (t=1.0s)
+            prev_static = generate_headline_preview("dummy.mp4", "ESTÁTICO", cfg, timestamp_s=1.0)
+            self.assertIsNotNone(prev_static)
+            self.assertEqual(prev_static.shape, (1920, 1080, 3))
+
+            # Durante a explosão final (t=4.6s -> entre 4.2s e 5.0s)
+            prev_expl = generate_headline_preview("dummy.mp4", "ESTÁTICO", cfg, timestamp_s=4.6)
+            self.assertIsNotNone(prev_expl)
+            self.assertEqual(prev_expl.shape, (1920, 1080, 3))
+
+    def test_apply_headline_static_explode(self):
+        """Valida que apply_headline_to_video monta overlay fixo x=0:y=0 e partículas para static_explode."""
+        from core.headline_drawer import apply_headline_to_video
+        from unittest.mock import patch, MagicMock
+        with patch("subprocess.run") as mock_run, \
+             patch("cv2.VideoCapture") as mock_vc, \
+             patch("os.path.exists", return_value=True), \
+             patch("os.path.getsize", return_value=1024), \
+             patch("os.rename"):
+            mock_cap = MagicMock()
+            mock_cap.isOpened.return_value = True
+            mock_cap.get.side_effect = [1080, 1920, 30.0, 300]
+            mock_vc.return_value = mock_cap
+            mock_run.return_value = MagicMock(returncode=0, stderr=b"")
+
+            res = apply_headline_to_video(
+                video_path="dummy.mp4",
+                text="TESTE ESTÁTICO EXPLOSÃO",
+                start_offset_s=0.0,
+                end_offset_s=5.0,
+                transition_type="static_explode",
+                transition_dur_s=0.8,
+                output_path="dummy_out.mp4"
+            )
+            self.assertIsNone(res.get("error"))
+            self.assertEqual(res.get("transition_type"), "static_explode")
+            called_cmd = mock_run.call_args[0][0]
+            fc_arg = called_cmd[called_cmd.index("-filter_complex") + 1]
+            self.assertIn("overlay=x=0:y=0", fc_arg)
+            self.assertIn("eof_action=pass", fc_arg)
+
 
 if __name__ == '__main__':
     unittest.main()

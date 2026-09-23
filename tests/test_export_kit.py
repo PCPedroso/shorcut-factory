@@ -152,6 +152,143 @@ class TestExportKit(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_create_viral_package_preserves_existing_transcricao_corte(self):
+        """
+        Valida que ao chamar create_viral_package com preserve_existing_transcript=True,
+        o arquivo transcricao_corte.txt editado manualmente não é sobrescrito.
+        """
+        temp_dir = tempfile.mkdtemp()
+        try:
+            src_video = os.path.join(temp_dir, "test_cut.mp4")
+            with open(src_video, "wb") as f:
+                f.write(b"fake_mp4_bytes")
+
+            transcript_file = os.path.join(temp_dir, "transcript.json")
+            with open(transcript_file, "w", encoding="utf-8") as f:
+                json.dump({
+                    "full_text": "Texto original sem ajustes",
+                    "segments": [
+                        {
+                            "start": 0.0,
+                            "end": 5.0,
+                            "text": "Texto original sem ajustes",
+                            "words": [
+                                {"word": "Texto", "start": 0.0, "end": 1.0},
+                                {"word": "original", "start": 1.0, "end": 2.0},
+                                {"word": "sem", "start": 2.0, "end": 3.0},
+                                {"word": "ajustes", "start": 3.0, "end": 4.0}
+                            ]
+                        }
+                    ]
+                }, f)
+
+            # Primeira criação do pacote
+            pkg1 = create_viral_package(
+                video_path=src_video,
+                title="Corte Teste Preservar",
+                description="Descricao",
+                hashtags=["#teste"],
+                tags_seo="teste",
+                aspect_mode="9:16_blur",
+                output_base_dir=temp_dir,
+                transcript_path=transcript_file,
+                start_time_str="00:00",
+                end_time_str="00:05"
+            )
+
+            txt_path = os.path.join(pkg1["package_dir"], "transcricao_corte.txt")
+            self.assertTrue(os.path.exists(txt_path))
+
+            # Simula o usuário editando manualmente o transcricao_corte.txt
+            manual_text = "Texto corrigido e ajustado manualmente pelo usuário!"
+            with open(txt_path, "w", encoding="utf-8") as f:
+                f.write(manual_text)
+
+            # Segunda criação (re-render) com preserve_existing_transcript=True
+            pkg2 = create_viral_package(
+                video_path=src_video,
+                title="Corte Teste Preservar",
+                description="Descricao",
+                hashtags=["#teste"],
+                tags_seo="teste",
+                aspect_mode="9:16_blur",
+                output_base_dir=temp_dir,
+                transcript_path=transcript_file,
+                start_time_str="00:00",
+                end_time_str="00:05",
+                preserve_existing_transcript=True,
+                existing_folder_path=pkg1["package_dir"]
+            )
+
+            # Garante que o arquivo NÃO foi sobrescrito pelo texto original
+            with open(txt_path, "r", encoding="utf-8") as f:
+                saved_content = f.read()
+            self.assertEqual(saved_content, manual_text)
+
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_align_edited_words_with_timestamps(self):
+        """
+        Valida que align_edited_words_with_timestamps alinha palavras substituídas
+        e inseridas mantendo a cronologia temporal de forma proporcional.
+        """
+        from core.subtitle_burner import align_edited_words_with_timestamps
+        original_words = [
+            {"word": "ministro", "start": 10.0, "end": 10.5},
+            {"word": "Gil", "start": 10.5, "end": 10.8},
+            {"word": "Marmendes", "start": 10.8, "end": 11.5},
+            {"word": "falou", "start": 11.5, "end": 12.0}
+        ]
+        edited_text = "ministro Gilmar Mendes falou"
+
+        aligned = align_edited_words_with_timestamps(original_words, edited_text)
+        self.assertEqual(len(aligned), 4)
+        self.assertEqual(aligned[0]["word"], "ministro")
+        self.assertEqual(aligned[1]["word"], "Gilmar")
+        self.assertEqual(aligned[2]["word"], "Mendes")
+        self.assertEqual(aligned[3]["word"], "falou")
+        self.assertAlmostEqual(aligned[0]["start"], 10.0)
+        self.assertAlmostEqual(aligned[3]["end"], 12.0)
+
+    def test_apply_edited_transcript_to_json(self):
+        """
+        Valida que apply_edited_transcript_to_json carrega o json existente,
+        reagrupa as palavras e salva um novo arquivo json atualizado.
+        """
+        from core.subtitle_burner import apply_edited_transcript_to_json
+        temp_dir = tempfile.mkdtemp()
+        try:
+            json_file = os.path.join(temp_dir, "_cut_tr_test.json")
+            with open(json_file, "w", encoding="utf-8") as f:
+                json.dump({
+                    "full_text": "Bolsa Familia reajuste",
+                    "segments": [
+                        {
+                            "start": 0.0,
+                            "end": 2.0,
+                            "text": "Bolsa Familia reajuste",
+                            "words": [
+                                {"word": "Bolsa", "start": 0.0, "end": 0.6},
+                                {"word": "Familia", "start": 0.6, "end": 1.2},
+                                {"word": "reajuste", "start": 1.2, "end": 2.0}
+                            ]
+                        }
+                    ]
+                }, f)
+
+            edited_text = "Bolsa Família com reajuste aprovado"
+            new_json_path = apply_edited_transcript_to_json(json_file, edited_text)
+            self.assertTrue(os.path.exists(new_json_path))
+
+            with open(new_json_path, "r", encoding="utf-8") as f:
+                new_data = json.load(f)
+
+            self.assertEqual(new_data["full_text"], edited_text)
+            self.assertTrue(len(new_data["segments"]) > 0)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 if __name__ == '__main__':
     unittest.main()

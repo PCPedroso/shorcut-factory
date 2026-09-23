@@ -4,6 +4,7 @@ video_processor.py — Download em Alta Definição (1080p Full HD / 720p) e Cor
 
 import os
 import subprocess
+import time
 import yt_dlp
 import imageio_ffmpeg
 from moviepy.video.io.VideoFileClip import VideoFileClip
@@ -395,16 +396,29 @@ def download_live_video_snapshot(
     recent_minutes: float = None
 ) -> dict:
     """
-    Baixa transmissão ao vivo em alta velocidade (15x a 40x) com congelamento do ponto presente (Freeze Live Edge),
-    evitando loops infinitos de busca de fragmentos futuros (DASH/HLS).
-    Gera sub-manifestos estáticos M3U8 para áudio e vídeo com #EXT-X-ENDLIST e realiza muxing
-    via FFmpeg Stream Copy (-c copy) sem re-encoding.
+    Baixa trecho de transmissão ao vivo (LIVE ativa ou encerrada) com o motor Direct Parallel DVR:
+    - Para lives ativas (is_live):
+      1. Extrai os manifestos HLS de vídeo (Full HD/1080p) e áudio.
+      2. Mapeia a borda ao vivo (live edge) e a minutagem desejada (15m, 30m, 60m, intervalo ou buffer completo).
+      3. Acessa os segmentos históricos via URL template (/sq/{sq}/) diretamente no CDN do Google.
+      4. Valida os limites com verificação direta e busca binária instantânea para evitar 404s.
+      5. Efetua o download paralelo multithread dos fragmentos .ts com pool controlado (8 workers) para máxima estabilidade no CDN.
+      6. Muxa áudio + vídeo em MP4 estático via FFmpeg concat sem re-encoding (instantâneo e sem loops).
+    - Para streams encerradas (was_live / VOD):
+      Baixa via manifesto VOD completo ou yt-dlp sem loops infinitos.
     """
     import urllib.request
     import subprocess
+    import concurrent.futures
+    import shutil
+    import uuid
+    import re
+    import time
+    from core.extractor import get_cookie_file, parse_time_str
 
     try:
-        out_dir = os.path.dirname(os.path.abspath(output_path))
+        output_path = os.path.abspath(output_path)
+        out_dir = os.path.dirname(output_path)
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
         if os.path.exists(output_path):
@@ -413,25 +427,25 @@ def download_live_video_snapshot(
             except Exception:
                 pass
 
-        # Garante que o diretório do FFmpeg esteja no PATH para subprocessos e yt-dlp
         if FFMPEG_EXE and os.path.exists(FFMPEG_EXE):
             ff_dir = os.path.dirname(os.path.abspath(FFMPEG_EXE))
             if ff_dir not in os.environ.get("PATH", ""):
                 os.environ["PATH"] = ff_dir + os.pathsep + os.environ.get("PATH", "")
 
-        from core.extractor import get_cookie_file, parse_time_str
         cookie_file = get_cookie_file()
+        req_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
-        ydl_opts = {
+        # ─── Extração de metadados ────────────────────────────────────────────────
+        ydl_opts_info = {
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
             'playlist_items': '1',
         }
         if cookie_file:
-            ydl_opts['cookiefile'] = cookie_file
+            ydl_opts_info['cookiefile'] = cookie_file
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
             info = ydl.extract_info(url, download=False)
             if not info:
                 return {"path": None, "error": "Falha ao extrair metadados da transmissão ao vivo."}
@@ -442,49 +456,172 @@ def download_live_video_snapshot(
                     info = entries[0]
 
             formats = info.get('formats', [])
-            
-            # Localiza melhor stream de vídeo HLS (m3u8)
-            v_hls = [
-                f for f in formats
-                if f.get('vcodec') != 'none' and ('m3u8' in str(f.get('protocol', '')) or 'm3u8' in str(f.get('url', '')))
-            ]
-            v_hls.sort(key=lambda x: int(x.get('height') or 0), reverse=True)
-            best_v = v_hls[0] if v_hls else None
 
-            # Localiza melhor stream de áudio HLS (m3u8)
-            a_hls = [
-                f for f in formats
-                if f.get('vcodec') == 'none' and ('m3u8' in str(f.get('protocol', '')) or 'm3u8' in str(f.get('url', '')))
-            ]
-            a_hls.sort(key=lambda x: float(x.get('abr') or x.get('tbr') or 0), reverse=True)
-            best_a = a_hls[0] if a_hls else None
+        live_status = info.get('live_status', '')
+        is_currently_live = bool(info.get('is_live') or live_status == 'is_live')
 
-            if best_v and best_a and best_v.get('url') and best_a.get('url'):
-                # 🔴 MODO HLS SNAPSHOT RÁPIDO COM FREEZE LIVE EDGE
-                import concurrent.futures
-                import shutil
-                import uuid
+        # ─── ESTRATÉGIA PRINCIPAL: DIRECT PARALLEL DVR SEGMENT ENGINE ────────────
+        v_hls = [
+            f for f in formats
+            if f.get('vcodec') != 'none' and ('m3u8' in str(f.get('protocol', '')) or 'm3u8' in str(f.get('url', '')))
+        ]
+        v_hls.sort(key=lambda x: int(x.get('height') or 0), reverse=True)
+        best_v = v_hls[0] if v_hls else None
 
-                req_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-                
-                v_req = urllib.request.Request(best_v['url'], headers=req_headers)
-                with urllib.request.urlopen(v_req, timeout=15) as r_v:
-                    v_m3u8_text = r_v.read().decode('utf-8', errors='ignore')
+        a_hls = [
+            f for f in formats
+            if f.get('vcodec') == 'none' and ('m3u8' in str(f.get('protocol', '')) or 'm3u8' in str(f.get('url', '')))
+        ]
+        a_hls.sort(key=lambda x: float(x.get('abr') or x.get('tbr') or 0), reverse=True)
+        best_a = a_hls[0] if a_hls else None
 
-                a_req = urllib.request.Request(best_a['url'], headers=req_headers)
-                with urllib.request.urlopen(a_req, timeout=15) as r_a:
-                    a_m3u8_text = r_a.read().decode('utf-8', errors='ignore')
+        if best_v and best_a and best_v.get('url') and best_a.get('url'):
+            v_req = urllib.request.Request(best_v['url'], headers=req_headers)
+            with urllib.request.urlopen(v_req, timeout=15) as r_v:
+                v_m3u8_text = r_v.read().decode('utf-8', errors='ignore')
 
-                seq_v, dur_v, pairs_v = parse_m3u8_segments(v_m3u8_text)
-                seq_a, dur_a, pairs_a = parse_m3u8_segments(a_m3u8_text)
+            a_req = urllib.request.Request(best_a['url'], headers=req_headers)
+            with urllib.request.urlopen(a_req, timeout=15) as r_a:
+                a_m3u8_text = r_a.read().decode('utf-8', errors='ignore')
 
-                if pairs_v and pairs_a:
-                    avg_dur = max(1.0, dur_v or dur_a or 5.0)
-                    end_v = seq_v + len(pairs_v)
-                    end_a = seq_a + len(pairs_a)
-                    target_end = min(end_v, end_a)
+            seq_v, dur_v, pairs_v = parse_m3u8_segments(v_m3u8_text)
+            seq_a, dur_a, pairs_a = parse_m3u8_segments(a_m3u8_text)
+
+            if pairs_v and pairs_a:
+                sample_v = pairs_v[0][1]
+                sample_a = pairs_a[0][1]
+                m_v = re.search(r'/sq/(\d+)/', sample_v)
+                m_a = re.search(r'/sq/(\d+)/', sample_a)
+
+                avg_dur = max(1.0, dur_v or dur_a or 2.0)
+                edge_v = seq_v + len(pairs_v)
+                edge_a = seq_a + len(pairs_a)
+                target_end = min(edge_v, edge_a)
+                sq_offset_a = seq_a - seq_v
+
+                # Se a stream possui URLs com template /sq/{number}/ (YouTube Live CDN)
+                if m_v and m_a and is_currently_live:
+                    v_pre, v_suf = sample_v[:m_v.start()], sample_v[m_v.end():]
+                    a_pre, a_suf = sample_a[:m_a.start()], sample_a[m_a.end():]
+
+                    # Mapeia segmentos já presentes no manifesto atual
+                    v_url_map = {seq_v + i: p[1] for i, p in enumerate(pairs_v)}
+                    a_url_map = {seq_a + i: p[1] for i, p in enumerate(pairs_a)}
+
+                    def _check_sq_exists(sq_probe):
+                        u_probe = v_url_map.get(sq_probe, f"{v_pre}/sq/{sq_probe}/{v_suf}")
+                        try:
+                            _req = urllib.request.Request(u_probe, headers=req_headers)
+                            with urllib.request.urlopen(_req, timeout=3.5) as _resp:
+                                return _resp.status == 200
+                        except Exception:
+                            return False
+
+                    def _resolve_earliest_sq(min_probe, max_known):
+                        if _check_sq_exists(min_probe):
+                            return min_probe
+                        low, high = min_probe, max_known
+                        best = max_known
+                        while low <= high:
+                            mid = (low + high) // 2
+                            if _check_sq_exists(mid):
+                                best = mid
+                                high = mid - 1
+                            else:
+                                low = mid + 1
+                        return best
+
+                    # Resolução precisa do ponto inicial (target_start)
+                    if recent_minutes is not None and recent_minutes > 0:
+                        wanted_segs = int((recent_minutes * 60.0) / avg_dur)
+                        wanted_start = target_end - wanted_segs
+                        if wanted_start < seq_v:
+                            if not _check_sq_exists(wanted_start):
+                                wanted_start = _resolve_earliest_sq(wanted_start, seq_v)
+                        target_start = max(0, wanted_start)
+                    elif start_sec is not None or end_sec is not None:
+                        earliest_sq = _resolve_earliest_sq(max(0, seq_v - int(12 * 3600 / avg_dur)), seq_v)
+                        s_parsed = parse_time_str(start_sec)
+                        s_val = s_parsed if s_parsed is not None and s_parsed >= 0 else 0.0
+                        target_start = max(earliest_sq, earliest_sq + int(s_val / avg_dur))
+                        e_parsed = parse_time_str(end_sec)
+                        if e_parsed is not None and e_parsed > s_val:
+                            target_end = min(target_end, earliest_sq + int(e_parsed / avg_dur))
+                    else:
+                        # Buffer Completo (toda a live até o instante presente)
+                        earliest_sq = _resolve_earliest_sq(max(0, seq_v - int(12 * 3600 / avg_dur)), seq_v)
+                        target_start = earliest_sq
+
+                    if target_start >= target_end:
+                        target_start = max(0, target_end - max(1, len(pairs_v)))
+
+                    temp_dir = os.path.join(out_dir, f"_temp_live_{os.getpid()}_{uuid.uuid4().hex[:6]}")
+                    os.makedirs(temp_dir, exist_ok=True)
+
+                    try:
+                        tasks = []
+                        for sq in range(target_start, target_end):
+                            u_v = v_url_map.get(sq, f"{v_pre}/sq/{sq}/{v_suf}")
+                            tasks.append((sq, u_v, 'v'))
+                            sq_a = sq + sq_offset_a
+                            u_a = a_url_map.get(sq_a, f"{a_pre}/sq/{sq_a}/{a_suf}")
+                            tasks.append((sq, u_a, 'a'))
+
+                        def _dl_worker(item):
+                            sq_num, u_val, prefix = item
+                            out_ts = os.path.join(temp_dir, f"{prefix}_{sq_num:07d}.ts")
+                            for _attempt in range(3):
+                                try:
+                                    seg_req = urllib.request.Request(u_val, headers=req_headers)
+                                    with urllib.request.urlopen(seg_req, timeout=12) as _resp:
+                                        data = _resp.read()
+                                        if data:
+                                            with open(out_ts, "wb") as _f_ts:
+                                                _f_ts.write(data)
+                                            return out_ts
+                                except Exception:
+                                    time.sleep(0.2)
+                            return None
+
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                            dl_results = list(executor.map(_dl_worker, tasks))
+
+                        v_files = sorted([r for r in dl_results if r and os.path.basename(r).startswith('v_')])
+                        a_files = sorted([r for r in dl_results if r and os.path.basename(r).startswith('a_')])
+
+                        if v_files and a_files:
+                            v_list_file = os.path.join(temp_dir, "v_list.txt")
+                            with open(v_list_file, "w", encoding="utf-8") as _vf:
+                                for _vf_path in v_files:
+                                    _vf.write(f"file '{os.path.basename(_vf_path)}'\n")
+
+                            a_list_file = os.path.join(temp_dir, "a_list.txt")
+                            with open(a_list_file, "w", encoding="utf-8") as _af:
+                                for _af_path in a_files:
+                                    _af.write(f"file '{os.path.basename(_af_path)}'\n")
+
+                            cmd_mux = [
+                                FFMPEG_EXE, '-y',
+                                '-f', 'concat', '-safe', '0', '-i', 'v_list.txt',
+                                '-f', 'concat', '-safe', '0', '-i', 'a_list.txt',
+                                '-c:v', 'copy', '-c:a', 'copy',
+                                '-movflags', '+faststart',
+                                output_path
+                            ]
+                            mux_res = subprocess.run(cmd_mux, cwd=temp_dir, capture_output=True, text=True, timeout=300)
+                            if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
+                                return {"path": output_path, "error": None}
+                            else:
+                                err_details = (mux_res.stderr or "").strip()[-400:]
+                                return {"path": None, "error": f"FFmpeg mux falhou: {err_details}"}
+                        else:
+                            return {"path": None, "error": f"Falha no download dos segmentos (v={len(v_files)}, a={len(a_files)} baixados)."}
+                    finally:
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+
+                else:
+                    # Para streams finalizadas (was_live) ou sem template /sq/
                     min_base = max(seq_v, seq_a)
-
                     s_parsed = parse_time_str(start_sec)
                     e_parsed = parse_time_str(end_sec)
 
@@ -502,45 +639,31 @@ def download_live_video_snapshot(
                     if target_start >= target_end:
                         target_start = max(min_base, target_end - max(1, len(pairs_v)))
 
-                    # Filtra segmentos da janela congelada
-                    v_sub = [
-                        (i, pair) for i, pair in enumerate(pairs_v)
-                        if target_start <= (seq_v + i) < target_end
-                    ]
-                    a_sub = [
-                        (i, pair) for i, pair in enumerate(pairs_a)
-                        if target_start <= (seq_a + i) < target_end
-                    ]
+                    v_sub = [(i, p) for i, p in enumerate(pairs_v) if target_start <= (seq_v + i) < target_end]
+                    a_sub = [(i, p) for i, p in enumerate(pairs_a) if target_start <= (seq_a + i) < target_end]
 
-                    # Diretório temporário único para download simultâneo de segmentos
-                    temp_dir = os.path.join(out_dir, f"_temp_live_segs_{os.getpid()}_{uuid.uuid4().hex[:6]}")
+                    temp_dir = os.path.join(out_dir, f"_temp_vod_{os.getpid()}_{uuid.uuid4().hex[:6]}")
                     os.makedirs(temp_dir, exist_ok=True)
-
                     try:
-                        def _dl_seg_worker(item):
+                        def _dl_vod_worker(item):
                             idx, (dur_val, u_val), prefix = item
                             out_ts = os.path.join(temp_dir, f"{prefix}_{idx:05d}.ts")
-                            seg_req = urllib.request.Request(u_val, headers=req_headers)
                             for _attempt in range(3):
                                 try:
-                                    with urllib.request.urlopen(seg_req, timeout=15) as _resp:
+                                    seg_req = urllib.request.Request(u_val, headers=req_headers)
+                                    with urllib.request.urlopen(seg_req, timeout=12) as _resp:
                                         data = _resp.read()
                                         if data:
                                             with open(out_ts, "wb") as _f_ts:
                                                 _f_ts.write(data)
                                             return out_ts
                                 except Exception:
-                                    time.sleep(0.3)
+                                    time.sleep(0.2)
                             return None
 
-                        tasks = (
-                            [(idx, p, 'v') for idx, p in v_sub] +
-                            [(idx, p, 'a') for idx, p in a_sub]
-                        )
-
-                        # Download paralelo de até 24 fragmentos simultâneos (15 a 40x em tempo real)
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=24) as executor:
-                            dl_results = list(executor.map(_dl_seg_worker, tasks))
+                        tasks = ([(idx, p, 'v') for idx, p in v_sub] + [(idx, p, 'a') for idx, p in a_sub])
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                            dl_results = list(executor.map(_dl_vod_worker, tasks))
 
                         v_files = sorted([r for r in dl_results if r and os.path.basename(r).startswith('v_')])
                         a_files = sorted([r for r in dl_results if r and os.path.basename(r).startswith('a_')])
@@ -561,8 +684,7 @@ def download_live_video_snapshot(
                                     FFMPEG_EXE, '-y',
                                     '-f', 'concat', '-safe', '0', '-i', 'v_list.txt',
                                     '-f', 'concat', '-safe', '0', '-i', 'a_list.txt',
-                                    '-c:v', 'copy',
-                                    '-c:a', 'copy',
+                                    '-c:v', 'copy', '-c:a', 'copy',
                                     '-movflags', '+faststart',
                                     output_path
                                 ]
@@ -576,13 +698,12 @@ def download_live_video_snapshot(
                                 ]
 
                             subprocess.run(cmd_mux, cwd=temp_dir, capture_output=True, text=True, timeout=300)
-
                             if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
                                 return {"path": output_path, "error": None}
                     finally:
                         shutil.rmtree(temp_dir, ignore_errors=True)
 
-        # Fallback via yt-dlp sem live_from_start
+        # ─── Fallback via yt-dlp padrão ──────────────────────────────────────────
         fallback_opts = {
             'format': 'bestvideo[protocol^=m3u8]+bestaudio[protocol^=m3u8]/best[protocol^=m3u8]/best',
             'outtmpl': output_path,
@@ -607,6 +728,7 @@ def download_live_video_snapshot(
 
     except Exception as e:
         return {"path": None, "error": str(e)}
+
 
 
 def download_full_video(

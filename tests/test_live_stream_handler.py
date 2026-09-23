@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import patch, MagicMock
 from core.extractor import get_video_metadata
@@ -129,15 +130,18 @@ class TestLiveStreamHandler(unittest.TestCase):
         }
 
         out_path = "scratch/test_live_video_mock.mp4"
-        with patch('os.path.exists', side_effect=lambda p: True if p == out_path else False), \
-             patch('os.path.getsize', return_value=500000):
+        # A função normaliza o output_path para abspath internamente, então o mock deve comparar com o abspath
+        abs_out_path = os.path.abspath(out_path)
+        with patch('os.path.exists', side_effect=lambda p: p == abs_out_path), \
+             patch('os.path.getsize', return_value=500000), \
+             patch('os.makedirs'):
             res = download_live_video_snapshot(
                 "https://youtu.be/live123",
                 output_path=out_path,
                 start_sec=60.0,
                 end_sec=90.0
             )
-            self.assertEqual(res["path"], out_path)
+            self.assertEqual(res["path"], abs_out_path)
             # Verifica que o yt-dlp foi invocado no fallback
             mock_ydl_instance.download.assert_called_once_with(["https://youtu.be/live123"])
             # Verifica que live_from_start não é True no fallback para prevenir loop infinito
@@ -147,4 +151,3 @@ class TestLiveStreamHandler(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-
