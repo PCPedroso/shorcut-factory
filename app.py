@@ -3136,47 +3136,25 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 "mantendo 100% do áudio editado original e adaptando-se automaticamente ao formato gerado para este corte."
             )
 
-            # Detecta formato de exportação original do corte
-            detected_mode = detect_cut_aspect_mode(video_path)
+            # Detecta e adapta automaticamente ao formato original do corte
+            sel_aspect = detect_cut_aspect_mode(video_path)
+            format_labels = {
+                "9:16_blur": "📱 Vertical 9:16 (Fundo Desfocado / Blur)",
+                "9:16_crop": "📱 Vertical 9:16 (Corte Central 100% Tela)",
+                "9:16_smart_face": "📱 Vertical 9:16 (Rastreamento de Rosto / Auto-Reframing)",
+                "9:16_split": "📱 Vertical 9:16 (Layout Dividido / Split Screen)",
+                "16:9": "💻 Horizontal 16:9 (1080p Full HD)",
+                "pad": "⬛ Proporcional com Barras (Letterbox)"
+            }
+            desc_format = format_labels.get(sel_aspect, "📱 Vertical 9:16")
 
-            aspect_options = [
-                ("9:16_blur", "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)"),
-                ("9:16_crop", "📱 Vertical 9:16 (Corte Central 100% Tela)"),
-                ("9:16_smart_face", "📱 Vertical 9:16 (Rastreamento Inteligente de Rosto / Auto-Reframing)"),
-                ("9:16_split", "📱 Vertical 9:16 (Layout Dividido / Split Screen)"),
-                ("16:9", "💻 Horizontal 16:9 (Original 1080p Full HD)"),
-                ("pad", "⬛ Ajustar com Barras Pretas (Letterbox)")
-            ]
-            opt_keys = [o[0] for o in aspect_options]
-            opt_labels = {o[0]: o[1] for o in aspect_options}
-            def_idx = opt_keys.index(detected_mode) if detected_mode in opt_keys else 0
-
-            st.markdown("###### 📐 Enquadramento da Imagem no Formato do Vídeo:")
-            sel_aspect = st.radio(
-                "Escolha o formato de enquadramento:",
-                options=opt_keys,
-                index=def_idx,
-                format_func=lambda k: opt_labels.get(k, k),
-                key=f"sel_static_aspect_{unique_key}",
-                help="Formato pré-selecionado automaticamente com base no modo em que este corte foi gerado previamente."
-            )
-
-            if sel_aspect == "9:16_blur":
-                st.info("✨ **Fundo Desfocado (Blur)**: A imagem será exibida em destaque com o fundo preenchido por um blur desfocado dinâmico (estilo Shorts/TikTok/Reels), eliminando barras pretas.")
-            elif sel_aspect == "9:16_crop":
-                st.info("✨ **Corte Central 100%**: A imagem preencherá 100% da tela vertical (1080x1920) sem nenhuma barra preta.")
-            elif sel_aspect == "9:16_smart_face":
-                st.info("✨ **Auto-Reframing Facial**: Detecta e centraliza automaticamente o rosto presente na imagem no enquadramento vertical 9:16.")
-            elif sel_aspect == "16:9":
-                st.info("✨ **Horizontal 16:9 (1080p)**: Enquadramento Full HD horizontal widescreen.")
-            else:
-                st.info("✨ **Letterbox**: Preserva a imagem centralizada com barras pretas.")
+            st.info(f"✨ **Formato Detectado**: A imagem se adaptará automaticamente ao padrão deste corte: **{desc_format}**.")
 
             up_static_img = st.file_uploader(
                 "Selecionar Imagem do Computador (PNG, JPG, WEBP):",
                 type=["png", "jpg", "jpeg", "webp"],
                 key=f"file_uploader_quick_static_{unique_key}",
-                help="A imagem será ajustada proporcionalmente ao formato selecionado mantendo o áudio original."
+                help=f"A imagem será ajustada automaticamente ao formato {desc_format} mantendo o áudio original."
             )
 
             update_cut_thumb = st.checkbox(
@@ -3194,7 +3172,7 @@ def render_quick_editor_component(video_path: str, unique_key: str):
 
                         btn_label_static = "🖼️ Salvar como Novo Vídeo com Imagem Estática" if "Salvar como um novo vídeo" in save_mode else "🖼️ Aplicar Imagem Estática no Vídeo Atual"
                         if st.button(btn_label_static, key=f"btn_apply_quick_static_{unique_key}", type="primary", use_container_width=True):
-                            with st.spinner(f"Aplicando imagem estática no formato {opt_labels.get(sel_aspect, sel_aspect)} com áudio..."):
+                            with st.spinner(f"Aplicando imagem estática adaptada ao formato {desc_format} com áudio..."):
                                 import gc
                                 gc.collect()
                                 v_dir = os.path.dirname(video_path)
@@ -3242,7 +3220,7 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                                     entry = record_quick_edit(
                                         video_path=video_path,
                                         action_name="🖼️ Imagem Estática",
-                                        details=f"Imagem: '{up_static_img.name}' | Formato: {opt_labels.get(sel_aspect, sel_aspect)} | Resolução: {static_res.get('resolution', 'N/A')} | Duração: {dur:.1f}s (Áudio Preservado)",
+                                        details=f"Imagem: '{up_static_img.name}' | Formato Adaptado: {desc_format} | Resolução: {static_res.get('resolution', 'N/A')} | Duração: {dur:.1f}s (Áudio Preservado)",
                                         output_path=out_target
                                     )
                                     st.session_state[f"last_edit_status_{unique_key}"] = entry
