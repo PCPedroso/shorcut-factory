@@ -97,7 +97,7 @@ from core.quick_editor import (
     cleanup_all_edited_versions, load_edit_history, record_quick_edit,
     add_viral_hook_to_video, create_hook_badge_image, apply_hook_style_to_frame,
     overlay_badge_on_frame, HOOK_STYLES, HOOK_BADGE_PRESETS, HOOK_TRANSITIONS,
-    apply_static_image_to_video
+    apply_static_image_to_video, detect_cut_aspect_mode
 )
 from core.overlay_manager import apply_overlay_to_video, generate_overlay_preview, OVERLAY_PRESETS
 from core.audio_processor import (
@@ -3133,14 +3133,50 @@ def render_quick_editor_component(video_path: str, unique_key: str):
             st.markdown("##### 🖼️ Imagem Estática (Áudio do Corte)")
             st.caption(
                 f"Substitua o vídeo por uma **imagem estática contínua** durante toda a duração deste corte ({dur:.1f}s), "
-                "mantendo 100% do áudio editado original."
+                "mantendo 100% do áudio editado original e adaptando-se automaticamente ao formato gerado para este corte."
             )
+
+            # Detecta formato de exportação original do corte
+            detected_mode = detect_cut_aspect_mode(video_path)
+
+            aspect_options = [
+                ("9:16_blur", "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)"),
+                ("9:16_crop", "📱 Vertical 9:16 (Corte Central 100% Tela)"),
+                ("9:16_smart_face", "📱 Vertical 9:16 (Rastreamento Inteligente de Rosto / Auto-Reframing)"),
+                ("9:16_split", "📱 Vertical 9:16 (Layout Dividido / Split Screen)"),
+                ("16:9", "💻 Horizontal 16:9 (Original 1080p Full HD)"),
+                ("pad", "⬛ Ajustar com Barras Pretas (Letterbox)")
+            ]
+            opt_keys = [o[0] for o in aspect_options]
+            opt_labels = {o[0]: o[1] for o in aspect_options}
+            def_idx = opt_keys.index(detected_mode) if detected_mode in opt_keys else 0
+
+            st.markdown("###### 📐 Enquadramento da Imagem no Formato do Vídeo:")
+            sel_aspect = st.radio(
+                "Escolha o formato de enquadramento:",
+                options=opt_keys,
+                index=def_idx,
+                format_func=lambda k: opt_labels.get(k, k),
+                key=f"sel_static_aspect_{unique_key}",
+                help="Formato pré-selecionado automaticamente com base no modo em que este corte foi gerado previamente."
+            )
+
+            if sel_aspect == "9:16_blur":
+                st.info("✨ **Fundo Desfocado (Blur)**: A imagem será exibida em destaque com o fundo preenchido por um blur desfocado dinâmico (estilo Shorts/TikTok/Reels), eliminando barras pretas.")
+            elif sel_aspect == "9:16_crop":
+                st.info("✨ **Corte Central 100%**: A imagem preencherá 100% da tela vertical (1080x1920) sem nenhuma barra preta.")
+            elif sel_aspect == "9:16_smart_face":
+                st.info("✨ **Auto-Reframing Facial**: Detecta e centraliza automaticamente o rosto presente na imagem no enquadramento vertical 9:16.")
+            elif sel_aspect == "16:9":
+                st.info("✨ **Horizontal 16:9 (1080p)**: Enquadramento Full HD horizontal widescreen.")
+            else:
+                st.info("✨ **Letterbox**: Preserva a imagem centralizada com barras pretas.")
 
             up_static_img = st.file_uploader(
                 "Selecionar Imagem do Computador (PNG, JPG, WEBP):",
                 type=["png", "jpg", "jpeg", "webp"],
                 key=f"file_uploader_quick_static_{unique_key}",
-                help="A imagem será ajustada proporcionalmente às dimensões deste corte e exibida continuamente mantendo o áudio original."
+                help="A imagem será ajustada proporcionalmente ao formato selecionado mantendo o áudio original."
             )
 
             update_cut_thumb = st.checkbox(
@@ -3158,7 +3194,7 @@ def render_quick_editor_component(video_path: str, unique_key: str):
 
                         btn_label_static = "🖼️ Salvar como Novo Vídeo com Imagem Estática" if "Salvar como um novo vídeo" in save_mode else "🖼️ Aplicar Imagem Estática no Vídeo Atual"
                         if st.button(btn_label_static, key=f"btn_apply_quick_static_{unique_key}", type="primary", use_container_width=True):
-                            with st.spinner("Substituindo vídeo pela imagem estática com áudio..."):
+                            with st.spinner(f"Aplicando imagem estática no formato {opt_labels.get(sel_aspect, sel_aspect)} com áudio..."):
                                 v_dir = os.path.dirname(video_path)
                                 tmp_img_save = os.path.join(v_dir, f"temp_static_up_{up_static_img.name}")
                                 with open(tmp_img_save, "wb") as f_up:
@@ -3173,7 +3209,8 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                                 static_res = apply_static_image_to_video(
                                     video_path=video_path,
                                     image_path=tmp_img_save,
-                                    output_path=out_target
+                                    output_path=out_target,
+                                    aspect_mode=sel_aspect
                                 )
 
                                 if os.path.exists(tmp_img_save):
@@ -3200,14 +3237,14 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                                     entry = record_quick_edit(
                                         video_path=video_path,
                                         action_name="🖼️ Imagem Estática",
-                                        details=f"Imagem: '{up_static_img.name}' | Resolução: {static_res.get('resolution', 'N/A')} | Duração: {dur:.1f}s (Áudio Preservado)",
+                                        details=f"Imagem: '{up_static_img.name}' | Formato: {opt_labels.get(sel_aspect, sel_aspect)} | Resolução: {static_res.get('resolution', 'N/A')} | Duração: {dur:.1f}s (Áudio Preservado)",
                                         output_path=out_target
                                     )
                                     st.session_state[f"last_edit_status_{unique_key}"] = entry
                                     st.session_state[f"just_edited_{unique_key}"] = True
                                     if out_target:
                                         st.session_state[f"last_edited_video_{unique_key}"] = out_target
-                                    st.toast("🎉 Imagem estática aplicada com sucesso no corte!")
+                                    st.toast("🎉 Imagem estática aplicada com sucesso no formato do corte!")
                                     st.rerun(scope="app")
                 except Exception as e_st_img:
                     st.error(f"Erro ao processar imagem: {e_st_img}")

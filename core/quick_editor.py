@@ -888,19 +888,158 @@ def add_viral_hook_to_video(
         return {"path": None, "error": err_msg}
 
 
+def detect_cut_aspect_mode(video_path: str) -> str:
+    """
+    Detecta automaticamente o formato original de exportação do corte
+    baseado no prefixo da pasta/arquivo (VFDBS, VCCFT, VRIRA, VLDSS, HOFHD),
+    metadados de publicação ou resolução do vídeo.
+    """
+    if not video_path:
+        return "9:16_blur"
+
+    path_norm = os.path.abspath(video_path).replace("\\", "/")
+    parts = path_norm.split("/")
+    filename = parts[-1] if parts else ""
+    folder_name = parts[-2] if len(parts) >= 2 else ""
+
+    # 1. Checa prefixos oficiais do export kit
+    prefix_to_mode = {
+        "VFDBS": "9:16_blur",
+        "VCCFT": "9:16_crop",
+        "VRIRA": "9:16_smart_face",
+        "VLDSS": "9:16_split",
+        "HOFHD": "16:9"
+    }
+    for pfx, mode in prefix_to_mode.items():
+        if filename.startswith(pfx) or folder_name.startswith(pfx):
+            return mode
+
+    # 2. Checa info_publicacao.txt na pasta se existir
+    v_dir = os.path.dirname(video_path)
+    info_p = os.path.join(v_dir, "info_publicacao.txt")
+    if os.path.exists(info_p):
+        try:
+            with open(info_p, "r", encoding="utf-8") as f:
+                content = f.read(500)
+                for pfx, mode in prefix_to_mode.items():
+                    if pfx in content:
+                        return mode
+        except Exception:
+            pass
+
+    # 3. Fallback por resolução
+    try:
+        cap = cv2.VideoCapture(video_path)
+        if cap.isOpened():
+            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
+            if w > h:
+                return "16:9"
+            else:
+                return "9:16_blur"
+    except Exception:
+        pass
+
+    return "9:16_blur"
+
+
+def build_static_image_filter(
+    image_path: str,
+    aspect_mode: str = "9:16_blur",
+    target_w: int = 1080,
+    target_h: int = 1920
+) -> str:
+    """
+    Constrói o filtro FFmpeg filter_complex para adaptar a imagem estática
+    ao formato de corte desejado sem distorções (Fundo Desfocado / Blur, Corte Central 100%, 16:9, etc.).
+    """
+    img_w, img_h = 1920, 1080
+    img = None
+    try:
+        img = cv2.imread(image_path)
+        if img is not None:
+            img_h, img_w = img.shape[:2]
+    except Exception:
+        img = None
+
+    # Modo 1: 9:16 com Fundo Desfocado (Blur) - Padrão Shorts / TikTok / Reels
+    if aspect_mode == "9:16_blur":
+        # Se a imagem já for estritamente vertical 9:16 (diferença de proporção < 3%)
+        if img_h > 0 and abs((img_w / img_h) - (9.0 / 16.0)) < 0.03:
+            return f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black[v]"
+        else:
+            return (
+                f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h},boxblur=25:5,eq=brightness=-0.10[bg];"
+                f"[0:v]scale={target_w}:-2[fg];"
+                f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+            )
+
+    # Modo 2: 9:16 Corte Central 100% da tela (sem barras)
+    elif aspect_mode == "9:16_crop":
+        return f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h}[v]"
+
+    # Modo 3: 9:16 Rastreamento Inteligente de Rosto (Auto-Reframing)
+    elif aspect_mode == "9:16_smart_face":
+        crop_x = None
+        if img is not None and img_h > 0:
+            try:
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+                if os.path.exists(cascade_path):
+                    face_cascade = cv2.CascadeClassifier(cascade_path)
+                    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+                    if len(faces) > 0:
+                        fx, fy, fw, fh = max(faces, key=lambda f: f[2] * f[3])
+                        scale_factor = float(target_h) / float(img_h)
+                        scaled_w = float(img_w) * scale_factor
+                        scaled_face_x = (fx + fw / 2.0) * scale_factor
+                        left_x = int(scaled_face_x - (target_w / 2.0))
+                        left_x = max(0, min(int(scaled_w - target_w), left_x))
+                        crop_x = left_x
+            except Exception:
+                crop_x = None
+
+        if crop_x is not None:
+            return f"[0:v]scale=-2:{target_h},crop={target_w}:{target_h}:{crop_x}:0[v]"
+        else:
+            return f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h}[v]"
+
+    # Modo 4: 9:16 Layout Dividido (Split Screen)
+    elif aspect_mode == "9:16_split":
+        return (
+            f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h},boxblur=25:5,eq=brightness=-0.10[bg];"
+            f"[0:v]scale={target_w}:-2[fg];"
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+        )
+
+    # Modo 5: Horizontal 16:9
+    elif aspect_mode == "16:9":
+        # Se a imagem for vertical colocada em vídeo horizontal, usa blur nas laterais
+        if img_w > 0 and img_h > 0 and (img_w / img_h) < 1.0:
+            return (
+                f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h},boxblur=25:5,eq=brightness=-0.10[bg];"
+                f"[0:v]scale=-2:{target_h}[fg];"
+                f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+            )
+        else:
+            return f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black[v]"
+
+    # Padrão / Letterbox com barras pretas
+    else:
+        return f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black[v]"
+
+
 def apply_static_image_to_video(
     video_path: str,
     image_path: str,
-    output_path: str = None
+    output_path: str = None,
+    aspect_mode: str = None
 ) -> dict:
     """
     Substitui a faixa de vídeo do corte por uma imagem estática contínua,
-    preservando 100% do áudio do corte e sua duração exata.
-    
-    - Mantém a resolução e proporção original do corte (ex: 1080x1920 ou 1920x1080)
-    - Enquadra a imagem sem distorções com scale proporcional e pad
-    - Utiliza codificação rápida libx264 com tune stillimage e web streaming faststart
-    - Suporta substituição direta no vídeo atual ou criação de nova versão
+    preservando 100% do áudio do corte e sua duração exata, adaptando-se
+    ao formato de exportação original do corte (Blur 9:16, Corte Central 100%, 16:9, etc.).
     """
     if not video_path or not os.path.exists(video_path):
         return {"path": None, "error": "Arquivo de vídeo de origem não encontrado."}
@@ -911,18 +1050,28 @@ def apply_static_image_to_video(
     if dur <= 0:
         return {"path": None, "error": "Não foi possível obter a duração do vídeo de origem."}
 
-    # Detecta resolução do vídeo original
-    w, h = 1080, 1920
-    try:
-        cap = cv2.VideoCapture(video_path)
-        if cap.isOpened():
-            orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            cap.release()
-            if orig_w > 0 and orig_h > 0:
-                w, h = orig_w, orig_h
-    except Exception:
-        pass
+    # Detecta formato de enquadramento se não for fornecido explicitamente
+    if not aspect_mode or aspect_mode == "auto":
+        aspect_mode = detect_cut_aspect_mode(video_path)
+
+    # Define a resolução alvo conforme o formato de exportação escolhido
+    if aspect_mode and aspect_mode.startswith("9:16"):
+        w, h = 1080, 1920
+    elif aspect_mode == "16:9":
+        w, h = 1920, 1080
+    else:
+        # Padrão ou letterbox: usa dimensões do vídeo original se disponíveis
+        w, h = 1080, 1920
+        try:
+            cap = cv2.VideoCapture(video_path)
+            if cap.isOpened():
+                orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                cap.release()
+                if orig_w > 0 and orig_h > 0:
+                    w, h = orig_w, orig_h
+        except Exception:
+            pass
 
     # Garante dimensões pares
     if w % 2 != 0:
@@ -943,7 +1092,13 @@ def apply_static_image_to_video(
         except Exception:
             pass
 
-    vf_filter = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
+    # Constrói filtro específico para o formato do corte
+    filter_complex_str = build_static_image_filter(
+        image_path=image_path,
+        aspect_mode=aspect_mode,
+        target_w=w,
+        target_h=h
+    )
 
     cmd = [
         FFMPEG_EXE, "-y",
@@ -951,7 +1106,7 @@ def apply_static_image_to_video(
         "-t", f"{dur:.3f}",
         "-i", image_path,
         "-i", video_path,
-        "-filter_complex", f"[0:v]{vf_filter}[v]",
+        "-filter_complex", filter_complex_str,
         "-map", "[v]",
         "-map", "1:a:0?",
         "-c:v", "libx264",
@@ -987,7 +1142,8 @@ def apply_static_image_to_video(
             "path": target_out,
             "error": None,
             "new_duration": new_dur,
-            "resolution": f"{w}x{h}"
+            "resolution": f"{w}x{h}",
+            "aspect_mode": aspect_mode
         }
     else:
         if os.path.exists(tmp_out):

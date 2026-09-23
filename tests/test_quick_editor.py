@@ -8,7 +8,9 @@ from core.quick_editor import (
     trim_video,
     remove_snippet_and_merge,
     change_video_speed,
-    apply_static_image_to_video
+    apply_static_image_to_video,
+    detect_cut_aspect_mode,
+    build_static_image_filter
 )
 
 
@@ -166,8 +168,8 @@ class TestQuickEditor(unittest.TestCase):
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         cap.release()
-        self.assertEqual(w, 640)
-        self.assertEqual(h, 360)
+        self.assertEqual(w, 1920)
+        self.assertEqual(h, 1080)
 
     def test_apply_static_image_to_video_in_place(self):
         import shutil
@@ -193,7 +195,63 @@ class TestQuickEditor(unittest.TestCase):
         res2 = apply_static_image_to_video(self.sample_video, "inexistente.jpg")
         self.assertIsNotNone(res2.get("error"))
 
+    def test_detect_cut_aspect_mode(self):
+        self.assertEqual(detect_cut_aspect_mode("data/v1/VFDBS_Corte_1/VFDBS_Corte_1.mp4"), "9:16_blur")
+        self.assertEqual(detect_cut_aspect_mode("data/v1/VCCFT_Corte_2/video.mp4"), "9:16_crop")
+        self.assertEqual(detect_cut_aspect_mode("data/v1/VRIRA_Corte_3/VRIRA_Corte_3.mp4"), "9:16_smart_face")
+        self.assertEqual(detect_cut_aspect_mode("data/v1/VLDSS_Corte_4/split.mp4"), "9:16_split")
+        self.assertEqual(detect_cut_aspect_mode("data/v1/HOFHD_Corte_5/corte.mp4"), "16:9")
+
+    def test_apply_static_image_with_format_blur_9_16(self):
+        # Imagem horizontal (16:9) adaptada ao formato 9:16 Blur
+        img_path = os.path.join(self.test_dir, "horizontal_img.jpg")
+        img = np.zeros((720, 1280, 3), dtype=np.uint8)
+        img[:, :] = (0, 180, 255)
+        cv2.imwrite(img_path, img)
+
+        out_blur = os.path.join(self.test_dir, "static_blur_916.mp4")
+        res = apply_static_image_to_video(
+            self.sample_video,
+            img_path,
+            output_path=out_blur,
+            aspect_mode="9:16_blur"
+        )
+        self.assertIsNone(res.get("error"))
+        self.assertTrue(os.path.exists(out_blur))
+        self.assertEqual(res.get("aspect_mode"), "9:16_blur")
+
+        cap = cv2.VideoCapture(out_blur)
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+        self.assertEqual(w, 1080)
+        self.assertEqual(h, 1920)
+
+    def test_apply_static_image_with_format_16_9(self):
+        img_path = os.path.join(self.test_dir, "any_img.jpg")
+        img = np.zeros((500, 500, 3), dtype=np.uint8)
+        img[:, :] = (100, 200, 50)
+        cv2.imwrite(img_path, img)
+
+        out_169 = os.path.join(self.test_dir, "static_169.mp4")
+        res = apply_static_image_to_video(
+            self.sample_video,
+            img_path,
+            output_path=out_169,
+            aspect_mode="16:9"
+        )
+        self.assertIsNone(res.get("error"))
+        self.assertTrue(os.path.exists(out_169))
+
+        cap = cv2.VideoCapture(out_169)
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+        self.assertEqual(w, 1920)
+        self.assertEqual(h, 1080)
+
 
 if __name__ == '__main__':
     unittest.main()
+
 

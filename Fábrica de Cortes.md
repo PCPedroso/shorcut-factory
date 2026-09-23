@@ -325,16 +325,20 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
     - **⭐ Salvar como Capa Oficial**: Define o frame exato diretamente como a `thumbnail.jpg` e `thumbnail_1.jpg` do corte, atualizando `cuts_catalog.json`.
     - **🎨 Criar 3 Capas com IA**: Utiliza o frame capturado como orador principal, remove o fundo com Rembg e gera as variações virais (*Impacto Neon*, *Clean Focus 3D*, *Moldura Dinâmica HDR*).
     - **💾 Baixar (JPG)**: Download direto do frame capturado.
-- **🖼️ Ferramenta de Imagem Estática com Áudio no Editor Rápido (`core/quick_editor.py`, `app.py`, `tests/test_quick_editor.py`)**:
-  - Nova aba **`🖼️ Imagem Estática`** adicionada ao painel do **Editor Rápido** em qualquer corte renderizado (Galeria de Cortes na Seção 4 e Instância Existente na Seção 3).
-  - Permite transformar o corte já finalizado (com duração, áudio e efeitos prontos) em um vídeo com **imagem estática contínua**, preservando 100% do áudio editado original.
-  - **Uploader Simples & Prévia Instantânea**: Upload de imagem do computador (`PNG`, `JPG`, `WEBP`) com exibição de prévia em tempo real.
-  - **Opção de Sincronização de Capa**: Checkbox opcional para atualizar simultaneamente o arquivo `thumbnail.jpg` da pasta do corte.
-  - **Compatibilidade com Modos de Salvamento**: Funciona tanto no modo `🔄 Substituir o vídeo atual` (substituição in-place segura) quanto em `✨ Salvar como um novo vídeo` (gerando arquivo com sufixo personalizado, ex: `_com_imagem_estatica`).
-  - **Enquadramento Proporcional FFmpeg (`apply_static_image_to_video`)**: Adapta a imagem às dimensões exatas do corte (ex: 1080x1920 ou 1920x1080) com escala proporcional e padding sem distorções, usando `-tune stillimage`, `-pix_fmt yuv420p` e `-movflags +faststart`.
-  - **Histórico & Limpeza**: Registrado no histórico persistente (`historico_edicoes.json`) com suporte ao gerenciador de versões secundárias.
-- **🧪 Suíte de 199 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (quick editor static image, frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
+- **🖼️ Ferramenta de Imagem Estática com Adaptação ao Formato do Corte (`core/quick_editor.py`, `app.py`, `tests/test_quick_editor.py`)**:
+  - Nova aba **`🖼️ Imagem Estática`** no painel do **Editor Rápido** em qualquer corte renderizado (Galeria de Cortes na Seção 4 e Instância Existente na Seção 3).
+  - Permite transformar o corte já finalizado em um vídeo com **imagem estática contínua**, preservando 100% do áudio editado original e adaptando o enquadramento ao formato gerado previamente.
+  - **Auto-Detecção do Formato Original (`detect_cut_aspect_mode`)**: Identifica automaticamente se o corte foi exportado como `Vertical 9:16 (Fundo Desfocado / Blur)` (`VFDBS`), `Vertical 9:16 (Corte Central 100% Tela)` (`VCCFT`), `Vertical 9:16 (Auto-Reframing Facial)` (`VRIRA`), `Vertical 9:16 (Split Screen)` (`VLDSS`) ou `Horizontal 16:9` (`HOFHD`), pré-selecionando o enquadramento correto.
+  - **Renderização Específica por Formato (`build_static_image_filter`)**:
+    - **Fundo Desfocado / Blur (9:16)**: Imagem em destaque com fundo ampliado e desfocado com blur dinâmico (`boxblur=25:5`, `brightness=-0.10`), eliminando barras pretas e mantendo o padrão visual Shorts/TikTok/Reels.
+    - **Corte Central 100% (9:16)**: Imagem preenche 100% da tela vertical (1080x1920) sem bordas.
+    - **Auto-Reframing Facial (9:16)**: Centralização inteligente de rosto detectado na imagem.
+    - **Horizontal 16:9**: Enquadramento Full HD 1920x1080 com suporte a blur lateral para imagens verticais.
+  - **Opção de Sincronização de Capa**: Checkbox para atualizar simultaneamente o arquivo `thumbnail.jpg` da pasta do corte.
+  - **Compatibilidade com Modos de Salvamento**: Suporta substituição in-place no vídeo atual ou criação de nova versão com sufixo.
+  - **Histórico & Limpeza**: Registro persistente em `historico_edicoes.json` e suporte ao gerenciador de versões secundárias.
+- **🧪 Suíte de 202 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (quick editor static image format adaptation, frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
 
 ---
 
