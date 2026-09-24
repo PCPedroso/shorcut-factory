@@ -197,6 +197,14 @@ def create_viral_package(
             except Exception:
                 pass
 
+        # Garante que transcricao_corte.json exista na pasta do corte para futuras re-renderizações instantâneas
+        pkg_json = os.path.join(package_dir, "transcricao_corte.json")
+        if not os.path.exists(pkg_json) and eff_transcript and os.path.exists(eff_transcript) and eff_transcript.endswith(".json"):
+            try:
+                shutil.copy2(eff_transcript, pkg_json)
+            except Exception:
+                pass
+
         # Formata hashtags
         hashtags_str = " ".join(h if h.startswith("#") else f"#{h}" for h in hashtags) if hashtags else "#shorts #viral #cortes"
 

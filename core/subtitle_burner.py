@@ -181,12 +181,23 @@ def extract_words_in_range(transcript_path: str, start_time_str: str, end_time_s
             raw_words[k + 1]["start"] = raw_words[k]["start"]
 
     # 4. Filtra apenas as palavras que caem dentro do intervalo [cut_start, cut_end]
-    # e ajusta os timestamps para serem relativos ao início do corte (t = 0)
+    # e ajusta os timestamps para serem relativos ao início do corte (t = 0).
+    # Se o transcript já for relativo ao corte (ex: transcricao_corte.json ou legendas.srt da pasta do corte),
+    # o timestamp máximo das palavras é significativamente menor que cut_start.
+    is_already_relative = False
+    if cut_start > 0 and raw_words:
+        max_t = max(w["end"] for w in raw_words)
+        if max_t < cut_start:
+            is_already_relative = True
+
+    effective_cut_start = 0.0 if is_already_relative else cut_start
+    effective_cut_end = (cut_end - cut_start) if is_already_relative else cut_end
+
     relative_words = []
     for w in raw_words:
-        if w["end"] >= cut_start and w["start"] <= cut_end:
-            rel_start = max(0.0, w["start"] - cut_start)
-            rel_end = min(cut_end - cut_start, w["end"] - cut_start)
+        if w["end"] >= effective_cut_start and w["start"] <= effective_cut_end:
+            rel_start = max(0.0, w["start"] - effective_cut_start)
+            rel_end = min(effective_cut_end - effective_cut_start, w["end"] - effective_cut_start)
             if rel_end > rel_start:
                 relative_words.append({
                     "word": w["word"],
@@ -870,4 +881,151 @@ def apply_edited_transcript_to_json(transcript_json_path: str, edited_text: str,
         return out_path
     except Exception:
         return transcript_json_path
+
+
+def parse_srt_to_transcript_dict(srt_path: str, offset_sec: float = 0.0) -> dict:
+    """
+    Lê um arquivo .srt e converte em estrutura de dicionário compatível com transcript.json
+    (com segments, words e timestamps). Se offset_sec for fornecido, adiciona o offset.
+    """
+    if not srt_path or not os.path.exists(srt_path):
+        return {}
+    try:
+        with open(srt_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+
+        pattern = re.compile(
+            r'(\d+)\s*\n'
+            r'(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*\n'
+            r'([\s\S]*?)(?=\n{2,}|\n*\Z)'
+        )
+
+        def srt_t_to_sec(t_str):
+            t_str = t_str.replace(',', '.')
+            parts = t_str.split(':')
+            h = float(parts[0])
+            m = float(parts[1])
+            s = float(parts[2])
+            return h * 3600 + m * 60 + s
+
+        segments = []
+        all_words_text = []
+        for match in pattern.finditer(content):
+            _, t_start_str, t_end_str, text = match.groups()
+            t_start = srt_t_to_sec(t_start_str) + offset_sec
+            t_end = srt_t_to_sec(t_end_str) + offset_sec
+            clean_text = " ".join(text.strip().split())
+            if not clean_text:
+                continue
+
+            words = clean_text.split()
+            seg_dur = max(0.2, t_end - t_start)
+            w_dur = seg_dur / max(1, len(words))
+
+            w_list = []
+            for idx, w in enumerate(words):
+                w_start = round(t_start + idx * w_dur, 3)
+                w_end = round(t_start + (idx + 1) * w_dur, 3)
+                w_list.append({
+                    "word": w,
+                    "start": w_start,
+                    "end": w_end
+                })
+
+            segments.append({
+                "start": round(t_start, 3),
+                "end": round(t_end, 3),
+                "text": clean_text,
+                "words": w_list
+            })
+            all_words_text.append(clean_text)
+
+        full_text = " ".join(all_words_text)
+        return {
+            "full_text": full_text,
+            "segments": segments,
+            "source": "SRT Preservado"
+        }
+    except Exception:
+        return {}
+
+
+def resolve_preserved_cut_transcript(
+    cut_folder_path: str,
+    base_transcript_path: str = None,
+    start_time_str: str = None,
+    end_time_str: str = None
+) -> str:
+    """
+    Localiza, preserva e prepara a transcrição presente na pasta do corte para reutilização:
+    1. Se houver transcricao_corte.txt com edições manuais, alinha com o JSON base e gera transcricao_corte.json.
+    2. Se houver transcricao_corte.json, reutiliza diretamente.
+    3. Se houver legendas.srt (ou .srt na pasta), converte em transcricao_corte.json.
+    Retorna o caminho do arquivo JSON pronto para uso no burner de legendas, ou None se não houver.
+    """
+    if not cut_folder_path or not os.path.isdir(cut_folder_path):
+        return None
+
+    txt_file = os.path.join(cut_folder_path, "transcricao_corte.txt")
+    json_file = os.path.join(cut_folder_path, "transcricao_corte.json")
+
+    # Encontra qualquer arquivo .srt na pasta do corte
+    srt_file = os.path.join(cut_folder_path, "legendas.srt")
+    if not os.path.exists(srt_file):
+        for f in os.listdir(cut_folder_path):
+            if f.endswith(".srt"):
+                srt_file = os.path.join(cut_folder_path, f)
+                break
+
+    # Caso 1: transcricao_corte.txt existe e possui conteúdo
+    if os.path.exists(txt_file) and os.path.getsize(txt_file) > 0:
+        try:
+            with open(txt_file, "r", encoding="utf-8", errors="replace") as f_txt:
+                edited_text = f_txt.read().strip()
+            if edited_text:
+                # Procura base JSON para alinhar timestamps
+                base_json = None
+                if os.path.exists(json_file) and os.path.getsize(json_file) > 10:
+                    base_json = json_file
+                elif base_transcript_path and os.path.exists(base_transcript_path) and os.path.getsize(base_transcript_path) > 10:
+                    base_json = base_transcript_path
+                elif os.path.exists(srt_file) and os.path.getsize(srt_file) > 10:
+                    srt_data = parse_srt_to_transcript_dict(srt_file)
+                    if srt_data and srt_data.get("segments"):
+                        with open(json_file, "w", encoding="utf-8") as f_js:
+                            json.dump(srt_data, f_js, ensure_ascii=False, indent=2)
+                        base_json = json_file
+
+                if base_json:
+                    aligned = apply_edited_transcript_to_json(
+                        transcript_json_path=base_json,
+                        edited_text=edited_text,
+                        output_json_path=json_file
+                    )
+                    if aligned and os.path.exists(aligned):
+                        return aligned
+        except Exception:
+            pass
+
+    # Caso 2: transcricao_corte.json existe e é válido
+    if os.path.exists(json_file) and os.path.getsize(json_file) > 10:
+        return json_file
+
+    # Caso 3: legendas.srt existe na pasta
+    if os.path.exists(srt_file) and os.path.getsize(srt_file) > 10:
+        try:
+            srt_data = parse_srt_to_transcript_dict(srt_file)
+            if srt_data and srt_data.get("segments"):
+                with open(json_file, "w", encoding="utf-8") as f_js:
+                    json.dump(srt_data, f_js, ensure_ascii=False, indent=2)
+                # Garante também que transcricao_corte.txt seja criado se faltar
+                if not os.path.exists(txt_file):
+                    with open(txt_file, "w", encoding="utf-8") as f_tx:
+                        f_tx.write(srt_data.get("full_text", "") + "\n")
+                return json_file
+        except Exception:
+            pass
+
+    return None
+
 

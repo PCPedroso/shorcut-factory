@@ -8490,6 +8490,41 @@ if _has_media_ready:
                             st.rerun()
 
         st.markdown("")
+        preserve_folder_transcript = True
+        existing_folder_path = None
+        if existing_inst and existing_inst.get("folder_path") and os.path.isdir(existing_inst["folder_path"]):
+            existing_folder_path = existing_inst["folder_path"]
+        elif existing_cut and existing_cut.get("formats"):
+            for _fk, _fv in existing_cut["formats"].items():
+                if _fv.get("folder_path") and os.path.isdir(_fv["folder_path"]):
+                    existing_folder_path = _fv["folder_path"]
+                    break
+
+        if existing_folder_path:
+            has_existing_trans = False
+            existing_trans_preview = ""
+            for f_name in ["transcricao_corte.txt", "transcricao_corte.json", "legendas.srt"]:
+                f_p = os.path.join(existing_folder_path, f_name)
+                if os.path.exists(f_p) and os.path.getsize(f_p) > 0:
+                    has_existing_trans = True
+                    if f_name == "transcricao_corte.txt":
+                        try:
+                            with open(f_p, "r", encoding="utf-8", errors="replace") as _f_prev:
+                                existing_trans_preview = _f_prev.read(140).strip()
+                        except Exception:
+                            pass
+                    break
+
+            if has_existing_trans:
+                preserve_folder_transcript = st.checkbox(
+                    "📝 **Preservar e utilizar a transcrição existente na pasta deste corte**",
+                    value=True,
+                    key=f"chk_preserve_trans_{_vid_id_cat}_{start_time}_{end_time}_{selected_aspect}",
+                    help="Mantém e reutiliza a transcrição já existente na pasta deste corte (incluindo edições manuais em transcricao_corte.txt ou legendas.srt) sem retranscrever pelo Whisper, sincronizando as legendas no corte refeito."
+                )
+                if preserve_folder_transcript and existing_trans_preview:
+                    st.caption(f"🗣️ *Transcrição preservada da pasta:* \"{existing_trans_preview}...\"")
+
         render_button_label = "🔄 Forçar Re-renderização no Formato Escolhido" if existing_inst else "✂️ Gerar Corte no Formato Escolhido"
         if st.button(render_button_label, type="primary" if not existing_inst else "secondary", use_container_width=True):
             import importlib
@@ -8594,8 +8629,26 @@ if _has_media_ready:
                         extra_info += " + 🎵 Música/Ducking"
     
                     _transcript_path_cut = os.path.join(data_dir, "transcript.json")
-                    # Se legendas estiverem ativas, garante transcrição pontual se não houver transcrição completa
-                    if subtitle_enabled:
+                    _tr_from_folder = False
+
+                    # Se solicitado para preservar transcrição existente, localiza e prepara da pasta do corte
+                    if preserve_folder_transcript and existing_folder_path:
+                        from core.subtitle_burner import resolve_preserved_cut_transcript
+                        _cut_base_cand = os.path.join(data_dir, f"_cut_tr_{re.sub(r'[^0-9A-Za-z_-]', '-', str(start_time)).strip('-')}_{re.sub(r'[^0-9A-Za-z_-]', '-', str(end_time)).strip('-')}.json")
+                        _base_cand = _cut_base_cand if os.path.exists(_cut_base_cand) else (os.path.join(data_dir, "transcript.json") if os.path.exists(os.path.join(data_dir, "transcript.json")) else None)
+                        _resolved_tr = resolve_preserved_cut_transcript(
+                            cut_folder_path=existing_folder_path,
+                            base_transcript_path=_base_cand,
+                            start_time_str=start_time,
+                            end_time_str=end_time
+                        )
+                        if _resolved_tr and os.path.exists(_resolved_tr):
+                            _transcript_path_cut = _resolved_tr
+                            _tr_from_folder = True
+                            st.toast("⚡ Transcrição da pasta preservada e reaproveitada para o corte!")
+
+                    # Se legendas estiverem ativas e NÃO foi recuperada transcrição da pasta, garante transcrição pontual via Whisper
+                    if subtitle_enabled and not _tr_from_folder:
                         from core.transcriber import ensure_cut_transcript
                         with st.spinner(f"🎙️ Verificando sincronia das legendas [{start_time} → {end_time}]..."):
                             _tr_cut_res = ensure_cut_transcript(
@@ -8613,6 +8666,8 @@ if _has_media_ready:
                                     st.toast("⚡ Transcrição pontual do corte sincronizada com sucesso!")
                             elif _tr_cut_res.get("error"):
                                 st.warning(f"⚠️ Aviso na transcrição do corte: {_tr_cut_res['error']}")
+                    elif subtitle_enabled and _tr_from_folder:
+                        st.info("📝 **Legendas Sincronizadas**: Utilizando a transcrição preservada da pasta do corte.")
 
                     # Se a tradução de legendas deste corte estiver ativa, traduz automaticamente antes de queimar no vídeo
                     if subtitle_enabled and st.session_state.get("cut_trans_enabled_tgl") and os.path.exists(_transcript_path_cut):
@@ -8774,7 +8829,9 @@ if _has_media_ready:
                                 thumbnail_path=gen_thumb_path,
                                 transcript_path=_transcript_path_cut,
                                 start_time_str=start_time,
-                                end_time_str=end_time
+                                end_time_str=end_time,
+                                preserve_existing_transcript=preserve_folder_transcript,
+                                existing_folder_path=existing_folder_path
                             )
     
                             # Registra no Catálogo de Cortes
