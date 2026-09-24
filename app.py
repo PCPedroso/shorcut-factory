@@ -8530,6 +8530,10 @@ if _has_media_ready:
             import importlib
             import core.video_processor
             importlib.reload(core.video_processor)
+            import core.subtitle_burner
+            importlib.reload(core.subtitle_burner)
+            import core.export_kit
+            importlib.reload(core.export_kit)
             from core.video_processor import download_full_video, cut_video, get_video_resolution
             
             active_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
@@ -8633,6 +8637,9 @@ if _has_media_ready:
 
                     # Se solicitado para preservar transcrição existente, localiza e prepara da pasta do corte
                     if preserve_folder_transcript and existing_folder_path:
+                        import importlib
+                        import core.subtitle_burner
+                        importlib.reload(core.subtitle_burner)
                         from core.subtitle_burner import resolve_preserved_cut_transcript
                         _cut_base_cand = os.path.join(data_dir, f"_cut_tr_{re.sub(r'[^0-9A-Za-z_-]', '-', str(start_time)).strip('-')}_{re.sub(r'[^0-9A-Za-z_-]', '-', str(end_time)).strip('-')}.json")
                         _base_cand = _cut_base_cand if os.path.exists(_cut_base_cand) else (os.path.join(data_dir, "transcript.json") if os.path.exists(os.path.join(data_dir, "transcript.json")) else None)
