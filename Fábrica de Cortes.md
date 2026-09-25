@@ -18,7 +18,7 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
 | **Processamento de Vídeo** | `FFmpeg` (com `libass` e NVENC) | Recorte, filtros complexos, sidechain compress, equalização e queima de legendas/overlays |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
-| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (196 testes) |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (207 testes) |
 
 ---
 
@@ -31,7 +31,8 @@ shorcut-factory/
 ├── assets/
 │   ├── audio/                 # Trilhas sonoras royalty-free categorizadas (.wav / .mp3)
 │   └── fonts/                 # Tipografias bundled (Montserrat-ExtraBold)
-├── tests/                     # Suíte de Testes Unitários Automatizados (196 testes)
+├── tests/                     # Suíte de Testes Unitários Automatizados (207 testes)
+│   ├── test_preserve_cut_transcript.py # Testes de preservação e reuso de transcrição da pasta do corte na re-renderização
 │   ├── test_static_image_video.py# Testes de substituição de vídeo por imagem estática mantendo áudio e backup
 │   ├── test_frame_capturer.py    # Testes de extração de frames, conversão de tempo, thumbnails e base64
 │   ├── test_quick_editor.py      # Testes de duração, trim, corte cirúrgico e concatenação
@@ -51,7 +52,7 @@ shorcut-factory/
 ├── core/
 │   ├── frame_capturer.py      # Motor de captura de frames pausados em alta resolução e gestão de capas/thumbnails
 │   ├── ui_theme.py            # Design System Studio: tokens CSS, Glassmorphism, stepper, badges e componentes
-│   ├── quick_editor.py        # Edição rápida / ajuste fino: Trim, Snip & Merge, Speed Up (1.0x-1.5x) e Limpeza de Versões
+│   ├── quick_editor.py        # Edição rápida / ajuste fino: Trim, Snip & Merge, Speed Up (1.0x-1.5x), Imagem Estática com adaptação automática ao formato do corte e execução FFmpeg segura (_run_ffmpeg_command com CREATE_NO_WINDOW/NVENC) e Limpeza de Versões
 │   ├── audio_processor.py     # Equalização, anti-estouro (de-clipping/limiter), nivelador dinâmico de voz/torcida
 │   ├── overlay_manager.py     # Motor de sobreposição de banners, tarjas (GC), logos com modos fill/fit/cover
 │   ├── headline_drawer.py     # Estilização de Headlines magnéticas de topo (Live Preview, presets reativos de cores)
@@ -60,12 +61,12 @@ shorcut-factory/
 │   ├── analyzer.py            # Análise Q&A/Temática, Séries Sugeridas flexíveis e Kit Viral com IA
 │   ├── video_processor.py     # Pipeline FFmpeg para os 5 formatos de enquadramento + download multi-thread
 │   ├── face_tracker.py        # Detecção facial MediaPipe, Deadband Anchor, Split Screen Proporcional & Auto-Switch
-│   ├── subtitle_burner.py     # Geração de legendas dinâmicas em ASS + Headlines + Emojis + Callout
+│   ├── subtitle_burner.py     # Geração de legendas dinâmicas em ASS + Headlines + Emojis + Callout + Reuso e parser de transcrição preservada (resolve_preserved_cut_transcript, parse_srt_to_transcript_dict)
 │   ├── thumbnail_generator.py # Extração de melhor frame (MediaPipe/sharpness) e capas 9:16 multicamadas
 │   ├── audio_mixer.py         # Mixagem de áudio com Ducking dinâmico via sidechaincompress FFmpeg
 │   ├── retention_effects.py   # Barra de progresso, Zoom Punch, Climax Zoom e Callout ASS
 │   ├── integrations.py        # Upload YouTube Shorts API v3 e despachante de Webhooks
-│   ├── export_kit.py          # Nomenclatura estrita (VLDSS, VRIRA...) e pastas de publicação com thumbnail
+│   ├── export_kit.py          # Nomenclatura estrita (VLDSS, VRIRA...), pastas de publicação com thumbnail e persistência de transcricao_corte.json
 │   ├── cuts_catalog.py        # Catálogo e cache inteligente multi-instância (cuts_catalog.json)
 │   ├── batch_processor.py     # Processamento sequencial em lote com Smart Skip e Phase 4
 │   ├── library_manager.py     # Catálogo global de vídeos processados (library.json)
@@ -325,20 +326,37 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
     - **⭐ Salvar como Capa Oficial**: Define o frame exato diretamente como a `thumbnail.jpg` e `thumbnail_1.jpg` do corte, atualizando `cuts_catalog.json`.
     - **🎨 Criar 3 Capas com IA**: Utiliza o frame capturado como orador principal, remove o fundo com Rembg e gera as variações virais (*Impacto Neon*, *Clean Focus 3D*, *Moldura Dinâmica HDR*).
     - **💾 Baixar (JPG)**: Download direto do frame capturado.
-- **🖼️ Ferramenta de Imagem Estática com Adaptação ao Formato do Corte (`core/quick_editor.py`, `app.py`, `tests/test_quick_editor.py`)**:
+- **🖼️ Ferramenta de Imagem Estática com Adaptação 100% Automática ao Formato do Corte (`core/quick_editor.py`, `app.py`, `tests/test_quick_editor.py`, `tests/test_static_image_video.py`)**:
   - Nova aba **`🖼️ Imagem Estática`** no painel do **Editor Rápido** em qualquer corte renderizado (Galeria de Cortes na Seção 4 e Instância Existente na Seção 3).
-  - Permite transformar o corte já finalizado em um vídeo com **imagem estática contínua**, preservando 100% do áudio editado original e adaptando o enquadramento ao formato gerado previamente.
-  - **Auto-Detecção do Formato Original (`detect_cut_aspect_mode`)**: Identifica automaticamente se o corte foi exportado como `Vertical 9:16 (Fundo Desfocado / Blur)` (`VFDBS`), `Vertical 9:16 (Corte Central 100% Tela)` (`VCCFT`), `Vertical 9:16 (Auto-Reframing Facial)` (`VRIRA`), `Vertical 9:16 (Split Screen)` (`VLDSS`) ou `Horizontal 16:9` (`HOFHD`), pré-selecionando o enquadramento correto.
+  - Permite transformar o corte já finalizado em um vídeo com **imagem estática contínua**, preservando 100% do áudio editado original e adaptando o enquadramento diretamente ao formato gerado previamente, sem requerer seleção manual redundante do usuário.
+  - **Auto-Detecção do Formato Original (`detect_cut_aspect_mode`)**: Identifica de forma determinística o formato a partir dos metadados e do prefixo da pasta do corte:
+    - `Vertical 9:16 (Fundo Desfocado / Blur)` (`VFDBS`)
+    - `Vertical 9:16 (Corte Central 100% Tela)` (`VCCFT`)
+    - `Vertical 9:16 (Auto-Reframing Facial)` (`VRIRA`)
+    - `Vertical 9:16 (Split Screen)` (`VLDSS`)
+    - `Horizontal 16:9` (`HOFHD`)
   - **Renderização Específica por Formato (`build_static_image_filter`)**:
     - **Fundo Desfocado / Blur (9:16)**: Imagem em destaque com fundo ampliado e desfocado com blur dinâmico (`boxblur=25:5`, `brightness=-0.10`), eliminando barras pretas e mantendo o padrão visual Shorts/TikTok/Reels.
     - **Corte Central 100% (9:16)**: Imagem preenche 100% da tela vertical (1080x1920) sem bordas.
-    - **Auto-Reframing Facial (9:16)**: Centralização inteligente de rosto detectado na imagem.
+    - **Auto-Reframing Facial (9:16)**: Centralização inteligente de rosto detectado na imagem com enquadramento vertical.
     - **Horizontal 16:9**: Enquadramento Full HD 1920x1080 com suporte a blur lateral para imagens verticais.
+  - **Resiliência de Sistema Operacional & Gerenciamento de Memória no Windows (`_run_ffmpeg_command`)**:
+    - Eliminação completa de erros `[WinError 8] Not enough memory resources available to process this command` decorrentes de esgotamento do desktop heap do Windows em processos longos do Streamlit.
+    - Execução blindada via `subprocess.CREATE_NO_WINDOW`, descarte de streams (`stdout=subprocess.DEVNULL`, `stderr=subprocess.PIPE`), coleta de lixo forçada (`gc.collect()`), aceleração de hardware NVENC GPU (`h264_nvenc`) e fallback automático para shell.
   - **Opção de Sincronização de Capa**: Checkbox para atualizar simultaneamente o arquivo `thumbnail.jpg` da pasta do corte.
   - **Compatibilidade com Modos de Salvamento**: Suporta substituição in-place no vídeo atual ou criação de nova versão com sufixo.
   - **Histórico & Limpeza**: Registro persistente em `historico_edicoes.json` e suporte ao gerenciador de versões secundárias.
-- **🧪 Suíte de 202 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (quick editor static image format adaptation, frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
+- **🔄 Re-renderização Forçada com Preservação de Transcrição da Pasta do Corte (`core/subtitle_burner.py`, `core/export_kit.py`, `app.py`, `tests/test_preserve_cut_transcript.py`)**:
+  - Checkbox interativo ao forçar a re-renderização de qualquer corte existente: `Preservar e reutilizar transcrição existente da pasta do corte (evita re-transcrever com Whisper)`.
+  - **Resolução em Cascata de Transcrições Preservadas (`resolve_preserved_cut_transcript`)**:
+    1. **Edições Manuais Prioritárias**: Se o usuário tiver editado manualmente o arquivo `transcricao_corte.txt` da pasta do corte, a função alinha o texto corrigido com a estrutura temporal detalhada (`apply_edited_transcript_to_json`), mantendo a pontuação e correções sem perder a sincronia labial.
+    2. **Estrutura Nativa em JSON**: Carrega diretamente `transcricao_corte.json` da pasta do corte com timestamps por palavra e frases geradas anteriormente.
+    3. **Parser Resiliente de Legenda SubRip (`parse_srt_to_transcript_dict`)**: Na ausência de JSON, converte diretamente arquivos `.srt` (`<PREFIXO_...>.srt` ou `legendas.srt`) em dicionário de transcrição com suporte a milissegundos.
+  - **Compatibilidade com Timestamps Relativos & Absolutos**: O extrator de palavras (`extract_words_in_range`) identifica automaticamente se as palavras utilizam tempos relativos ao início do corte (`00:00:00`) ou absolutos da linha do tempo original, ajustando o offset com precisão milimétrica.
+  - **Proteção Física dos Arquivos (`preserve_existing_transcript` em `core/export_kit.py`)**: Previne que a rotina de exportação sobrescreva os arquivos `transcricao_corte.txt` e `transcricao_corte.json` editados pelo usuário durante o empacotamento final.
+  - **Recarregamento Dinâmico de Módulos (Hot Reload)**: Invocação de `importlib.reload` para `core.subtitle_burner` e `core.export_kit` durante a execução no Streamlit, garantindo que novas rotinas sejam aplicadas instantaneamente sem necessidade de reiniciar o servidor.
+- **🧪 Suíte de 207 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (preserve cut transcript on re-render, quick editor static image format adaptation, frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
 
 ---
 
