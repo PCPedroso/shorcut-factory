@@ -325,18 +325,33 @@ def inject_video_time_sync_js():
                     const txt = (btn.innerText || '').toLowerCase();
                     const isStart = txt.includes('setar tempo inicial');
                     const isEnd = txt.includes('setar tempo final');
+                    const isCapture = txt.includes('capturar tempo') || txt.includes('capturar momento');
 
-                    if (isStart || isEnd) {
+                    if (isStart || isEnd || isCapture) {
                         btn.dataset.timeSyncClickBound = "true";
                         const onSetTimeClick = () => {
                             let activeVid = null;
                             const allVids = pDoc.querySelectorAll('video');
-                            if (allVids.length > 0) {
+                            if (allVids.length === 1) {
                                 activeVid = allVids[0];
+                            } else if (allVids.length > 1) {
+                                const bRect = btn.getBoundingClientRect();
+                                let minDist = Infinity;
+                                allVideos = allVids;
+                                allVids.forEach(v => {
+                                    const vRect = v.getBoundingClientRect();
+                                    const dist = Math.abs(vRect.top - bRect.top);
+                                    if (dist < minDist) {
+                                        minDist = dist;
+                                        activeVid = v;
+                                    }
+                                });
                             }
 
                             let sec = 0;
-                            if (window.__viralcutCurrentVideoTime !== undefined && !isNaN(window.__viralcutCurrentVideoTime)) {
+                            if (activeVid && !isNaN(activeVid.currentTime) && activeVid.currentTime > 0) {
+                                sec = activeVid.currentTime;
+                            } else if (window.__viralcutCurrentVideoTime !== undefined && !isNaN(window.__viralcutCurrentVideoTime)) {
                                 sec = window.__viralcutCurrentVideoTime;
                             } else if (activeVid && !isNaN(activeVid.currentTime)) {
                                 sec = activeVid.currentTime;
@@ -354,14 +369,28 @@ def inject_video_time_sync_js():
                                 const u = new URL(rootWin.location.href);
                                 if (isStart) {
                                     u.searchParams.set('sync_s1_start', formatted);
-                                } else {
+                                } else if (isEnd) {
                                     u.searchParams.set('sync_s1_end', formatted);
+                                } else if (isCapture) {
+                                    u.searchParams.set('captured_frame_time', formatted);
+                                    u.searchParams.set('last_frame_snap_time', formatted);
                                 }
                                 rootWin.history.replaceState(null, '', u.toString());
                             } catch (e) {}
 
                             // 2. Atualiza inputs do Streamlit
-                            updateTargetInputs(formatted);
+                            if (isStart || isEnd) {
+                                updateTargetInputs(formatted);
+                            }
+                            if (isCapture) {
+                                let row = btn.closest('[data-testid="column"]')?.parentElement || btn.closest('.stHorizontal') || btn.closest('[data-testid="stExpander"]') || btn.parentElement;
+                                let inp = row ? row.querySelector('input') : null;
+                                if (!inp && window.__viralcutSyncVideoFrameInput && activeVid) {
+                                    window.__viralcutSyncVideoFrameInput(activeVid);
+                                } else if (inp) {
+                                    setReactInputValue(inp, formatted);
+                                }
+                            }
                         };
 
                         btn.addEventListener('mousedown', onSetTimeClick, true);
@@ -754,11 +783,11 @@ def inject_video_snapshot_js():
             if (fillBtn) {
                 fillBtn.onclick = () => {
                     try {
-                        const inputs = pDoc.querySelectorAll('input[type="text"]');
+                        const inputs = pDoc.querySelectorAll('input');
                         let count = 0;
                         inputs.forEach(inp => {
                             const label = (inp.getAttribute('aria-label') || '').toLowerCase();
-                            if (label.includes('momento') || label.includes('frame') || label.includes('minutagem') || label.includes('player_synced') || label.includes('tempo')) {
+                            if (isFrameTimeInput(inp) || label.includes('momento') || label.includes('frame') || label.includes('minutagem') || label.includes('player_synced')) {
                                 setReactInputValue(inp, formattedTime);
                                 count++;
                             }
@@ -774,18 +803,39 @@ def inject_video_snapshot_js():
         }
 
         function isFrameTimeInput(inp) {
-            if (!inp || inp.type !== 'text') return false;
+            if (!inp || (inp.tagName !== 'INPUT' && inp.tagName !== 'TEXTAREA')) return false;
+            
+            // 1. Verifica aria-label
             const aria = (inp.getAttribute('aria-label') || '').toLowerCase();
-            if (aria.includes('tempo do frame')) return true;
+            if (aria.includes('tempo do frame') || aria.includes('frame (hh:mm:ss')) return true;
+            
+            // 2. Verifica placeholder
             const ph = (inp.getAttribute('placeholder') || '').toLowerCase();
             if (ph.includes('tempo do frame')) return true;
-            const parentWidget = inp.closest('[data-testid="stTextInput"]');
+            
+            // 3. Verifica name ou id
+            const name = (inp.getAttribute('name') || '').toLowerCase();
+            const id = (inp.getAttribute('id') || '').toLowerCase();
+            if (name.includes('snap_time') || id.includes('snap_time')) return true;
+
+            // 4. Verifica container stTextInput e seu label
+            const parentWidget = inp.closest('[data-testid="stTextInput"]') || inp.closest('.stTextInput');
             if (parentWidget) {
-                const lbl = parentWidget.querySelector('label');
-                if (lbl && (lbl.innerText || lbl.textContent || '').toLowerCase().includes('tempo do frame')) {
+                const text = (parentWidget.innerText || parentWidget.textContent || '').toLowerCase();
+                if (text.includes('tempo do frame')) {
                     return true;
                 }
             }
+
+            // 5. Verifica label associado via id
+            if (inp.id) {
+                const doc = inp.ownerDocument || document;
+                const associatedLabel = doc.querySelector(`label[for="${inp.id}"]`);
+                if (associatedLabel && (associatedLabel.innerText || associatedLabel.textContent || '').toLowerCase().includes('tempo do frame')) {
+                    return true;
+                }
+            }
+
             return false;
         }
 
@@ -818,64 +868,58 @@ def inject_video_snapshot_js():
                 input.dispatchEvent(new Event('blur', { bubbles: true }));
             } catch (e) {}
             try {
-                input.style.transition = 'border-color 0.3s ease, box-shadow 0.3s ease';
+                input.style.transition = 'border-color 0.25s ease, box-shadow 0.25s ease';
                 input.style.borderColor = '#ff6b00';
-                input.style.boxShadow = '0 0 10px rgba(255, 107, 0, 0.5)';
+                input.style.boxShadow = '0 0 10px rgba(255, 107, 0, 0.6)';
                 setTimeout(() => {
                     input.style.borderColor = '';
                     input.style.boxShadow = '';
-                }, 900);
+                }, 1000);
             } catch (e) {}
             return true;
         }
 
-        function findFrameTimeInputForVideo(video) {
-            const pDoc = (window.parent && window.parent.document) || document;
-            if (!video || !pDoc) return null;
+        function findTargetFrameInputForVideo(video) {
+            if (!video) return null;
+            const doc = video.ownerDocument || (window.parent && window.parent.document) || document;
 
             // 1. Procura subindo pela árvore de elementos pais
             let curr = video.parentElement;
-            while (curr && curr !== pDoc.body && curr !== pDoc.documentElement) {
-                const inputs = curr.querySelectorAll('input[type="text"]');
+            while (curr && curr !== doc.body && curr !== doc.documentElement) {
+                const inputs = curr.querySelectorAll('input');
                 for (const inp of inputs) {
                     if (isFrameTimeInput(inp)) {
                         return inp;
                     }
                 }
-                if (curr.dataset && curr.dataset.testid === 'stContainer') {
-                    break;
-                }
                 curr = curr.parentElement;
             }
 
-            // 2. Procura nos irmãos do bloco horizontal ou coluna vizinha
-            try {
-                const hBlock = video.closest('[data-testid="stHorizontalBlock"]');
-                if (hBlock && hBlock.parentElement) {
-                    const inputs = hBlock.parentElement.querySelectorAll('input[type="text"]');
-                    for (const inp of inputs) {
-                        if (isFrameTimeInput(inp)) return inp;
-                    }
-                }
-            } catch (e) {}
-
-            // 3. Fallback: seleciona o input de frame mais próximo visualmente
-            const allFrameInputs = [];
-            const allInputs = pDoc.querySelectorAll('input[type="text"]');
+            // 2. Procura em todos os inputs da página
+            const allInputs = doc.querySelectorAll('input');
+            const candidates = [];
             for (const inp of allInputs) {
                 if (isFrameTimeInput(inp)) {
-                    allFrameInputs.push(inp);
+                    candidates.push(inp);
                 }
             }
-            if (allFrameInputs.length === 1) {
-                return allFrameInputs[0];
-            } else if (allFrameInputs.length > 1) {
+
+            if (candidates.length === 1) {
+                return candidates[0];
+            } else if (candidates.length > 1) {
                 const vRect = video.getBoundingClientRect();
-                let closest = null;
+                let closest = candidates[0];
                 let minDist = Infinity;
-                for (const inp of allFrameInputs) {
+                for (const inp of candidates) {
                     const iRect = inp.getBoundingClientRect();
-                    const dist = Math.abs(iRect.top - vRect.top);
+                    let topPos = iRect.top;
+                    if (topPos === 0) {
+                        const widget = inp.closest('[data-testid="stTextInput"]') || inp.closest('[data-testid="stExpander"]') || inp.parentElement;
+                        if (widget) {
+                            topPos = widget.getBoundingClientRect().top;
+                        }
+                    }
+                    const dist = Math.abs(topPos - vRect.top);
                     if (dist < minDist) {
                         minDist = dist;
                         closest = inp;
@@ -887,38 +931,126 @@ def inject_video_snapshot_js():
             return null;
         }
 
-        function syncVideoFrameInput(video) {
+        function syncVideoToFrameInput(video) {
             if (!video) return;
             const curSec = video.currentTime || 0;
             const formatted = formatSecToHHMMSS(curSec);
-            const targetInput = findFrameTimeInputForVideo(video);
+
+            // 1. Atualiza query param silenciosamente no navegador
+            try {
+                const rootWin = window.parent || window;
+                const u = new URL(rootWin.location.href);
+                u.searchParams.set('last_frame_snap_time', formatted);
+                rootWin.history.replaceState(null, '', u.toString());
+            } catch (e) {}
+
+            // 2. Encontra o input e injeta o valor
+            const targetInput = findTargetFrameInputForVideo(video);
             if (targetInput) {
                 setReactInputValue(targetInput, formatted);
             }
         }
 
-        window.__viralcutSyncVideoFrameInput = syncVideoFrameInput;
+        window.__viralcutSyncVideoFrameInput = syncVideoToFrameInput;
+
+        function attachGlobalVideoListeners() {
+            try {
+                const pDoc = (window.parent && window.parent.document) || document;
+                if (!pDoc || pDoc.__viralcutGlobalListenersAttached) return;
+                pDoc.__viralcutGlobalListenersAttached = true;
+
+                // Captura eventos de pause e seeked globalmente na fase de captura
+                pDoc.addEventListener('pause', (e) => {
+                    const target = e.target;
+                    if (!target || target.tagName !== 'VIDEO') return;
+                    syncVideoToFrameInput(target);
+                }, true);
+
+                pDoc.addEventListener('seeked', (e) => {
+                    const target = e.target;
+                    if (!target || target.tagName !== 'VIDEO') return;
+                    if (target.paused) {
+                        syncVideoToFrameInput(target);
+                    }
+                }, true);
+
+                // Re-sincroniza ao abrir expanders
+                pDoc.addEventListener('toggle', (e) => {
+                    const details = e.target;
+                    if (!details || details.tagName !== 'DETAILS' || !details.open) return;
+                    const frameInp = details.querySelector('input');
+                    if (frameInp && isFrameTimeInput(frameInp)) {
+                        const allVideos = (details.ownerDocument || pDoc).querySelectorAll('video');
+                        if (allVideos.length > 0) {
+                            let bestVid = allVideos[0];
+                            let minDist = Infinity;
+                            const dRect = details.getBoundingClientRect();
+                            allVideos.forEach(v => {
+                                const dist = Math.abs(v.getBoundingClientRect().top - dRect.top);
+                                if (dist < minDist) {
+                                    minDist = dist;
+                                    bestVid = v;
+                                }
+                            });
+                            if (bestVid && bestVid.currentTime > 0) {
+                                setReactInputValue(frameInp, formatSecToHHMMSS(bestVid.currentTime));
+                            }
+                        }
+                    }
+                }, true);
+
+                // Hook nos botões de prévia e captura de tempo
+                pDoc.addEventListener('pointerdown', (e) => {
+                    const btn = e.target.closest('button');
+                    if (!btn) return;
+                    const txt = (btn.innerText || btn.textContent || '').toLowerCase();
+                    if (txt.includes('capturar tempo') || txt.includes('capturar momento')) {
+                        const allVideos = pDoc.querySelectorAll('video');
+                        let bestVid = null;
+                        if (allVideos.length === 1) {
+                            bestVid = allVideos[0];
+                        } else if (allVideos.length > 1) {
+                            const bRect = btn.getBoundingClientRect();
+                            let minDist = Infinity;
+                            allVideos.forEach(v => {
+                                const vRect = v.getBoundingClientRect();
+                                const dist = Math.abs(vRect.top - bRect.top);
+                                if (dist < minDist) {
+                                    minDist = dist;
+                                    bestVid = v;
+                                }
+                            });
+                        }
+                        if (bestVid) {
+                            syncVideoToFrameInput(bestVid);
+                        }
+                    } else if (txt.includes('prévia do frame') || txt.includes('previa do frame')) {
+                        const allVideos = pDoc.querySelectorAll('video');
+                        allVideos.forEach(v => {
+                            if (v.currentTime > 0) {
+                                syncVideoToFrameInput(v);
+                            }
+                        });
+                    }
+                }, true);
+            } catch(e) {}
+        }
 
         function scanAndBindSnapshotButtons() {
             try {
                 const pDoc = (window.parent && window.parent.document) || document;
                 if (!pDoc) return;
                 ensureSnapshotUI();
+                attachGlobalVideoListeners();
 
                 const videos = pDoc.querySelectorAll('video');
                 videos.forEach(v => {
                     const wrapper = v.parentElement;
                     if (!wrapper) return;
 
-                    // Garante que o wrapper seja posicionado relativamente
                     if (wrapper.style.position !== 'relative') {
                         wrapper.style.position = 'relative';
                     }
-
-                    if (v.dataset.snapBound && wrapper.querySelector('.viralcut-video-snap-trigger')) {
-                        return;
-                    }
-                    v.dataset.snapBound = "true";
 
                     let snapTrigger = wrapper.querySelector('.viralcut-video-snap-trigger');
                     if (!snapTrigger) {
@@ -936,7 +1068,7 @@ def inject_video_snapshot_js():
                             const formatted = formatSecToHHMMSS(v.currentTime);
                             snapTrigger.innerHTML = `📸 Print (${formatted.split('.')[0]})`;
                             if (v.currentTime > 0) {
-                                syncVideoFrameInput(v);
+                                syncVideoToFrameInput(v);
                             }
                         } else {
                             snapTrigger.classList.remove('is-paused');
@@ -944,112 +1076,40 @@ def inject_video_snapshot_js():
                         }
                     };
 
-                    v.addEventListener('pause', () => {
+                    if (!v.dataset.snapBound) {
+                        v.dataset.snapBound = "true";
+                        v.addEventListener('pause', updateTriggerState);
+                        v.addEventListener('play', updateTriggerState);
+                        v.addEventListener('seeked', updateTriggerState);
                         updateTriggerState();
-                        syncVideoFrameInput(v);
-                    });
-                    v.addEventListener('play', updateTriggerState);
-                    v.addEventListener('seeked', () => {
-                        updateTriggerState();
-                        if (v.paused) {
-                            syncVideoFrameInput(v);
-                        }
-                    });
-                    updateTriggerState();
 
-                    snapTrigger.onclick = (e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        try {
-                            syncVideoFrameInput(v);
-                            const w = v.videoWidth || v.clientWidth || 1280;
-                            const h = v.videoHeight || v.clientHeight || 720;
-                            const canvas = pDoc.createElement('canvas');
-                            canvas.width = w;
-                            canvas.height = h;
-                            const ctx = canvas.getContext('2d');
-                            ctx.drawImage(v, 0, 0, w, h);
-                            const curSec = v.currentTime || 0;
-                            const formatted = formatSecToHHMMSS(curSec);
-                            openSnapshotModal(canvas, curSec, formatted, w, h);
-                        } catch(err) {
-                            console.error('Snapshot capture error:', err);
-                        }
-                    };
-                });
-
-                // Sincroniza em cliques nos botões de prévia
-                const prevButtons = pDoc.querySelectorAll('button');
-                prevButtons.forEach(btn => {
-                    if (btn.dataset.prevFrameBound) return;
-                    const txt = (btn.innerText || '').toLowerCase();
-                    if (txt.includes('prévia do frame') || txt.includes('previa do frame')) {
-                        btn.dataset.prevFrameBound = "true";
-                        const onPrevDown = () => {
-                            let container = btn.closest('[data-testid="stHorizontalBlock"]') || btn.closest('[data-testid="stVerticalBlock"]') || btn.parentElement;
-                            let nearbyVideo = null;
-                            while (container && container !== pDoc.body) {
-                                const vids = container.querySelectorAll('video');
-                                if (vids.length > 0) {
-                                    nearbyVideo = vids[0];
-                                    break;
-                                }
-                                container = container.parentElement;
-                            }
-                            if (nearbyVideo && nearbyVideo.currentTime > 0) {
-                                syncVideoFrameInput(nearbyVideo);
+                        snapTrigger.onclick = (e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            try {
+                                syncVideoToFrameInput(v);
+                                const w = v.videoWidth || v.clientWidth || 1280;
+                                const h = v.videoHeight || v.clientHeight || 720;
+                                const canvas = pDoc.createElement('canvas');
+                                canvas.width = w;
+                                canvas.height = h;
+                                const ctx = canvas.getContext('2d');
+                                ctx.drawImage(v, 0, 0, w, h);
+                                const curSec = v.currentTime || 0;
+                                const formatted = formatSecToHHMMSS(curSec);
+                                openSnapshotModal(canvas, curSec, formatted, w, h);
+                            } catch(err) {
+                                console.error('Snapshot capture error:', err);
                             }
                         };
-                        btn.addEventListener('mousedown', onPrevDown, true);
-                        btn.addEventListener('pointerdown', onPrevDown, true);
                     }
-                });
-
-                // Escuta abertura de expanders para revalidar sincronização
-                const expanders = pDoc.querySelectorAll('[data-testid="stExpander"], details');
-                expanders.forEach(exp => {
-                    if (exp.dataset.frameSyncBound) return;
-                    exp.dataset.frameSyncBound = "true";
-                    exp.addEventListener('toggle', () => {
-                        if (exp.open || exp.hasAttribute('open')) {
-                            const inputs = exp.querySelectorAll('input[type="text"]');
-                            let hasFrameInput = false;
-                            for (const inp of inputs) {
-                                if (isFrameTimeInput(inp)) {
-                                    hasFrameInput = true;
-                                    break;
-                                }
-                            }
-                            if (hasFrameInput) {
-                                let container = exp.closest('[data-testid="stVerticalBlock"]') || exp.parentElement;
-                                let nearbyVideo = null;
-                                while (container && container !== pDoc.body) {
-                                    const vids = container.querySelectorAll('video');
-                                    if (vids.length > 0) {
-                                        nearbyVideo = vids[0];
-                                        break;
-                                    }
-                                    container = container.parentElement;
-                                }
-                                if (nearbyVideo && nearbyVideo.currentTime > 0) {
-                                    syncVideoFrameInput(nearbyVideo);
-                                }
-                            }
-                        }
-                    });
                 });
             } catch(e) {}
         }
 
-        try {
-            const rootWin = window.parent || window;
-            if (rootWin && !rootWin.__viralcutSnapshotLoopAttached) {
-                rootWin.__viralcutSnapshotLoopAttached = true;
-                setInterval(scanAndBindSnapshotButtons, 700);
-            }
-        } catch (e) {}
-
+        attachGlobalVideoListeners();
         scanAndBindSnapshotButtons();
+        setInterval(scanAndBindSnapshotButtons, 600);
     })();
     </script>
     """
@@ -8004,32 +8064,55 @@ if _has_media_ready:
 
             # Captura de Frame do Corte Existente para Thumbnail
             with st.expander("📸 Capturar Frame deste Corte como Capa / Thumbnail", expanded=False):
-                st.caption("Passe a minutagem ou pause o vídeo acima para selecionar o frame exato da capa.")
-                col_cap_s1, col_cap_s2 = st.columns([2, 1])
+                st.caption("Passe a minutagem ou pause o vídeo acima e clique em **⏱️ Capturar Tempo** para selecionar o frame exato.")
+                inst_snap_key = f"snap_time_inst_{_vid_id_cat}_{selected_aspect}"
+                if inst_snap_key not in st.session_state:
+                    st.session_state[inst_snap_key] = "00:00:01.00"
+
+                col_cap_s1, col_cap_sbtn, col_cap_s2 = st.columns([1.8, 1.2, 1.1])
                 with col_cap_s1:
                     snap_time_inst_inp = st.text_input(
-                        "Tempo do Frame (HH:MM:SS.ms ou segundos):",
-                        value="00:00:01.00",
-                        key=f"snap_time_inst_{_vid_id_cat}_{selected_aspect}",
-                        help="Exemplo: 00:00:02.50 ou 2.5. Sincronizado automaticamente ao pausar o vídeo ou clicar no print do player."
+                        "Tempo do Frame (HH:MM:SS.ms):",
+                        key=inst_snap_key,
+                        help="Exemplo: 00:00:02.50 ou 2.5. Pause o vídeo acima e clique em '⏱️ Capturar Tempo' para preencher instantaneamente."
                     )
+                with col_cap_sbtn:
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                    btn_cap_time_inst = st.button("⏱️ Capturar Tempo", key=f"btn_cap_time_inst_{_vid_id_cat}_{selected_aspect}", use_container_width=True, help="Captura o momento exato em que o vídeo acima está pausado")
                 with col_cap_s2:
                     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                     btn_prev_inst_snap = st.button("👁️ Prévia do Frame", key=f"btn_prev_inst_snap_{_vid_id_cat}_{selected_aspect}", use_container_width=True)
+
+                if btn_cap_time_inst:
+                    _cap_t = st.query_params.get("captured_frame_time") or st.query_params.get("last_frame_snap_time")
+                    if isinstance(_cap_t, list): _cap_t = _cap_t[0]
+                    if _cap_t:
+                        st.session_state[inst_snap_key] = _cap_t
+                        st.toast(f"⏱️ Tempo capturado do vídeo: {_cap_t}!")
+                        st.rerun()
+                    else:
+                        st.toast(f"⏱️ Tempo atual: {st.session_state.get(inst_snap_key, '00:00:01.00')}")
 
                 snap_inst_store_key = f"snap_cached_inst_{_vid_id_cat}_{selected_aspect}"
                 if btn_prev_inst_snap:
                     _inst_vpath = existing_inst.get("video_path")
                     if _inst_vpath and os.path.exists(_inst_vpath):
                         with st.spinner("Extraindo frame em alta resolução..."):
-                            ts_sec = parse_time_str_to_seconds(snap_time_inst_inp)
+                            effective_snap_time = st.session_state.get(inst_snap_key, snap_time_inst_inp)
+                            if "last_frame_snap_time" in st.query_params and (not effective_snap_time or effective_snap_time == "00:00:01.00"):
+                                _qp_t = st.query_params["last_frame_snap_time"]
+                                if isinstance(_qp_t, list): _qp_t = _qp_t[0]
+                                if _qp_t and _qp_t != "00:00:00.00":
+                                    effective_snap_time = _qp_t
+                                    st.session_state[inst_snap_key] = effective_snap_time
+                            ts_sec = parse_time_str_to_seconds(effective_snap_time)
                             ext_res = extract_capture_frame(_inst_vpath, ts_sec)
                             if ext_res.get("error") or ext_res.get("frame") is None:
                                 st.error(f"Erro ao capturar frame: {ext_res.get('error')}")
                             else:
                                 st.session_state[snap_inst_store_key] = {
                                     "frame": ext_res["frame"],
-                                    "time_str": ext_res.get("time_str", snap_time_inst_inp),
+                                    "time_str": ext_res.get("time_str", effective_snap_time),
                                     "resolution": ext_res.get("resolution", (0, 0))
                                 }
                     else:
@@ -9325,19 +9408,35 @@ if _has_media_ready:
                                     # Seção de Captura de Frame do Corte para Thumbnail
                                     st.markdown("---")
                                     st.markdown("##### 📸 Capturar Frame do Corte como Thumbnail:")
-                                    st.caption("Defina o segundo desejado ou pause o player ao lado para capturar o frame exato.")
+                                    st.caption("Defina o segundo desejado ou pause o player ao lado e clique em **⏱️ Capturar Tempo**.")
 
-                                    col_cap_t1, col_cap_t2 = st.columns([2, 1])
+                                    gal_snap_key = f"snap_time_gal_{c_idx}_{_fi}"
+                                    if gal_snap_key not in st.session_state:
+                                        st.session_state[gal_snap_key] = "00:00:01.00"
+
+                                    col_cap_t1, col_cap_tbtn, col_cap_t2 = st.columns([1.8, 1.2, 1.1])
                                     with col_cap_t1:
                                         snap_time_inp = st.text_input(
-                                            "Tempo do Frame (HH:MM:SS.ms ou segundos):",
-                                            value="00:00:01.00",
-                                            key=f"snap_time_gal_{c_idx}_{_fi}",
-                                            help="Exemplo: 00:00:02.50 ou 2.5. Sincronizado automaticamente ao pausar o vídeo ou clicar no print do player."
+                                            "Tempo do Frame (HH:MM:SS.ms):",
+                                            key=gal_snap_key,
+                                            help="Exemplo: 00:00:02.50 ou 2.5. Pause o player ao lado e clique em '⏱️ Capturar Tempo' para preencher instantaneamente."
                                         )
+                                    with col_cap_tbtn:
+                                        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                                        btn_cap_time_gal = st.button("⏱️ Capturar Tempo", key=f"btn_cap_time_gal_{c_idx}_{_fi}", use_container_width=True, help="Captura o momento exato em que o vídeo está pausado")
                                     with col_cap_t2:
                                         st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                                         btn_prev_frame = st.button("👁️ Prévia do Frame", key=f"btn_prev_snap_{c_idx}_{_fi}", use_container_width=True)
+
+                                    if btn_cap_time_gal:
+                                        _cap_t = st.query_params.get("captured_frame_time") or st.query_params.get("last_frame_snap_time")
+                                        if isinstance(_cap_t, list): _cap_t = _cap_t[0]
+                                        if _cap_t:
+                                            st.session_state[gal_snap_key] = _cap_t
+                                            st.toast(f"⏱️ Tempo capturado do corte: {_cap_t}!")
+                                            st.rerun()
+                                        else:
+                                            st.toast(f"⏱️ Tempo atual: {st.session_state.get(gal_snap_key, '00:00:01.00')}")
 
                                     _cut_vpath = _fd.get("video_path")
                                     if not _cut_vpath or not os.path.exists(_cut_vpath):
@@ -9347,14 +9446,21 @@ if _has_media_ready:
                                     if btn_prev_frame:
                                         if _cut_vpath and os.path.exists(_cut_vpath):
                                             with st.spinner("Extraindo frame em alta resolução..."):
-                                                ts_sec = parse_time_str_to_seconds(snap_time_inp)
+                                                effective_snap_time = st.session_state.get(gal_snap_key, snap_time_inp)
+                                                if "last_frame_snap_time" in st.query_params and (not effective_snap_time or effective_snap_time == "00:00:01.00"):
+                                                    _qp_t = st.query_params["last_frame_snap_time"]
+                                                    if isinstance(_qp_t, list): _qp_t = _qp_t[0]
+                                                    if _qp_t and _qp_t != "00:00:00.00":
+                                                        effective_snap_time = _qp_t
+                                                        st.session_state[gal_snap_key] = effective_snap_time
+                                                ts_sec = parse_time_str_to_seconds(effective_snap_time)
                                                 ext_res = extract_capture_frame(_cut_vpath, ts_sec)
                                                 if ext_res.get("error") or ext_res.get("frame") is None:
                                                     st.error(f"Erro ao capturar frame: {ext_res.get('error')}")
                                                 else:
                                                     st.session_state[snap_store_key] = {
                                                         "frame": ext_res["frame"],
-                                                        "time_str": ext_res.get("time_str", snap_time_inp),
+                                                        "time_str": ext_res.get("time_str", effective_snap_time),
                                                         "resolution": ext_res.get("resolution", (0, 0))
                                                     }
                                         else:

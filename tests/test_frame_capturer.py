@@ -103,10 +103,12 @@ class TestFrameCapturer(unittest.TestCase):
         full_js = "\n".join(captured_html)
         self.assertIn("isFrameTimeInput", full_js)
         self.assertIn("setReactInputValue", full_js)
-        self.assertIn("findFrameTimeInputForVideo", full_js)
-        self.assertIn("syncVideoFrameInput", full_js)
+        self.assertIn("findTargetFrameInputForVideo", full_js)
+        self.assertIn("syncVideoToFrameInput", full_js)
         self.assertIn("__viralcutSyncVideoFrameInput", full_js)
         self.assertIn("tempo do frame", full_js.lower())
+        self.assertIn("capturar tempo", full_js.lower())
+        self.assertIn("captured_frame_time", full_js)
 
 
 if __name__ == '__main__':
