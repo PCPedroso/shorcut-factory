@@ -1117,6 +1117,15 @@ def inject_video_snapshot_js():
 
 inject_video_snapshot_js()
 
+def cb_capture_frame_time(target_key: str):
+    """Callback seguro para botões de captura de tempo (executado no início do ciclo antes da instanciação de widgets)."""
+    _cap = st.query_params.get("captured_frame_time") or st.query_params.get("last_frame_snap_time")
+    if isinstance(_cap, list):
+        _cap = _cap[0]
+    if _cap and _cap != "00:00:00.00":
+        st.session_state[target_key] = _cap
+        st.toast(f"⏱️ Tempo capturado: {_cap}!")
+
 def safe_display_image(img_source, caption=None, use_container_width=True, width=None):
     """
     Exibe imagens no Streamlit lendo diretamente os bytes em memória
@@ -8078,33 +8087,24 @@ if _has_media_ready:
                     )
                 with col_cap_sbtn:
                     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-                    btn_cap_time_inst = st.button("⏱️ Capturar Tempo", key=f"btn_cap_time_inst_{_vid_id_cat}_{selected_aspect}", use_container_width=True, help="Captura o momento exato em que o vídeo acima está pausado")
+                    st.button(
+                        "⏱️ Capturar Tempo",
+                        key=f"btn_cap_time_inst_{_vid_id_cat}_{selected_aspect}",
+                        on_click=cb_capture_frame_time,
+                        args=(inst_snap_key,),
+                        use_container_width=True,
+                        help="Captura o momento exato em que o vídeo acima está pausado"
+                    )
                 with col_cap_s2:
                     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                     btn_prev_inst_snap = st.button("👁️ Prévia do Frame", key=f"btn_prev_inst_snap_{_vid_id_cat}_{selected_aspect}", use_container_width=True)
-
-                if btn_cap_time_inst:
-                    _cap_t = st.query_params.get("captured_frame_time") or st.query_params.get("last_frame_snap_time")
-                    if isinstance(_cap_t, list): _cap_t = _cap_t[0]
-                    if _cap_t:
-                        st.session_state[inst_snap_key] = _cap_t
-                        st.toast(f"⏱️ Tempo capturado do vídeo: {_cap_t}!")
-                        st.rerun()
-                    else:
-                        st.toast(f"⏱️ Tempo atual: {st.session_state.get(inst_snap_key, '00:00:01.00')}")
 
                 snap_inst_store_key = f"snap_cached_inst_{_vid_id_cat}_{selected_aspect}"
                 if btn_prev_inst_snap:
                     _inst_vpath = existing_inst.get("video_path")
                     if _inst_vpath and os.path.exists(_inst_vpath):
                         with st.spinner("Extraindo frame em alta resolução..."):
-                            effective_snap_time = st.session_state.get(inst_snap_key, snap_time_inst_inp)
-                            if "last_frame_snap_time" in st.query_params and (not effective_snap_time or effective_snap_time == "00:00:01.00"):
-                                _qp_t = st.query_params["last_frame_snap_time"]
-                                if isinstance(_qp_t, list): _qp_t = _qp_t[0]
-                                if _qp_t and _qp_t != "00:00:00.00":
-                                    effective_snap_time = _qp_t
-                                    st.session_state[inst_snap_key] = effective_snap_time
+                            effective_snap_time = snap_time_inst_inp or st.session_state.get(inst_snap_key, "00:00:01.00")
                             ts_sec = parse_time_str_to_seconds(effective_snap_time)
                             ext_res = extract_capture_frame(_inst_vpath, ts_sec)
                             if ext_res.get("error") or ext_res.get("frame") is None:
@@ -9423,20 +9423,17 @@ if _has_media_ready:
                                         )
                                     with col_cap_tbtn:
                                         st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-                                        btn_cap_time_gal = st.button("⏱️ Capturar Tempo", key=f"btn_cap_time_gal_{c_idx}_{_fi}", use_container_width=True, help="Captura o momento exato em que o vídeo está pausado")
+                                        st.button(
+                                            "⏱️ Capturar Tempo",
+                                            key=f"btn_cap_time_gal_{c_idx}_{_fi}",
+                                            on_click=cb_capture_frame_time,
+                                            args=(gal_snap_key,),
+                                            use_container_width=True,
+                                            help="Captura o momento exato em que o vídeo está pausado"
+                                        )
                                     with col_cap_t2:
                                         st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                                         btn_prev_frame = st.button("👁️ Prévia do Frame", key=f"btn_prev_snap_{c_idx}_{_fi}", use_container_width=True)
-
-                                    if btn_cap_time_gal:
-                                        _cap_t = st.query_params.get("captured_frame_time") or st.query_params.get("last_frame_snap_time")
-                                        if isinstance(_cap_t, list): _cap_t = _cap_t[0]
-                                        if _cap_t:
-                                            st.session_state[gal_snap_key] = _cap_t
-                                            st.toast(f"⏱️ Tempo capturado do corte: {_cap_t}!")
-                                            st.rerun()
-                                        else:
-                                            st.toast(f"⏱️ Tempo atual: {st.session_state.get(gal_snap_key, '00:00:01.00')}")
 
                                     _cut_vpath = _fd.get("video_path")
                                     if not _cut_vpath or not os.path.exists(_cut_vpath):
@@ -9446,13 +9443,7 @@ if _has_media_ready:
                                     if btn_prev_frame:
                                         if _cut_vpath and os.path.exists(_cut_vpath):
                                             with st.spinner("Extraindo frame em alta resolução..."):
-                                                effective_snap_time = st.session_state.get(gal_snap_key, snap_time_inp)
-                                                if "last_frame_snap_time" in st.query_params and (not effective_snap_time or effective_snap_time == "00:00:01.00"):
-                                                    _qp_t = st.query_params["last_frame_snap_time"]
-                                                    if isinstance(_qp_t, list): _qp_t = _qp_t[0]
-                                                    if _qp_t and _qp_t != "00:00:00.00":
-                                                        effective_snap_time = _qp_t
-                                                        st.session_state[gal_snap_key] = effective_snap_time
+                                                effective_snap_time = snap_time_inp or st.session_state.get(gal_snap_key, "00:00:01.00")
                                                 ts_sec = parse_time_str_to_seconds(effective_snap_time)
                                                 ext_res = extract_capture_frame(_cut_vpath, ts_sec)
                                                 if ext_res.get("error") or ext_res.get("frame") is None:
