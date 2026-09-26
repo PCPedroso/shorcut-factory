@@ -9340,15 +9340,60 @@ if _has_media_ready:
 
                                 with st.expander(f"🖼️ Gerenciar Capa / Thumbnail ({'16:9' if _fk == '16:9' else '9:16'})", expanded=_exp):
                                     if _gt and os.path.exists(_gt):
-                                        safe_display_image(_gt, caption="Capa Principal Ativa", use_container_width=True)
+                                        _is_vert = (_fk != "16:9")
+                                        _tb_w = 210 if _is_vert else 340
+
+                                        # Exibição compacta e proporcional da Capa Ativa lado a lado com ações
+                                        col_tb_img, col_tb_info = st.columns([1.1, 1.9] if _is_vert else [1.5, 1.5])
+                                        with col_tb_img:
+                                            safe_display_image(_gt, caption="⭐ Capa Ativa", width=_tb_w, use_container_width=False)
+                                        with col_tb_info:
+                                            st.markdown(f"**Capa Principal ({'📱 9:16 Vertical' if _is_vert else '💻 16:9 Horizontal'})**")
+                                            st.download_button(
+                                                label="💾 Baixar Thumbnail (JPG)",
+                                                data=get_file_bytes_loader(_gt),
+                                                file_name=f"thumbnail_{cut_item.get('title', 'corte')[:30].strip()}.jpg",
+                                                mime="image/jpeg",
+                                                key=f"dl_thumb_gal_{c_idx}_{_fi}",
+                                                use_container_width=True
+                                            )
+                                            if st.button("🔄 Recriar 3 Capas com IA", key=f"btn_regen_gal_{c_idx}_{_fi}", use_container_width=True, help="Recria 3 variações de capa com Rembg e IA para este formato sem re-renderizar o vídeo"):
+                                                _vfg = os.path.join("data", _vid_id_gal, "video_full.mp4")
+                                                if os.path.exists(_vfg):
+                                                    with st.spinner("Recriando capas com Rembg e IA..."):
+                                                        _th_res = create_cut_thumbnail(
+                                                            source_video_or_frame=_vfg,
+                                                            headline_text=cut_item.get("headline") or cut_item.get("title", ""),
+                                                            output_path=_gt,
+                                                            start_time_str=cut_item.get("start_time"),
+                                                            end_time_str=cut_item.get("end_time"),
+                                                            aspect_mode=_fk
+                                                        )
+                                                        if _th_res.get("error"):
+                                                            st.error(f"Erro ao recriar: {_th_res['error']}")
+                                                        else:
+                                                            update_cut_thumbnail_in_catalog(
+                                                                video_id=_vid_id_gal,
+                                                                start_time=cut_item.get("start_time"),
+                                                                end_time=cut_item.get("end_time"),
+                                                                aspect_mode=_fk,
+                                                                thumbnail_path=_gt,
+                                                                variations=_th_res.get("variations", [])
+                                                            )
+                                                            st.success("Capas recriadas com sucesso!")
+                                                            st.rerun()
+                                                else:
+                                                    st.warning("Vídeo original não encontrado em data.")
+
                                         if len(_gvars) > 1:
-                                            st.markdown("##### 🎨 Variações de Capa:")
+                                            st.markdown("---")
+                                            st.markdown("##### 🎨 Variações de Capa Disponíveis:")
                                             _gvcols = st.columns(len(_gvars))
                                             _act_gvar = _fd.get("active_variation", 1)
                                             for _gvi, (_gvid, _gvnm, _gvpath) in enumerate(_gvars):
                                                 with _gvcols[_gvi]:
                                                     _is_act = (_gvid == _act_gvar)
-                                                    st.caption(f"**{_gvnm}**" + (" ⭐" if _is_act else ""))
+                                                    st.caption(f"**{_gvnm}**" + (" ⭐ *(Ativa)*" if _is_act else ""))
                                                     safe_display_image(_gvpath, use_container_width=True)
                                                     _cg1, _cg2 = st.columns(2)
                                                     with _cg1:
@@ -9358,54 +9403,16 @@ if _has_media_ready:
                                                                 st.success(f"Capa {_gvid} ativada!")
                                                                 st.rerun()
                                                         else:
-                                                            st.button("✅", disabled=True, key=f"btn_act_gvar_{c_idx}_{_fi}_{_gvid}", use_container_width=True)
+                                                            st.button("✅ Ativa", disabled=True, key=f"btn_act_gvar_{c_idx}_{_fi}_{_gvid}", use_container_width=True)
                                                     with _cg2:
                                                         st.download_button(
-                                                            label="⬇️",
+                                                            label="⬇️ JPG",
                                                             data=get_file_bytes_loader(_gvpath),
                                                             file_name=f"thumbnail_{_gvid}.jpg",
                                                             mime="image/jpeg",
                                                             key=f"dl_gvar_{c_idx}_{_fi}_{_gvid}",
                                                             use_container_width=True
                                                         )
-                                        else:
-                                            st.download_button(
-                                                label="💾 Baixar Thumbnail (JPG)",
-                                                data=get_file_bytes_loader(_gt),
-                                                file_name="thumbnail.jpg",
-                                                mime="image/jpeg",
-                                                key=f"dl_thumb_gal_{c_idx}_{_fi}",
-                                                use_container_width=True
-                                            )
-
-                                        st.markdown("")
-                                        if st.button("🔄 Recriar 3 Capas com IA (Sem Renderizar Vídeo)", key=f"btn_regen_gal_{c_idx}_{_fi}", use_container_width=True):
-                                            _vfg = os.path.join("data", _vid_id_gal, "video_full.mp4")
-                                            if os.path.exists(_vfg):
-                                                with st.spinner("Recriando capas com Rembg e IA..."):
-                                                    _th_res = create_cut_thumbnail(
-                                                        source_video_or_frame=_vfg,
-                                                        headline_text=cut_item.get("title", ""),
-                                                        output_path=_gt,
-                                                        start_time_str=cut_item.get("start_time"),
-                                                        end_time_str=cut_item.get("end_time"),
-                                                        aspect_mode=_fk
-                                                    )
-                                                    if _th_res.get("error"):
-                                                        st.error(f"Erro ao recriar: {_th_res['error']}")
-                                                    else:
-                                                        update_cut_thumbnail_in_catalog(
-                                                            video_id=_vid_id_gal,
-                                                            start_time=cut_item.get("start_time"),
-                                                            end_time=cut_item.get("end_time"),
-                                                            aspect_mode=_fk,
-                                                            thumbnail_path=_gt,
-                                                            variations=_th_res.get("variations", [])
-                                                        )
-                                                        st.success("Capas recriadas com sucesso!")
-                                                        st.rerun()
-                                            else:
-                                                st.warning("Vídeo original não encontrado em data.")
                                     else:
                                         st.caption("ℹ️ Nenhuma capa gerada para este formato ainda.")
 
