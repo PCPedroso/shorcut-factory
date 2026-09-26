@@ -8123,11 +8123,17 @@ if _has_media_ready:
                     s_bgr = sdata["frame"]
                     s_rgb = cv2.cvtColor(s_bgr, cv2.COLOR_BGR2RGB)
                     w_s, h_s = sdata["resolution"]
-                    st.caption(f"Prévia do Frame Capturado ({w_s}x{h_s} aos `{sdata['time_str']}`):")
-                    safe_display_image(s_rgb, use_container_width=True)
 
-                    c_act1, c_act2, c_act3 = st.columns([1.5, 1.5, 1.0])
-                    with c_act1:
+                    s_is_vertical = (h_s > w_s) if (w_s and h_s) else ("9:16" in selected_aspect)
+                    s_thumb_prev_w = 210 if s_is_vertical else 340
+
+                    st.markdown(f"**Prévia do Frame Capturado aos `{sdata['time_str']}`** ({w_s}x{h_s}):")
+                    col_s_box1, col_s_box2 = st.columns([1.1, 1.9] if s_is_vertical else [1.5, 1.5])
+                    with col_s_box1:
+                        safe_display_image(s_rgb, width=s_thumb_prev_w, use_container_width=False)
+
+                    with col_s_box2:
+                        st.caption("Ações para este frame:")
                         if st.button("⭐ Salvar como Capa Oficial", key=f"btn_save_inst_clean_{_vid_id_cat}_{selected_aspect}", type="primary", use_container_width=True, help="Define este frame diretamente como a capa oficial (thumbnail.jpg) do corte"):
                             with st.spinner("Salvando frame como capa oficial..."):
                                 s_res = save_captured_frame_as_thumbnail(
@@ -8146,7 +8152,6 @@ if _has_media_ready:
                                 else:
                                     st.error(f"Erro ao salvar: {s_res.get('error')}")
 
-                    with c_act2:
                         if st.button("🎨 Criar 3 Capas com IA", key=f"btn_save_inst_ai_{_vid_id_cat}_{selected_aspect}", use_container_width=True, help="Usa este frame como orador principal, remove o fundo com Rembg e gera as 3 variações virais"):
                             with st.spinner("Gerando 3 variações com IA (Rembg)..."):
                                 s_res = save_captured_frame_as_thumbnail(
@@ -8166,11 +8171,10 @@ if _has_media_ready:
                                 else:
                                     st.error(f"Erro ao gerar com IA: {s_res.get('error')}")
 
-                    with c_act3:
                         r_enc, b_enc = cv2.imencode(".jpg", s_bgr)
                         if r_enc:
                             st.download_button(
-                                "💾 Baixar",
+                                "💾 Baixar JPG",
                                 data=b_enc.tobytes(),
                                 file_name=f"frame_capturado_{sdata['time_str'].replace(':', '-')}.jpg",
                                 mime="image/jpeg",
@@ -9462,11 +9466,17 @@ if _has_media_ready:
                                         snap_bgr = snap_data["frame"]
                                         snap_rgb = cv2.cvtColor(snap_bgr, cv2.COLOR_BGR2RGB)
                                         w_snap, h_snap = snap_data["resolution"]
-                                        st.caption(f"Prévia do Frame Capturado ({w_snap}x{h_snap} aos `{snap_data['time_str']}`):")
-                                        safe_display_image(snap_rgb, use_container_width=True)
 
-                                        col_act1, col_act2, col_act3 = st.columns([1.5, 1.5, 1.0])
-                                        with col_act1:
+                                        is_vertical = (h_snap > w_snap) if (w_snap and h_snap) else ("9:16" in _fk)
+                                        thumb_prev_w = 210 if is_vertical else 340
+
+                                        st.markdown(f"**Prévia do Frame Capturado aos `{snap_data['time_str']}`** ({w_snap}x{h_snap}):")
+                                        col_pr_box1, col_pr_box2 = st.columns([1.1, 1.9] if is_vertical else [1.5, 1.5])
+                                        with col_pr_box1:
+                                            safe_display_image(snap_rgb, width=thumb_prev_w, use_container_width=False)
+
+                                        with col_pr_box2:
+                                            st.caption("Ações para este frame:")
                                             if st.button("⭐ Salvar como Capa Oficial", key=f"btn_save_thumb_clean_{c_idx}_{_fi}", type="primary", use_container_width=True, help="Define este frame diretamente como a capa oficial (thumbnail.jpg) do corte"):
                                                 with st.spinner("Salvando frame como capa oficial..."):
                                                     save_res = save_captured_frame_as_thumbnail(
@@ -9485,7 +9495,6 @@ if _has_media_ready:
                                                     else:
                                                         st.error(f"Erro ao salvar: {save_res.get('error')}")
 
-                                        with col_act2:
                                             if st.button("🎨 Criar 3 Capas com IA", key=f"btn_save_thumb_ai_{c_idx}_{_fi}", use_container_width=True, help="Usa este frame como orador principal, remove o fundo com Rembg e gera as 3 variações virais"):
                                                 with st.spinner("Gerando 3 variações com IA (Rembg)..."):
                                                     save_res = save_captured_frame_as_thumbnail(
@@ -9505,11 +9514,10 @@ if _has_media_ready:
                                                     else:
                                                         st.error(f"Erro ao gerar com IA: {save_res.get('error')}")
 
-                                        with col_act3:
                                             ret_enc, buf_enc = cv2.imencode(".jpg", snap_bgr)
                                             if ret_enc:
                                                 st.download_button(
-                                                    "💾 Baixar",
+                                                    "💾 Baixar JPG",
                                                     data=buf_enc.tobytes(),
                                                     file_name=f"frame_capturado_{snap_data['time_str'].replace(':', '-')}.jpg",
                                                     mime="image/jpeg",
