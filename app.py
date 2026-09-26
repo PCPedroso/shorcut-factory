@@ -310,6 +310,9 @@ def inject_video_time_sync_js():
                         if (badge) {
                             badge.innerHTML = formatted;
                         }
+                        if (window.__viralcutSyncVideoFrameInput) {
+                            window.__viralcutSyncVideoFrameInput(v);
+                        }
                     };
 
                     v.addEventListener('pause', onPauseOrSeeked);
@@ -755,14 +758,8 @@ def inject_video_snapshot_js():
                         let count = 0;
                         inputs.forEach(inp => {
                             const label = (inp.getAttribute('aria-label') || '').toLowerCase();
-                            const val = inp.value || '';
                             if (label.includes('momento') || label.includes('frame') || label.includes('minutagem') || label.includes('player_synced') || label.includes('tempo')) {
-                                const lastVal = inp.value;
-                                inp.value = formattedTime;
-                                const tracker = inp._valueTracker;
-                                if (tracker) tracker.setValue(lastVal);
-                                inp.dispatchEvent(new Event('input', { bubbles: true }));
-                                inp.dispatchEvent(new Event('change', { bubbles: true }));
+                                setReactInputValue(inp, formattedTime);
                                 count++;
                             }
                         });
@@ -775,6 +772,132 @@ def inject_video_snapshot_js():
 
             overlay.classList.add('active');
         }
+
+        function isFrameTimeInput(inp) {
+            if (!inp || inp.type !== 'text') return false;
+            const aria = (inp.getAttribute('aria-label') || '').toLowerCase();
+            if (aria.includes('tempo do frame')) return true;
+            const ph = (inp.getAttribute('placeholder') || '').toLowerCase();
+            if (ph.includes('tempo do frame')) return true;
+            const parentWidget = inp.closest('[data-testid="stTextInput"]');
+            if (parentWidget) {
+                const lbl = parentWidget.querySelector('label');
+                if (lbl && (lbl.innerText || lbl.textContent || '').toLowerCase().includes('tempo do frame')) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function setReactInputValue(input, value) {
+            if (!input) return false;
+            if (input.value === value) return false;
+            const previousValue = input.value;
+            try {
+                const nativeSetter = Object.getOwnPropertyDescriptor(
+                    window.HTMLInputElement.prototype,
+                    'value'
+                )?.set;
+                if (nativeSetter) {
+                    nativeSetter.call(input, value);
+                } else {
+                    input.value = value;
+                }
+            } catch (e) {
+                input.value = value;
+            }
+            try {
+                const tracker = input._valueTracker;
+                if (tracker) {
+                    tracker.setValue(previousValue);
+                }
+            } catch (e) {}
+            try {
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                input.dispatchEvent(new Event('blur', { bubbles: true }));
+            } catch (e) {}
+            try {
+                input.style.transition = 'border-color 0.3s ease, box-shadow 0.3s ease';
+                input.style.borderColor = '#ff6b00';
+                input.style.boxShadow = '0 0 10px rgba(255, 107, 0, 0.5)';
+                setTimeout(() => {
+                    input.style.borderColor = '';
+                    input.style.boxShadow = '';
+                }, 900);
+            } catch (e) {}
+            return true;
+        }
+
+        function findFrameTimeInputForVideo(video) {
+            const pDoc = (window.parent && window.parent.document) || document;
+            if (!video || !pDoc) return null;
+
+            // 1. Procura subindo pela árvore de elementos pais
+            let curr = video.parentElement;
+            while (curr && curr !== pDoc.body && curr !== pDoc.documentElement) {
+                const inputs = curr.querySelectorAll('input[type="text"]');
+                for (const inp of inputs) {
+                    if (isFrameTimeInput(inp)) {
+                        return inp;
+                    }
+                }
+                if (curr.dataset && curr.dataset.testid === 'stContainer') {
+                    break;
+                }
+                curr = curr.parentElement;
+            }
+
+            // 2. Procura nos irmãos do bloco horizontal ou coluna vizinha
+            try {
+                const hBlock = video.closest('[data-testid="stHorizontalBlock"]');
+                if (hBlock && hBlock.parentElement) {
+                    const inputs = hBlock.parentElement.querySelectorAll('input[type="text"]');
+                    for (const inp of inputs) {
+                        if (isFrameTimeInput(inp)) return inp;
+                    }
+                }
+            } catch (e) {}
+
+            // 3. Fallback: seleciona o input de frame mais próximo visualmente
+            const allFrameInputs = [];
+            const allInputs = pDoc.querySelectorAll('input[type="text"]');
+            for (const inp of allInputs) {
+                if (isFrameTimeInput(inp)) {
+                    allFrameInputs.push(inp);
+                }
+            }
+            if (allFrameInputs.length === 1) {
+                return allFrameInputs[0];
+            } else if (allFrameInputs.length > 1) {
+                const vRect = video.getBoundingClientRect();
+                let closest = null;
+                let minDist = Infinity;
+                for (const inp of allFrameInputs) {
+                    const iRect = inp.getBoundingClientRect();
+                    const dist = Math.abs(iRect.top - vRect.top);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        closest = inp;
+                    }
+                }
+                return closest;
+            }
+
+            return null;
+        }
+
+        function syncVideoFrameInput(video) {
+            if (!video) return;
+            const curSec = video.currentTime || 0;
+            const formatted = formatSecToHHMMSS(curSec);
+            const targetInput = findFrameTimeInputForVideo(video);
+            if (targetInput) {
+                setReactInputValue(targetInput, formatted);
+            }
+        }
+
+        window.__viralcutSyncVideoFrameInput = syncVideoFrameInput;
 
         function scanAndBindSnapshotButtons() {
             try {
@@ -812,21 +935,33 @@ def inject_video_snapshot_js():
                             snapTrigger.classList.add('is-paused');
                             const formatted = formatSecToHHMMSS(v.currentTime);
                             snapTrigger.innerHTML = `📸 Print (${formatted.split('.')[0]})`;
+                            if (v.currentTime > 0) {
+                                syncVideoFrameInput(v);
+                            }
                         } else {
                             snapTrigger.classList.remove('is-paused');
                             snapTrigger.innerHTML = '📸 Print';
                         }
                     };
 
-                    v.addEventListener('pause', updateTriggerState);
+                    v.addEventListener('pause', () => {
+                        updateTriggerState();
+                        syncVideoFrameInput(v);
+                    });
                     v.addEventListener('play', updateTriggerState);
-                    v.addEventListener('seeked', updateTriggerState);
+                    v.addEventListener('seeked', () => {
+                        updateTriggerState();
+                        if (v.paused) {
+                            syncVideoFrameInput(v);
+                        }
+                    });
                     updateTriggerState();
 
                     snapTrigger.onclick = (e) => {
                         e.stopPropagation();
                         e.preventDefault();
                         try {
+                            syncVideoFrameInput(v);
                             const w = v.videoWidth || v.clientWidth || 1280;
                             const h = v.videoHeight || v.clientHeight || 720;
                             const canvas = pDoc.createElement('canvas');
@@ -841,6 +976,67 @@ def inject_video_snapshot_js():
                             console.error('Snapshot capture error:', err);
                         }
                     };
+                });
+
+                // Sincroniza em cliques nos botões de prévia
+                const prevButtons = pDoc.querySelectorAll('button');
+                prevButtons.forEach(btn => {
+                    if (btn.dataset.prevFrameBound) return;
+                    const txt = (btn.innerText || '').toLowerCase();
+                    if (txt.includes('prévia do frame') || txt.includes('previa do frame')) {
+                        btn.dataset.prevFrameBound = "true";
+                        const onPrevDown = () => {
+                            let container = btn.closest('[data-testid="stHorizontalBlock"]') || btn.closest('[data-testid="stVerticalBlock"]') || btn.parentElement;
+                            let nearbyVideo = null;
+                            while (container && container !== pDoc.body) {
+                                const vids = container.querySelectorAll('video');
+                                if (vids.length > 0) {
+                                    nearbyVideo = vids[0];
+                                    break;
+                                }
+                                container = container.parentElement;
+                            }
+                            if (nearbyVideo && nearbyVideo.currentTime > 0) {
+                                syncVideoFrameInput(nearbyVideo);
+                            }
+                        };
+                        btn.addEventListener('mousedown', onPrevDown, true);
+                        btn.addEventListener('pointerdown', onPrevDown, true);
+                    }
+                });
+
+                // Escuta abertura de expanders para revalidar sincronização
+                const expanders = pDoc.querySelectorAll('[data-testid="stExpander"], details');
+                expanders.forEach(exp => {
+                    if (exp.dataset.frameSyncBound) return;
+                    exp.dataset.frameSyncBound = "true";
+                    exp.addEventListener('toggle', () => {
+                        if (exp.open || exp.hasAttribute('open')) {
+                            const inputs = exp.querySelectorAll('input[type="text"]');
+                            let hasFrameInput = false;
+                            for (const inp of inputs) {
+                                if (isFrameTimeInput(inp)) {
+                                    hasFrameInput = true;
+                                    break;
+                                }
+                            }
+                            if (hasFrameInput) {
+                                let container = exp.closest('[data-testid="stVerticalBlock"]') || exp.parentElement;
+                                let nearbyVideo = null;
+                                while (container && container !== pDoc.body) {
+                                    const vids = container.querySelectorAll('video');
+                                    if (vids.length > 0) {
+                                        nearbyVideo = vids[0];
+                                        break;
+                                    }
+                                    container = container.parentElement;
+                                }
+                                if (nearbyVideo && nearbyVideo.currentTime > 0) {
+                                    syncVideoFrameInput(nearbyVideo);
+                                }
+                            }
+                        }
+                    });
                 });
             } catch(e) {}
         }

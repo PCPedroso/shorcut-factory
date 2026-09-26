@@ -87,6 +87,28 @@ class TestFrameCapturer(unittest.TestCase):
         read_img = Image.open(out_img)
         self.assertEqual(read_img.size, (100, 100))
 
+    def test_snapshot_js_sync_logic(self):
+        """
+        Valida que os scripts injetados no app.py possuem as rotinas de sincronização
+        automática do campo 'Tempo do Frame' ao pausar o vídeo ou emitir seeked/print.
+        """
+        from unittest.mock import patch
+        import app
+
+        captured_html = []
+        with patch("streamlit.html", side_effect=lambda html_str, **kwargs: captured_html.append(html_str)):
+            app.inject_video_snapshot_js()
+            app.inject_video_time_sync_js()
+
+        full_js = "\n".join(captured_html)
+        self.assertIn("isFrameTimeInput", full_js)
+        self.assertIn("setReactInputValue", full_js)
+        self.assertIn("findFrameTimeInputForVideo", full_js)
+        self.assertIn("syncVideoFrameInput", full_js)
+        self.assertIn("__viralcutSyncVideoFrameInput", full_js)
+        self.assertIn("tempo do frame", full_js.lower())
+
 
 if __name__ == '__main__':
     unittest.main()
+
