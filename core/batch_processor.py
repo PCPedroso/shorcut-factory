@@ -290,6 +290,8 @@ def process_batch_cuts(
             bg_music_track_path=resolved_music_path,
             bg_music_volume=params.get("bg_music_volume", 0.15),
             ducking_preset=params.get("ducking_preset", "medio"),
+            bg_music_start_offset=params.get("bg_music_start_offset", params.get("bg_music_start_time", 0.0)),
+            video_start_offset=params.get("video_start_offset", params.get("bg_video_start_time", 0.0)),
             # Fase 4: Retenção Dinâmica & Thumbnails
             progress_bar_enabled=eff_progress_bar,
             progress_bar_color=params.get("progress_bar_color", "#FF0000"),

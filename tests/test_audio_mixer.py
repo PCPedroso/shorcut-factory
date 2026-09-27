@@ -4,7 +4,8 @@ from core.audio_mixer import (
     list_available_tracks,
     get_track_path_by_id,
     DUCKING_PRESETS,
-    MUSIC_CATEGORIES
+    MUSIC_CATEGORIES,
+    parse_time_offset
 )
 
 
@@ -108,6 +109,30 @@ class TestAudioMixer(unittest.TestCase):
                                 json.dump(ct_data, f_ct, indent=4, ensure_ascii=False)
                 except Exception:
                     pass
+
+    def test_parse_time_offset(self):
+        # MM:SS.ms format (user specified format)
+        self.assertAlmostEqual(parse_time_offset("00:12.00"), 12.0)
+        self.assertAlmostEqual(parse_time_offset("01:15.50"), 75.5)
+        self.assertAlmostEqual(parse_time_offset("00:00.00"), 0.0)
+        self.assertAlmostEqual(parse_time_offset("02:05.123"), 125.123)
+
+        # HH:MM:SS.ms format
+        self.assertAlmostEqual(parse_time_offset("00:01:12.50"), 72.5)
+
+        # Comma decimal format
+        self.assertAlmostEqual(parse_time_offset("00:12,50"), 12.5)
+
+        # Raw float/int formats
+        self.assertAlmostEqual(parse_time_offset("12.5"), 12.5)
+        self.assertAlmostEqual(parse_time_offset(14.2), 14.2)
+        self.assertAlmostEqual(parse_time_offset(10), 10.0)
+
+        # None / empty / invalid fallback to 0.0
+        self.assertEqual(parse_time_offset(None), 0.0)
+        self.assertEqual(parse_time_offset(""), 0.0)
+        self.assertEqual(parse_time_offset("invalid"), 0.0)
+        self.assertEqual(parse_time_offset(-5), 0.0)
 
 
 if __name__ == '__main__':

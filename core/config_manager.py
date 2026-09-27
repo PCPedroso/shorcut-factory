@@ -77,6 +77,8 @@ DEFAULT_SETTINGS = {
     "bg_music_track_id": "lofi_chill",
     "bg_music_volume": 0.15,
     "ducking_preset": "medio",
+    "bg_music_start_time": "00:00.00",
+    "bg_video_start_time": "00:00.00",
 
     # Integrações & Exportação Direta (Fase 3)
     "webhook_url": "",

@@ -474,16 +474,40 @@ def get_track_path_by_id(track_id: str) -> str:
     return default_f if os.path.exists(default_f) else ""
 
 
+def parse_time_offset(time_val) -> float:
+    """Converte strings de tempo (MM:SS.ms, HH:MM:SS.ms, SS.ms) ou números para segundos (float)."""
+    if time_val is None:
+        return 0.0
+    if isinstance(time_val, (int, float)):
+        return max(0.0, float(time_val))
+    s = str(time_val).strip().replace(',', '.')
+    if not s:
+        return 0.0
+    try:
+        if ":" in s:
+            parts = s.split(":")
+            if len(parts) == 3:
+                return max(0.0, float(parts[0]) * 3600.0 + float(parts[1]) * 60.0 + float(parts[2]))
+            elif len(parts) == 2:
+                return max(0.0, float(parts[0]) * 60.0 + float(parts[1]))
+        return max(0.0, float(s))
+    except Exception:
+        return 0.0
+
+
 def apply_audio_ducking(
     input_video_path: str,
     output_video_path: str,
     music_track_path: str,
     music_volume: float = 0.15,
     ducking_preset: str = "medio",
+    music_start_offset: float = 0.0,
+    video_start_offset: float = 0.0,
 ) -> dict:
     """
     Aplica trilha sonora de fundo com Audio Ducking profissional via FFmpeg.
     A música é atenuada dinamicamente com sidechaincompress quando a voz do vídeo está ativa.
+    Suporta offset inicial do áudio (music_start_offset, ex: '00:12.00') e delay de entrada (video_start_offset).
     """
     if not os.path.exists(input_video_path):
         return {"path": None, "error": f"Vídeo de entrada não encontrado: {input_video_path}"}
@@ -496,6 +520,9 @@ def apply_audio_ducking(
     ratio = preset["ratio"]
     attack = preset["attack"]
     release = preset["release"]
+
+    offset_s = parse_time_offset(music_start_offset)
+    delay_ms = int(round(parse_time_offset(video_start_offset) * 1000))
     
     # Prepara caminhos temporários
     tmp_output = output_video_path.replace(".mp4", "_ducking_tmp.mp4")
@@ -504,18 +531,29 @@ def apply_audio_ducking(
         
     try:
         # Monta filtro de áudio:
-        # 1. Ajuste de volume base da música de fundo (com -stream_loop nativo no input)
+        # 1. Ajuste de volume base da música de fundo (e delay de entrada no corte se houver)
         # 2. Sidechaincompress na música usando a faixa de voz [0:a] como trigger
         # 3. Mixagem do áudio da voz limpo com a música ducked
-        filter_complex = (
-            f"[1:a]volume={music_volume}[bg];"
-            f"[bg][0:a]sidechaincompress=threshold={threshold}:ratio={ratio}:attack={attack}:release={release}[ducked_bg];"
-            f"[0:a][ducked_bg]amix=inputs=2:duration=first:dropout_transition=2[aout]"
-        )
+        if delay_ms > 0:
+            filter_complex = (
+                f"[1:a]adelay={delay_ms}|{delay_ms}:all=1,volume={music_volume}[bg];"
+                f"[bg][0:a]sidechaincompress=threshold={threshold}:ratio={ratio}:attack={attack}:release={release}[ducked_bg];"
+                f"[0:a][ducked_bg]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+            )
+        else:
+            filter_complex = (
+                f"[1:a]volume={music_volume}[bg];"
+                f"[bg][0:a]sidechaincompress=threshold={threshold}:ratio={ratio}:attack={attack}:release={release}[ducked_bg];"
+                f"[0:a][ducked_bg]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+            )
         
         cmd = [
             FFMPEG_EXE, "-y",
             "-i", input_video_path,
+        ]
+        if offset_s > 0:
+            cmd.extend(["-ss", f"{offset_s:.3f}"])
+        cmd.extend([
             "-stream_loop", "-1", "-i", music_track_path,
             "-filter_complex", filter_complex,
             "-map", "0:v",
@@ -526,7 +564,7 @@ def apply_audio_ducking(
             "-shortest",
             "-movflags", "+faststart",
             tmp_output
-        ]
+        ])
         
         result = subprocess.run(cmd, capture_output=True, text=True)
         

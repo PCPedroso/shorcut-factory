@@ -1201,14 +1201,15 @@ def safe_display_video(video_path: str, start_time: int = 0):
     except Exception as e_vid:
         st.error(f"Erro ao reproduzir vídeo: {e_vid}")
 
-def safe_display_audio(audio_source, format="audio/mp3"):
+def safe_display_audio(audio_source, format="audio/mp3", start_time=0):
     """Reproduz áudio via streaming HTTP ou dados em memória sem travar a interface."""
     if not audio_source:
         return
+    st_val = int(start_time) if start_time else 0
     if isinstance(audio_source, str) and os.path.exists(audio_source):
         norm_p = os.path.normpath(audio_source)
         try:
-            st.audio(norm_p, format=format)
+            st.audio(norm_p, format=format, start_time=st_val)
             return
         except Exception:
             try:
@@ -7733,6 +7734,8 @@ if _has_media_ready:
         bg_music_track_id = _cfg.get("bg_music_track_id", "lofi_chill")
         bg_music_volume = float(_cfg.get("bg_music_volume", 0.15))
         ducking_preset = _cfg.get("ducking_preset", "medio")
+        bg_music_start_time = str(_cfg.get("bg_music_start_time", "00:00.00"))
+        bg_video_start_time = str(_cfg.get("bg_video_start_time", "00:00.00"))
     
         available_tracks = list_available_tracks()
         track_ids = [t["id"] for t in available_tracks]
@@ -7753,11 +7756,24 @@ if _has_media_ready:
                     selected_track_obj = available_tracks[track_labels.index(sel_track_label)]
                     bg_music_track_id = selected_track_obj["id"]
                     bg_music_track_path = selected_track_obj["path"]
+
+                    bg_music_start_time = st.text_input(
+                        "⏱️ Ponto de Início na Trilha Sonora (Offset do Áudio):",
+                        value=bg_music_start_time,
+                        placeholder="Ex: 00:12.00 (minuto, segundo e milissegundo)",
+                        key="txt_bg_music_start_time",
+                        help="Define em qual tempo do arquivo de áudio a música deve ser inserida no corte (ex: 00:12.00 para pular a introdução e iniciar aos 12 segundos). Formato: MM:SS.ms ou segundos."
+                    )
+                    m_sec = parse_time_str_to_seconds(bg_music_start_time)
+                    if m_sec > 0:
+                        st.caption(f"🎵 A trilha sonora começará a partir dos **{m_sec:.2f}s** ({bg_music_start_time}) da música.")
+                    else:
+                        st.caption("🎵 A trilha sonora começará a partir do início da música (**00:00.00**).")
     
-                    # Player de áudio para prévia da música
+                    # Player de áudio para prévia da música sincronizado com o tempo de início
                     if os.path.exists(bg_music_track_path):
                         _fmt = "audio/mp3" if bg_music_track_path.endswith(".mp3") else "audio/wav"
-                        safe_display_audio(bg_music_track_path, format=_fmt)
+                        safe_display_audio(bg_music_track_path, format=_fmt, start_time=int(m_sec))
     
                 with col_m2:
                     bg_music_volume = st.number_input("Volume da Música:", min_value=0.01, max_value=1.00, value=bg_music_volume, step=0.02, format="%.2f", help="Volume base da música quando não houver fala.")
@@ -7766,6 +7782,19 @@ if _has_media_ready:
                     cur_duck_idx = duck_keys.index(ducking_preset) if ducking_preset in duck_keys else 1
                     sel_duck_label = st.selectbox("Atenuação na Fala (Ducking):", duck_labels, index=cur_duck_idx)
                     ducking_preset = duck_keys[duck_labels.index(sel_duck_label)]
+
+                    bg_video_start_time = st.text_input(
+                        "⏱️ Entrada no Corte (Vídeo):",
+                        value=bg_video_start_time,
+                        placeholder="00:00.00",
+                        key="txt_bg_video_start_time",
+                        help="Momento do vídeo em que a música deve entrar (padrão 00:00.00 = desde o primeiro segundo do corte)."
+                    )
+                    v_sec = parse_time_str_to_seconds(bg_video_start_time)
+                    if v_sec > 0:
+                        st.caption(f"🕒 A música entrará aos **{v_sec:.2f}s** do vídeo.")
+                    else:
+                        st.caption("🕒 Música ativa desde o **1º segundo** do corte.")
     
                 # Uploader de músicas e botão de abrir pasta
                 col_u1, col_u2 = st.columns([2, 1])
@@ -7842,6 +7871,8 @@ if _has_media_ready:
             "bg_music_track_id": bg_music_track_id,
             "bg_music_volume": bg_music_volume,
             "ducking_preset": ducking_preset,
+            "bg_music_start_time": bg_music_start_time,
+            "bg_video_start_time": bg_video_start_time,
         })
     
         # ─────────────────────────────────────────────────────────────────
@@ -8615,6 +8646,8 @@ if _has_media_ready:
                                     bg_music_track_path=bg_music_track_path,
                                     bg_music_volume=bg_music_volume,
                                     ducking_preset=ducking_preset,
+                                    bg_music_start_offset=parse_time_str_to_seconds(bg_music_start_time),
+                                    video_start_offset=parse_time_str_to_seconds(bg_video_start_time),
                                     progress_bar_enabled=progress_bar_enabled,
                                     progress_bar_color=progress_bar_color,
                                     progress_bar_height=progress_bar_height,
@@ -9212,6 +9245,8 @@ if _has_media_ready:
                             bg_music_track_path=bg_music_track_path,
                             bg_music_volume=bg_music_volume,
                             ducking_preset=ducking_preset,
+                            bg_music_start_offset=parse_time_str_to_seconds(bg_music_start_time),
+                            video_start_offset=parse_time_str_to_seconds(bg_video_start_time),
                             # Fase 4: Retenção Dinâmica & Thumbnails
                             progress_bar_enabled=progress_bar_enabled,
                             progress_bar_color=progress_bar_color,

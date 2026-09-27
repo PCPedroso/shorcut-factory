@@ -911,6 +911,8 @@ def cut_video(
     bg_music_track_path: str = None,
     bg_music_volume: float = 0.15,
     ducking_preset: str = "medio",
+    bg_music_start_offset: float = 0.0,
+    video_start_offset: float = 0.0,
     # --- Parâmetros da Fase 4: Retenção Dinâmica & Thumbnails ---
     progress_bar_enabled: bool = False,
     progress_bar_color: str = "#FF0000",
@@ -962,7 +964,8 @@ def cut_video(
                 progress_bar_enabled, progress_bar_color, progress_bar_height,
                 callout_enabled, callout_text, callout_duration,
                 climax_zoom_enabled, climax_zoom_factor,
-                thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path
+                thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
+                bg_music_start_offset, video_start_offset
             )
 
         elif aspect_ratio_mode == "9:16_split":
@@ -995,7 +998,8 @@ def cut_video(
                 progress_bar_enabled, progress_bar_color, progress_bar_height,
                 callout_enabled, callout_text, callout_duration,
                 climax_zoom_enabled, climax_zoom_factor,
-                thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path
+                thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
+                bg_music_start_offset, video_start_offset
             )
 
         elif aspect_ratio_mode == "9:16_blur":
@@ -1021,7 +1025,8 @@ def cut_video(
                     progress_bar_enabled, progress_bar_color, progress_bar_height,
                     callout_enabled, callout_text, callout_duration,
                     climax_zoom_enabled, climax_zoom_factor,
-                    thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path
+                    thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
+                    bg_music_start_offset, video_start_offset
                 )
             else:
                 # Modo Manual Estático
@@ -1131,7 +1136,8 @@ def cut_video(
                 progress_bar_enabled, progress_bar_color, progress_bar_height,
                 callout_enabled, callout_text, callout_duration,
                 climax_zoom_enabled, climax_zoom_factor,
-                thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path
+                thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
+                bg_music_start_offset, video_start_offset
             )
 
         # Fallback MoviePy se FFmpeg direto retornar erro
@@ -1159,7 +1165,8 @@ def cut_video(
             progress_bar_enabled, progress_bar_color, progress_bar_height,
             callout_enabled, callout_text, callout_duration,
             climax_zoom_enabled, climax_zoom_factor,
-            thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path
+            thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
+            bg_music_start_offset, video_start_offset
         )
     except Exception as e:
         return {"path": None, "error": str(e)}
@@ -1200,7 +1207,9 @@ def _apply_all_post_processing(
     thumbnail_enabled: bool = True,
     thumbnail_output_path: str = None,
     aspect_mode: str = "9:16_smart_face",
-    source_video_path: str = None
+    source_video_path: str = None,
+    bg_music_start_offset: float = 0.0,
+    video_start_offset: float = 0.0
 ) -> dict:
     """
     Esteira unificada de pós-produção (Fases 2, 3 e 4):
@@ -1385,6 +1394,8 @@ def _apply_all_post_processing(
             music_track_path=bg_music_track_path,
             music_volume=bg_music_volume,
             ducking_preset=ducking_preset,
+            music_start_offset=bg_music_start_offset,
+            video_start_offset=video_start_offset,
         )
         if duck_result.get("warning"):
             result["audio_warning"] = duck_result["warning"]
