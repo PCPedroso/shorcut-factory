@@ -8,6 +8,7 @@ com sobreposição de caixas individuais (line boxes), bloco único (single card
 import os
 import re
 import time
+import json
 import shutil
 import textwrap
 import subprocess
@@ -73,6 +74,78 @@ HEADLINE_PRESETS = {
         "box_padding": 8,
     }
 }
+
+USER_HEADLINE_PRESETS_FILE = os.path.join("data", "headline_user_presets.json")
+
+
+def load_user_headline_presets(filepath: str = None) -> dict:
+    """Carrega as pré-configurações salvas pelo usuário em data/headline_user_presets.json."""
+    target_path = filepath or USER_HEADLINE_PRESETS_FILE
+    if not os.path.exists(target_path):
+        return {}
+    try:
+        with open(target_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
+
+
+def save_user_headline_preset(name: str, config: dict, filepath: str = None) -> bool:
+    """Salva ou atualiza uma pré-configuração customizada de headline."""
+    if not name or not str(name).strip():
+        return False
+    clean_name = str(name).strip()
+    target_path = filepath or USER_HEADLINE_PRESETS_FILE
+    presets = load_user_headline_presets(target_path)
+    presets[clean_name] = dict(config)
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    try:
+        with open(target_path, "w", encoding="utf-8") as f:
+            json.dump(presets, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception:
+        return False
+
+
+def delete_user_headline_preset(name: str, filepath: str = None) -> bool:
+    """Exclui uma pré-configuração customizada de headline."""
+    if not name or not str(name).strip():
+        return False
+    clean_name = str(name).strip()
+    target_path = filepath or USER_HEADLINE_PRESETS_FILE
+    presets = load_user_headline_presets(target_path)
+    if clean_name in presets:
+        del presets[clean_name]
+        try:
+            with open(target_path, "w", encoding="utf-8") as f:
+                json.dump(presets, f, indent=2, ensure_ascii=False)
+            return True
+        except Exception:
+            return False
+    return False
+
+
+def rename_user_headline_preset(old_name: str, new_name: str, filepath: str = None) -> bool:
+    """Renomeia uma pré-configuração existente."""
+    if not old_name or not new_name or not str(new_name).strip():
+        return False
+    clean_old = str(old_name).strip()
+    clean_new = str(new_name).strip()
+    target_path = filepath or USER_HEADLINE_PRESETS_FILE
+    presets = load_user_headline_presets(target_path)
+    if clean_old in presets:
+        cfg = presets.pop(clean_old)
+        presets[clean_new] = cfg
+        try:
+            with open(target_path, "w", encoding="utf-8") as f:
+                json.dump(presets, f, indent=2, ensure_ascii=False)
+            return True
+        except Exception:
+            return False
+    return False
 
 
 DANGLING_ENDINGS = {

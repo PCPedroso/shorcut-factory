@@ -75,7 +75,9 @@ from core.cuts_catalog import (
 from core.batch_processor import process_batch_cuts
 from core.headline_drawer import (
     HEADLINE_PRESETS, generate_headline_preview, apply_headline_to_video,
-    clean_and_condense_headline, format_headline_text
+    clean_and_condense_headline, format_headline_text,
+    load_user_headline_presets, save_user_headline_preset,
+    delete_user_headline_preset, rename_user_headline_preset
 )
 from core.audio_mixer import list_available_tracks, DUCKING_PRESETS, register_custom_audio_track
 from core.music_recognizer import identify_song_from_audio_and_meta
@@ -1674,10 +1676,10 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
                     "🔍 Tamanho da Prévia (%):",
                     min_value=10,
                     max_value=100,
-                    value=int(st.session_state.get("batch_hl_prev_scale", 20)),
+                    value=int(st.session_state.get("batch_hl_prev_scale", 50)),
                     step=5,
                     key="batch_hl_prev_scale",
-                    help="Ajuste o tamanho visual da imagem de prévia (o padrão é 20% para caber de forma compacta e confortável)."
+                    help="Ajuste o tamanho visual da imagem de prévia (o padrão é 50%)."
                 )
                 st.caption("Faça os ajustes desejados e clique no botão 🔄 para atualizar a prévia.")
 
@@ -2841,9 +2843,192 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         st.session_state[f"hl_post_text_{unique_key}"] = format_headline_text(cleaned_hl).replace(r"\N", "\n")
                         st.rerun()
 
-            # 2. Preset de Estilo Rápido com Sincronização Reativa
+            # ── 1.5. PRÉ-CONFIGURAÇÕES SALVAS DA HEADLINE (PRESETS DO USUÁRIO) ───
             hl_preset_keys = list(HEADLINE_PRESETS.keys())
             hl_preset_labels = [HEADLINE_PRESETS[k]["name"] for k in hl_preset_keys]
+
+            user_hl_presets = load_user_headline_presets()
+            user_hl_names = list(user_hl_presets.keys())
+
+            def _collect_current_hl_settings(u_key=unique_key):
+                saved_mtop = int(_cfg.get("headline_margin_top", 240))
+                saved_fsize = int(_cfg.get("headline_font_size", 70))
+                dur_mode = st.session_state.get(f"hl_dur_mode_{u_key}", "Vídeo Completo (0s até o final)")
+                if dur_mode == "Vídeo Completo (0s até o final)":
+                    s_off = 0.0
+                    e_off = 0.0
+                elif dur_mode == "Após o Gancho Viral":
+                    s_off = float(st.session_state.get(f"hl_start_offset_val_{u_key}", st.session_state.get(f"hl_start_offset_num_{u_key}", 0.0)))
+                    e_off = 0.0
+                else:
+                    s_off = float(st.session_state.get(f"hl_start_offset_val_{u_key}", st.session_state.get(f"hl_start_offset_num_{u_key}", 0.0)))
+                    e_off = float(st.session_state.get(f"hl_end_offset_val_{u_key}", st.session_state.get(f"hl_end_offset_num_{u_key}", min(15.0, float(dur)))))
+
+                return {
+                    "preset_style": st.session_state.get(f"last_hl_preset_{u_key}", "yellow_black"),
+                    "preset_style_lbl": st.session_state.get(f"hl_post_preset_{u_key}", hl_preset_labels[0]),
+                    "container_mode": st.session_state.get(f"hl_post_mode_{u_key}", "line_boxes"),
+                    "margin_top": int(st.session_state.get(f"hl_post_mtop_{u_key}", saved_mtop)),
+                    "font_size": int(st.session_state.get(f"hl_post_fsize_{u_key}", saved_fsize)),
+                    "text_color": st.session_state.get(f"hl_post_tcolor_{u_key}", "#000000"),
+                    "bg_color": st.session_state.get(f"hl_post_bgcolor_{u_key}", "#FFDA29"),
+                    "bg_alpha": int(st.session_state.get(f"hl_post_bgalpha_{u_key}", 95)),
+                    "alignment": st.session_state.get(f"hl_post_align_{u_key}", "center"),
+                    "padding_h": int(st.session_state.get(f"hl_post_padh_{u_key}", 28)),
+                    "padding_v": int(st.session_state.get(f"hl_post_padv_{u_key}", 16)),
+                    "line_spacing": int(st.session_state.get(f"hl_post_linesp_{u_key}", 14)),
+                    "corner_radius": int(st.session_state.get(f"hl_post_corner_{u_key}", 12)),
+                    "max_width_pct": int(st.session_state.get(f"hl_post_maxw_{u_key}", 90)),
+                    "shadow": bool(st.session_state.get(f"hl_post_shadow_{u_key}", True)),
+                    "duration_mode": dur_mode,
+                    "start_offset": s_off,
+                    "end_offset": e_off,
+                    "transition_type": st.session_state.get(f"hl_trans_type_{u_key}", "slide_explode"),
+                    "transition_dur": float(st.session_state.get(f"hl_trans_dur_val_{u_key}", st.session_state.get(f"hl_trans_dur_{u_key}", 1.0))),
+                }
+
+            def _apply_hl_preset(p_data, u_key=unique_key):
+                p_style_lbl = p_data.get("preset_style_lbl")
+                p_style_key = p_data.get("preset_style")
+                if p_style_lbl and p_style_lbl in hl_preset_labels:
+                    st.session_state[f"hl_post_preset_{u_key}"] = p_style_lbl
+                    st.session_state[f"last_hl_preset_{u_key}"] = hl_preset_keys[hl_preset_labels.index(p_style_lbl)]
+                elif p_style_key and p_style_key in hl_preset_keys:
+                    lbl = HEADLINE_PRESETS[p_style_key]["name"]
+                    st.session_state[f"hl_post_preset_{u_key}"] = lbl
+                    st.session_state[f"last_hl_preset_{u_key}"] = p_style_key
+
+                st.session_state[f"hl_post_mode_{u_key}"] = p_data.get("container_mode", "line_boxes")
+                st.session_state[f"hl_post_mtop_{u_key}"] = int(p_data.get("margin_top", 240))
+                st.session_state[f"hl_post_fsize_{u_key}"] = int(p_data.get("font_size", 70))
+                st.session_state[f"hl_post_tcolor_{u_key}"] = p_data.get("text_color", "#000000")
+                st.session_state[f"hl_post_bgcolor_{u_key}"] = p_data.get("bg_color", "#FFDA29")
+                st.session_state[f"hl_post_bgalpha_{u_key}"] = int(p_data.get("bg_alpha", 95))
+                st.session_state[f"hl_post_align_{u_key}"] = p_data.get("alignment", "center")
+                st.session_state[f"hl_post_padh_{u_key}"] = int(p_data.get("padding_h", 28))
+                st.session_state[f"hl_post_padv_{u_key}"] = int(p_data.get("padding_v", 16))
+                st.session_state[f"hl_post_linesp_{u_key}"] = int(p_data.get("line_spacing", 14))
+                st.session_state[f"hl_post_corner_{u_key}"] = int(p_data.get("corner_radius", 12))
+                st.session_state[f"hl_post_maxw_{u_key}"] = int(p_data.get("max_width_pct", 90))
+                st.session_state[f"hl_post_shadow_{u_key}"] = bool(p_data.get("shadow", True))
+                
+                st.session_state[f"hl_dur_mode_{u_key}"] = p_data.get("duration_mode", "Vídeo Completo (0s até o final)")
+                st.session_state[f"hl_start_offset_num_{u_key}"] = float(p_data.get("start_offset", 0.0))
+                st.session_state[f"hl_start_offset_val_{u_key}"] = float(p_data.get("start_offset", 0.0))
+                st.session_state[f"hl_end_offset_num_{u_key}"] = float(p_data.get("end_offset", 0.0))
+                st.session_state[f"hl_end_offset_val_{u_key}"] = float(p_data.get("end_offset", 0.0))
+                st.session_state[f"hl_trans_type_{u_key}"] = p_data.get("transition_type", "slide_explode")
+                st.session_state[f"hl_trans_dur_{u_key}"] = float(p_data.get("transition_dur", 1.0))
+                st.session_state[f"hl_trans_dur_val_{u_key}"] = float(p_data.get("transition_dur", 1.0))
+                st.session_state.pop(f"cached_hl_prev_{u_key}", None)
+
+            preset_sel_key = f"sel_custom_hl_preset_{unique_key}"
+            last_loaded_key = f"last_loaded_custom_hl_preset_{unique_key}"
+            
+            cur_saved_p = st.session_state.get(preset_sel_key, "-- Nenhuma (Personalizado) --")
+            if cur_saved_p != "-- Nenhuma (Personalizado) --" and cur_saved_p not in user_hl_names:
+                cur_saved_p = "-- Nenhuma (Personalizado) --"
+                st.session_state[preset_sel_key] = cur_saved_p
+
+            # Carregamento automático reativo quando o usuário seleciona um preset no dropdown
+            if cur_saved_p in user_hl_presets and st.session_state.get(last_loaded_key) != cur_saved_p:
+                _apply_hl_preset(user_hl_presets[cur_saved_p], unique_key)
+                st.session_state[last_loaded_key] = cur_saved_p
+                st.rerun()
+            elif cur_saved_p == "-- Nenhuma (Personalizado) --" and st.session_state.get(last_loaded_key) is not None:
+                st.session_state.pop(last_loaded_key, None)
+
+            st.markdown("###### 📋 Pré-configurações da Headline (Salvar / Editar / Excluir):")
+            col_p_drop, col_p_rel, col_p_save, col_p_del = st.columns([2.5, 0.8, 0.9, 0.8])
+            
+            preset_options = ["-- Nenhuma (Personalizado) --"] + user_hl_names
+            cur_p_idx = preset_options.index(cur_saved_p) if cur_saved_p in preset_options else 0
+
+            with col_p_drop:
+                sel_p_choice = st.selectbox(
+                    "Pré-configuração Salva:",
+                    preset_options,
+                    index=cur_p_idx,
+                    key=preset_sel_key,
+                    help="Carregue uma pré-configuração salva para restaurar instantaneamente estilo, fontes, margens, cores e durações.",
+                    label_visibility="collapsed"
+                )
+
+            is_preset_active = (sel_p_choice != "-- Nenhuma (Personalizado) --" and sel_p_choice in user_hl_presets)
+
+            with col_p_rel:
+                if st.button("🔄", key=f"btn_rel_hl_preset_{unique_key}", help="Recarregar esta pré-configuração descartando alterações manuais", disabled=not is_preset_active, use_container_width=True):
+                    _apply_hl_preset(user_hl_presets[sel_p_choice], unique_key)
+                    st.session_state[last_loaded_key] = sel_p_choice
+                    st.toast(f"🔄 Pré-configuração '{sel_p_choice}' recarregada!")
+                    st.rerun()
+
+            with col_p_save:
+                if st.button("💾 Salvar", key=f"btn_upd_hl_preset_{unique_key}", help=f"Atualizar e sobrescrever '{sel_p_choice}' com as configurações atuais da tela", disabled=not is_preset_active, use_container_width=True):
+                    upd_cfg = _collect_current_hl_settings(unique_key)
+                    save_user_headline_preset(sel_p_choice, upd_cfg)
+                    st.toast(f"💾 Pré-configuração '{sel_p_choice}' atualizada com sucesso!")
+                    st.rerun()
+
+            with col_p_del:
+                if st.button("🗑️", key=f"btn_del_hl_preset_{unique_key}", help=f"Excluir permanentemente '{sel_p_choice}'", disabled=not is_preset_active, use_container_width=True):
+                    delete_user_headline_preset(sel_p_choice)
+                    st.session_state[preset_sel_key] = "-- Nenhuma (Personalizado) --"
+                    st.session_state.pop(last_loaded_key, None)
+                    st.toast(f"🗑️ Pré-configuração '{sel_p_choice}' excluída com sucesso!")
+                    st.rerun()
+
+            col_sub_p1, col_sub_p2 = st.columns(2)
+            with col_sub_p1:
+                with st.expander("➕ Salvar Configuração Atual como Novo Preset", expanded=(len(user_hl_names) == 0)):
+                    col_np1, col_np2 = st.columns([2.5, 1.2])
+                    with col_np1:
+                        new_p_name = st.text_input(
+                            "Nome do Novo Preset:",
+                            placeholder="Ex: Amarelo Impacto 320px",
+                            key=f"input_new_preset_name_{unique_key}",
+                            label_visibility="collapsed"
+                        )
+                    with col_np2:
+                        if st.button("💾 Criar Preset", key=f"btn_create_hl_preset_{unique_key}", use_container_width=True):
+                            if not new_p_name or not new_p_name.strip():
+                                st.warning("⚠️ Digite um nome para a pré-configuração.")
+                            else:
+                                clean_name = new_p_name.strip()
+                                new_cfg = _collect_current_hl_settings(unique_key)
+                                save_user_headline_preset(clean_name, new_cfg)
+                                st.session_state[preset_sel_key] = clean_name
+                                st.session_state[last_loaded_key] = clean_name
+                                st.session_state[f"input_new_preset_name_{unique_key}"] = ""
+                                st.toast(f"✅ Pré-configuração '{clean_name}' salva com sucesso!")
+                                st.rerun()
+
+            with col_sub_p2:
+                if is_preset_active:
+                    with st.expander(f"✏️ Renomear '{sel_p_choice}'", expanded=False):
+                        col_rn1, col_rn2 = st.columns([2.5, 1.2])
+                        with col_rn1:
+                            ren_input_val = st.text_input(
+                                "Novo Nome:",
+                                value=sel_p_choice,
+                                key=f"input_ren_preset_val_{unique_key}",
+                                label_visibility="collapsed"
+                            )
+                        with col_rn2:
+                            if st.button("Salvar Nome", key=f"btn_save_ren_preset_{unique_key}", use_container_width=True):
+                                if ren_input_val and ren_input_val.strip() and ren_input_val.strip() != sel_p_choice:
+                                    ren_clean = ren_input_val.strip()
+                                    rename_user_headline_preset(sel_p_choice, ren_clean)
+                                    st.session_state[preset_sel_key] = ren_clean
+                                    st.session_state[last_loaded_key] = ren_clean
+                                    st.toast(f"✏️ Pré-configuração renomeada para '{ren_clean}'!")
+                                    st.rerun()
+                else:
+                    st.caption("ℹ️ Selecione um preset acima para poder renomeá-lo ou atualizá-lo.")
+
+            st.markdown("---")
+
+            # 2. Preset de Estilo Rápido com Sincronização Reativa
 
             def _on_hl_preset_change(u_key=unique_key):
                 selected_label = st.session_state.get(f"hl_post_preset_{u_key}")
@@ -3149,10 +3334,10 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     "🔍 Tamanho da Prévia (%):",
                     min_value=10,
                     max_value=100,
-                    value=int(st.session_state.get(f"hl_post_prev_scale_{unique_key}", 20)),
+                    value=int(st.session_state.get(f"hl_post_prev_scale_{unique_key}", 50)),
                     step=5,
                     key=f"hl_post_prev_scale_{unique_key}",
-                    help="Ajuste o tamanho visual da imagem de prévia (o padrão é 20% para caber de forma compacta e confortável)."
+                    help="Ajuste o tamanho visual da imagem de prévia (o padrão é 50%)."
                 )
                 st.caption("Faça os ajustes desejados e clique no botão 🔄 para atualizar a prévia.")
 
