@@ -64,7 +64,7 @@ from core.video_processor import (
     split_video_smart, slice_or_copy_local_video, parse_time_to_seconds,
     replace_video_with_static_image, restore_original_video_from_backup, has_original_video_backup
 )
-from core.library_manager import get_library, add_or_update_video_in_library, remove_video_from_library
+from core.library_manager import get_library, add_or_update_video_in_library, remove_video_from_library, create_project_from_cut_video
 from core.config_manager import load_settings, save_all_settings, save_setting
 from core.export_kit import build_cut_folder_name, create_viral_package
 from core.cuts_catalog import (
@@ -9525,7 +9525,7 @@ if _has_media_ready:
                     with st.container():
                         # Cabeçalho do corte com controle de trecho compacto na própria linha
                         st.subheader(f"📌 {cut_item.get('title', 'Corte sem título')}")
-                        col_tr1, col_tr2 = st.columns([0.28, 0.72])
+                        col_tr1, col_tr_proj, col_tr2 = st.columns([0.28, 0.32, 0.40])
                         with col_tr1:
                             if st.button(f"⏱️ [{cut_item.get('start_time')} → {cut_item.get('end_time')}]", key=f"btn_load_trecho_gal_{c_idx}", help="Clique para carregar este intervalo na Fábrica (Seção 3) e rolar a página até os campos de tempo."):
                                 st.session_state["_pending_start_time"] = cut_item.get('start_time')
@@ -9541,6 +9541,122 @@ if _has_media_ready:
                                 st.session_state["scroll_to_section3"] = True
                                 navigate_to_step("3")
                                 st.rerun()
+                        with col_tr_proj:
+                            with st.popover("🚀 Iniciar Novo Projeto deste Corte", use_container_width=True, help="Criar um novo projeto a partir deste corte para minerar pautas com IA e gerar pequenos cortes"):
+                                st.markdown("##### 🚀 Novo Projeto a partir deste Corte")
+                                st.caption(
+                                    "Transforme este corte em um projeto independente com seu próprio vídeo mestre (`video_full.mp4`). "
+                                    "Você poderá transcrever, minerar com IA (Llama 3) e produzir pequenos cortes e Shorts na Fábrica de Enquadramento."
+                                )
+                                _avail_fmts = cut_item.get("formats", {})
+                                _fmt_choices = list(_avail_fmts.keys())
+                                _chosen_fk = _fmt_choices[0] if _fmt_choices else None
+                                if len(_fmt_choices) > 1:
+                                    _def_fmt_idx = _fmt_choices.index("16:9") if "16:9" in _fmt_choices else 0
+                                    _chosen_fk = st.selectbox(
+                                        "Formato base para o novo projeto:",
+                                        _fmt_choices,
+                                        index=_def_fmt_idx,
+                                        format_func=lambda k: {
+                                            "16:9": "💻 16:9 Original (HOFHD)",
+                                            "9:16_smart_face": "📱 9:16 Smart Face",
+                                            "9:16_split": "📱 9:16 Split Screen",
+                                            "9:16_blur": "📱 9:16 Blur",
+                                            "9:16_crop": "📱 9:16 Crop"
+                                        }.get(k, k),
+                                        key=f"sel_fmt_subproj_hdr_{c_idx}"
+                                    )
+                                elif _fmt_choices:
+                                    _chosen_fk = _fmt_choices[0]
+
+                                _sel_fd = _avail_fmts.get(_chosen_fk, {}) if _chosen_fk else {}
+                                _sel_vf = _sel_fd.get("video_path")
+
+                                default_proj_title_hdr = f"{cut_item.get('title', 'Corte')} ({_chosen_fk or 'Sub-Projeto'})"
+                                sub_title_val_hdr = st.text_input(
+                                    "Título do Novo Projeto:",
+                                    value=default_proj_title_hdr,
+                                    key=f"inp_sub_title_hdr_{c_idx}"
+                                )
+
+                                dest_stage_hdr = st.radio(
+                                    "Após criar, abrir em:",
+                                    [
+                                        "🧠 2. Mineração & IA (Llama 3)",
+                                        "✂️ 3. Fábrica de Enquadramento 9:16",
+                                        "📥 1. Ingestão & Transcrição"
+                                    ],
+                                    key=f"rad_dest_stage_hdr_{c_idx}"
+                                )
+
+                                _has_parent_tr_hdr = os.path.exists(os.path.join("data", _vid_id_gal, "transcript.json"))
+                                _has_cut_tr_hdr = os.path.exists(os.path.join(_sel_fd.get("folder_path", ""), "transcricao_corte.json")) or os.path.exists(os.path.join(_sel_fd.get("folder_path", ""), "legendas.srt"))
+
+                                inherit_tr_hdr = False
+                                if _has_parent_tr_hdr or _has_cut_tr_hdr:
+                                    inherit_tr_hdr = st.checkbox(
+                                        "⚡ Herdar e fatiar transcrição existente (instantâneo)",
+                                        value=True,
+                                        key=f"chk_inh_tr_hdr_{c_idx}",
+                                        help="Reajusta os tempos das falas do trecho para começarem em 00:00:00 no novo projeto."
+                                    )
+                                else:
+                                    st.info("ℹ️ Este vídeo não possui transcrição prévia. Você poderá gerá-la com Whisper GPU na Seção 2 sob demanda (apenas deste trecho).")
+
+                                if st.button("✨ Criar & Iniciar Novo Projeto", key=f"btn_create_proj_hdr_{c_idx}", type="primary", use_container_width=True):
+                                    if not _sel_vf or not os.path.exists(_sel_vf):
+                                        st.error("Arquivo de vídeo do corte não encontrado em disco.")
+                                    else:
+                                        parent_meta_p = os.path.join("data", _vid_id_gal, "metadata.json")
+                                        parent_t = "Vídeo Mestre"
+                                        if os.path.exists(parent_meta_p):
+                                            try:
+                                                with open(parent_meta_p, "r", encoding="utf-8") as _pm_f:
+                                                    parent_t = json.load(_pm_f).get("title") or parent_t
+                                            except Exception:
+                                                pass
+
+                                        with st.spinner("🚀 Criando projeto e copiando vídeo..."):
+                                            proj_res = create_project_from_cut_video(
+                                                source_video_path=_sel_vf,
+                                                title=sub_title_val_hdr.strip() or default_proj_title_hdr,
+                                                parent_video_id=_vid_id_gal,
+                                                start_time_str=cut_item.get("start_time"),
+                                                end_time_str=cut_item.get("end_time"),
+                                                parent_title=parent_t,
+                                                copy_transcript=inherit_tr_hdr
+                                            )
+
+                                        if proj_res.get("success"):
+                                            new_vid = proj_res["video_id"]
+                                            new_url = f"local://{new_vid}"
+                                            st.session_state.video_url = new_url
+                                            st.session_state.input_yt_url = new_url
+                                            st.session_state.active_video_id = new_vid
+                                            st.session_state.video_ready = True
+
+                                            # Reseta estados de mídia para o novo projeto
+                                            st.session_state.pautas = []
+                                            st.session_state.bundles = []
+                                            st.session_state.shorts = []
+                                            st.session_state.saved_steps = []
+                                            st.session_state.transcription_done = proj_res.get("has_transcript", False)
+                                            if not proj_res.get("has_transcript"):
+                                                st.session_state.full_text = ""
+                                                st.session_state.segments = []
+
+                                            load_video_saved_artifacts(new_vid)
+                                            st.toast(f"🎉 Projeto '{proj_res.get('title')}' criado com sucesso!", icon="🚀")
+
+                                            if "2." in dest_stage_hdr:
+                                                navigate_to_step("2")
+                                            elif "3." in dest_stage_hdr:
+                                                navigate_to_step("3")
+                                            else:
+                                                navigate_to_step("1")
+                                            st.rerun()
+                                        else:
+                                            st.error(f"Erro ao criar novo projeto: {proj_res.get('error')}")
                         with col_tr2:
                             st.markdown(f"<div style='padding-top: 6px; font-size: 0.88rem; color: #a0a0a0;'>• Atualizado em: <code>{cut_item.get('updated_at', 'N/D')}</code></div>", unsafe_allow_html=True)
                         
@@ -9753,7 +9869,7 @@ if _has_media_ready:
                                                 )
 
                             def _render_actions_box(_vf, _fk, _fd, _fb, _fi):
-                                col_b_dl, col_b_fol, col_b_yt, col_b_wh, col_b_del = st.columns([1.5, 1.2, 1.0, 1.0, 0.6])
+                                col_b_dl, col_b_newp, col_b_fol, col_b_yt, col_b_wh, col_b_del = st.columns([1.3, 1.4, 1.1, 0.9, 0.9, 0.5])
                                 with col_b_dl:
                                     st.download_button(
                                         label=f"💾 Baixar ({_fd.get('resolution', 'HD')})",
@@ -9763,6 +9879,96 @@ if _has_media_ready:
                                         key=f"dl_gal_{c_idx}_{_fi}",
                                         use_container_width=True
                                     )
+                                with col_b_newp:
+                                    with st.popover("🚀 Novo Projeto", use_container_width=True, help="Iniciar um novo projeto a partir deste corte para minerar pautas com IA e gerar pequenos cortes"):
+                                        st.markdown("##### 🚀 Novo Projeto a partir deste Corte")
+                                        st.caption(
+                                            "Transforme este corte em um projeto independente com seu próprio vídeo mestre (`video_full.mp4`). "
+                                            "Você poderá transcrever, minerar com IA (Llama 3) e produzir pequenos cortes e Shorts na Fábrica de Enquadramento."
+                                        )
+
+                                        default_proj_title = f"{cut_item.get('title', 'Corte')} ({_fk})"
+                                        sub_title_val = st.text_input(
+                                            "Título do Projeto:",
+                                            value=default_proj_title,
+                                            key=f"inp_sub_title_{c_idx}_{_fi}"
+                                        )
+
+                                        dest_stage = st.radio(
+                                            "Após criar, abrir em:",
+                                            [
+                                                "🧠 2. Mineração & IA (Llama 3)",
+                                                "✂️ 3. Fábrica de Enquadramento 9:16",
+                                                "📥 1. Ingestão & Transcrição"
+                                            ],
+                                            key=f"rad_dest_stage_{c_idx}_{_fi}"
+                                        )
+
+                                        _has_parent_tr = os.path.exists(os.path.join("data", _vid_id_gal, "transcript.json"))
+                                        _has_cut_tr = os.path.exists(os.path.join(_fd.get("folder_path", ""), "transcricao_corte.json")) or os.path.exists(os.path.join(_fd.get("folder_path", ""), "legendas.srt"))
+
+                                        inherit_tr = False
+                                        if _has_parent_tr or _has_cut_tr:
+                                            inherit_tr = st.checkbox(
+                                                "⚡ Herdar e fatiar transcrição existente (instantâneo)",
+                                                value=True,
+                                                key=f"chk_inh_tr_{c_idx}_{_fi}",
+                                                help="Reajusta os tempos das falas do trecho para começarem em 00:00:00 no novo projeto."
+                                            )
+                                        else:
+                                            st.info("ℹ️ Este vídeo não possui transcrição prévia. Você poderá gerá-la com Whisper GPU na Seção 2 sob demanda (apenas deste trecho).")
+
+                                        if st.button("✨ Criar & Iniciar Novo Projeto", key=f"btn_create_proj_{c_idx}_{_fi}", type="primary", use_container_width=True):
+                                            parent_meta_p = os.path.join("data", _vid_id_gal, "metadata.json")
+                                            parent_t = "Vídeo Mestre"
+                                            if os.path.exists(parent_meta_p):
+                                                try:
+                                                    with open(parent_meta_p, "r", encoding="utf-8") as _pm_f:
+                                                        parent_t = json.load(_pm_f).get("title") or parent_t
+                                                except Exception:
+                                                    pass
+
+                                            with st.spinner("🚀 Criando projeto e copiando vídeo..."):
+                                                proj_res = create_project_from_cut_video(
+                                                    source_video_path=_vf,
+                                                    title=sub_title_val.strip() or default_proj_title,
+                                                    parent_video_id=_vid_id_gal,
+                                                    start_time_str=cut_item.get("start_time"),
+                                                    end_time_str=cut_item.get("end_time"),
+                                                    parent_title=parent_t,
+                                                    copy_transcript=inherit_tr
+                                                )
+
+                                            if proj_res.get("success"):
+                                                new_vid = proj_res["video_id"]
+                                                new_url = f"local://{new_vid}"
+                                                st.session_state.video_url = new_url
+                                                st.session_state.input_yt_url = new_url
+                                                st.session_state.active_video_id = new_vid
+                                                st.session_state.video_ready = True
+
+                                                # Reseta estados de mídia para o novo projeto
+                                                st.session_state.pautas = []
+                                                st.session_state.bundles = []
+                                                st.session_state.shorts = []
+                                                st.session_state.saved_steps = []
+                                                st.session_state.transcription_done = proj_res.get("has_transcript", False)
+                                                if not proj_res.get("has_transcript"):
+                                                    st.session_state.full_text = ""
+                                                    st.session_state.segments = []
+
+                                                load_video_saved_artifacts(new_vid)
+                                                st.toast(f"🎉 Projeto '{proj_res.get('title')}' criado com sucesso!", icon="🚀")
+
+                                                if "2." in dest_stage:
+                                                    navigate_to_step("2")
+                                                elif "3." in dest_stage:
+                                                    navigate_to_step("3")
+                                                else:
+                                                    navigate_to_step("1")
+                                                st.rerun()
+                                            else:
+                                                st.error(f"Erro ao criar novo projeto: {proj_res.get('error')}")
                                 with col_b_fol:
                                     if st.button("📂 Abrir Pasta", key=f"btn_open_fol_gal_{c_idx}_{_fi}", use_container_width=True, help="Abre a pasta deste corte no Explorador de Arquivos do Windows"):
                                         open_in_file_explorer(_fd.get("folder_path") or _vf)

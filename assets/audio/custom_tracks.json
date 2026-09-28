@@ -52,5 +52,14 @@
         "description": "Extraído para cortes (Personalizada)",
         "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\jingle_renan_santos.mp3",
         "is_builtin": false
+    },
+    "jingle_renan_santos_1.mp3": {
+        "id": "jingle_renan_santos_1.mp3",
+        "filename": "jingle_renan_santos_1.mp3",
+        "title": "📁 Jingle Renan Santos",
+        "category": "Personalizada",
+        "description": "Extraído para cortes (Personalizada)",
+        "path": "D:\\Repository\\shorcut-factory\\assets\\audio\\jingle_renan_santos_1.mp3",
+        "is_builtin": false
     }
 }
