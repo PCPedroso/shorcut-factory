@@ -108,7 +108,7 @@ from core.audio_processor import (
 from core.translator import (
     translate_transcript_segments, save_translated_transcript,
     restore_original_transcript, has_original_backup, translate_cut_subtitles,
-    LANGUAGE_NAMES
+    LANGUAGE_NAMES, get_installed_ollama_models, resolve_ollama_model
 )
 from core.ui_theme import (
     inject_viralcut_theme, render_workflow_stepper, render_section_header,
@@ -3830,13 +3830,20 @@ model_size = st.sidebar.selectbox("Tamanho do Modelo Whisper", _model_sizes, ind
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Modelo de IA (Ollama)")
-_ollama_models = ["llama3", "mistral", "qwen2.5", "llama3.1", "gemma2"]
-_om_idx = _ollama_models.index(_cfg.get("ollama_model", "llama3")) if _cfg.get("ollama_model") in _ollama_models else 0
+_installed_ollama = get_installed_ollama_models()
+if _installed_ollama:
+    _ollama_models = _installed_ollama
+else:
+    _ollama_models = ["llama3", "mistral", "qwen2.5", "llama3.1", "gemma2"]
+
+_saved_om = _cfg.get("ollama_model", "llama3")
+_resolved_om = resolve_ollama_model(_saved_om)
+_om_idx = _ollama_models.index(_resolved_om) if _resolved_om in _ollama_models else 0
 ollama_model = st.sidebar.selectbox(
     "Modelo:",
     _ollama_models,
     index=_om_idx,
-    help="Para usar mistral ou qwen2.5 rode: ollama pull mistral"
+    help="Modelos de IA disponíveis localmente no Ollama."
 )
 
 # 🌐 Integrações & Exportação Direta (Fase 3)
@@ -7528,10 +7535,13 @@ if _has_media_ready:
                             key="sel_cut_sub_trans_lang"
                         )
                     with col_ct2:
+                        _trans_models = get_installed_ollama_models() or _ollama_models
+                        _cur_t_model = resolve_ollama_model(st.session_state.get("sel_cut_trans_model") or ollama_model)
+                        _t_idx = _trans_models.index(_cur_t_model) if _cur_t_model in _trans_models else 0
                         sel_cut_trans_model = st.selectbox(
                             "Modelo IA:",
-                            _ollama_models,
-                            index=_om_idx,
+                            _trans_models,
+                            index=_t_idx,
                             key="sel_cut_trans_model"
                         )
     

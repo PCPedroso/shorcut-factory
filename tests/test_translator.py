@@ -152,6 +152,28 @@ class TestTranslator(unittest.TestCase):
             if os.path.exists(orig_data_dir):
                 shutil.rmtree(orig_data_dir, ignore_errors=True)
 
+    def test_resolve_ollama_model(self):
+        from core.translator import resolve_ollama_model
+
+        with patch("core.translator.get_installed_ollama_models", return_value=["qwen2.5", "mistral", "llama3"]):
+            # Correspondência exata
+            self.assertEqual(resolve_ollama_model("llama3"), "llama3")
+            self.assertEqual(resolve_ollama_model("qwen2.5"), "qwen2.5")
+            # Fallback inteligente quando usuário seleciona llama3.1 mas só tem llama3
+            self.assertEqual(resolve_ollama_model("llama3.1"), "llama3")
+            # Fallback para modelo não existente
+            self.assertEqual(resolve_ollama_model("modelo_inexistente_xyz"), "llama3")
+
+    @patch("core.translator._call_ollama_json", return_value=None)
+    def test_translate_failure_returns_explicit_error(self, mock_ollama):
+        res = translate_transcript_segments(
+            segments=[{"start": 0.0, "end": 2.0, "text": "Testing error"}],
+            target_lang="pt-BR",
+            model="llama3.1"
+        )
+        self.assertIsNotNone(res["error"])
+        self.assertIn("Ollama não retornou traduções", res["error"])
+
 
 if __name__ == '__main__':
     unittest.main()

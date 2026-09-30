@@ -47,62 +47,121 @@ Input subtitle lines to translate:
 """
 
 
-def _call_ollama_json(prompt: str, model: str = "llama3") -> list | None:
+def get_installed_ollama_models() -> list[str]:
     """
-    Chama o Ollama solicitando saída formatada em JSON com fallback robusto de extração.
+    Retorna a lista de nomes limpos dos modelos instalados no Ollama local.
+    Ex: ['llama3', 'mistral', 'qwen2.5']
     """
     try:
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "format": "json",
-            "options": {
-                "temperature": 0.1,
-                "top_p": 0.9,
-            }
-        }
-        res = requests.post(OLLAMA_API_URL, json=payload, timeout=90)
+        res = requests.get("http://localhost:11434/api/tags", timeout=3)
         if res.status_code == 200:
-            resp_json = res.json()
-            raw_response = resp_json.get("response", "").strip()
+            raw_models = res.json().get("models", [])
+            installed = []
+            for m in raw_models:
+                name = m.get("name", "")
+                clean_name = name.split(":")[0] if name.endswith(":latest") else name
+                if clean_name and clean_name not in installed:
+                    installed.append(clean_name)
+            return installed
+    except Exception:
+        pass
+    return []
 
-            # Tenta decodificar direto
-            try:
-                parsed = json.loads(raw_response)
-                if isinstance(parsed, list):
-                    return parsed
-                elif isinstance(parsed, dict):
-                    for k in ["translations", "subtitles", "items", "lines", "data", "result", "results"]:
-                        if k in parsed and isinstance(parsed[k], list):
-                            return parsed[k]
-                    # Se for um dicionário de ids {"0": "...", "1": "..."}
-                    items_list = []
-                    for k, v in parsed.items():
-                        if isinstance(v, dict) and "text" in v:
-                            v_copy = dict(v)
-                            if "id" not in v_copy:
-                                v_copy["id"] = k
-                            items_list.append(v_copy)
-                        elif isinstance(v, str):
-                            items_list.append({"id": k, "text": v})
-                    if items_list:
-                        return items_list
-            except Exception:
-                pass
 
-            # Fallback regex para array JSON
-            match = re.search(r'\[\s*\{.*?\}\s*\]', raw_response, re.DOTALL)
-            if match:
+def resolve_ollama_model(model: str = "llama3") -> str:
+    """
+    Resolve o modelo mais apropriado:
+    1. Se o modelo solicitado estiver instalado (ex: 'llama3' ou 'llama3:latest'), usa-o.
+    2. Caso contrário, tenta um fallback inteligente entre os instalados (prioridade: llama3, qwen2.5, mistral).
+    3. Se nenhum modelo estiver instalado ou o Ollama estiver inacessível, retorna o modelo original.
+    """
+    installed = get_installed_ollama_models()
+    if not installed:
+        return model
+
+    # Correspondência direta
+    m_clean = model.split(":")[0].strip().lower()
+    if m_clean in installed:
+        return m_clean
+
+    for inst in installed:
+        if m_clean in inst.lower() or inst.lower() in m_clean:
+            return inst
+
+    # Fallback por prioridade de modelos conhecidos
+    for pref in ["llama3", "qwen2.5", "mistral"]:
+        if pref in installed:
+            return pref
+
+    return installed[0]
+
+
+def _call_ollama_json(prompt: str, model: str = "llama3") -> list | None:
+    """
+    Chama o Ollama solicitando saída formatada em JSON com resolução automática de modelo
+    e fallback robusto para modelos instalados caso o solicitado não exista.
+    """
+    effective_model = resolve_ollama_model(model)
+    models_to_try = [effective_model]
+    for fb in ["llama3", "qwen2.5", "mistral"]:
+        if fb not in models_to_try:
+            models_to_try.append(fb)
+
+    for current_model in models_to_try:
+        try:
+            payload = {
+                "model": current_model,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "options": {
+                    "temperature": 0.1,
+                    "top_p": 0.9,
+                }
+            }
+            res = requests.post(OLLAMA_API_URL, json=payload, timeout=90)
+            if res.status_code == 200:
+                resp_json = res.json()
+                raw_response = resp_json.get("response", "").strip()
+
+                # Tenta decodificar direto
                 try:
-                    parsed = json.loads(match.group(0))
+                    parsed = json.loads(raw_response)
                     if isinstance(parsed, list):
                         return parsed
+                    elif isinstance(parsed, dict):
+                        for k in ["translations", "subtitles", "items", "lines", "data", "result", "results"]:
+                            if k in parsed and isinstance(parsed[k], list):
+                                return parsed[k]
+                        items_list = []
+                        for k, v in parsed.items():
+                            if isinstance(v, dict) and "text" in v:
+                                v_copy = dict(v)
+                                if "id" not in v_copy:
+                                    v_copy["id"] = k
+                                items_list.append(v_copy)
+                            elif isinstance(v, str):
+                                items_list.append({"id": k, "text": v})
+                        if items_list:
+                            return items_list
                 except Exception:
                     pass
 
-    except Exception:
-        pass
+                # Fallback regex para array JSON
+                match = re.search(r'\[\s*\{.*?\}\s*\]', raw_response, re.DOTALL)
+                if match:
+                    try:
+                        parsed = json.loads(match.group(0))
+                        if isinstance(parsed, list):
+                            return parsed
+                    except Exception:
+                        pass
+            elif res.status_code == 404:
+                # Modelo não encontrado no Ollama, tenta próximo fallback
+                continue
+        except Exception:
+            continue
+
     return None
 
 
@@ -154,6 +213,15 @@ def translate_transcript_segments(
         prompt = format_translation_prompt(items_payload, target_lang_name, source_lang_name)
         translated_items = _call_ollama_json(prompt, model=model)
 
+        if translated_items is None:
+            return {
+                "segments": segments,
+                "full_text": "",
+                "translated_count": 0,
+                "target_lang": target_lang_name,
+                "error": f"Ollama não retornou traduções para o modelo '{model}'. Verifique se o serviço do Ollama está rodando localmente (http://localhost:11434) e se possui modelos instalados (ex: 'ollama pull llama3')."
+            }
+
         # Mapeia as traduções recebidas
         trans_map = {}
         if translated_items and isinstance(translated_items, list):
@@ -164,6 +232,15 @@ def translate_transcript_segments(
                     # Se não vier o id, usa a ordem da lista
                     idx_implicit = len(trans_map)
                     trans_map[idx_implicit] = str(it["text"]).strip()
+
+        if not trans_map:
+            return {
+                "segments": segments,
+                "full_text": "",
+                "translated_count": 0,
+                "target_lang": target_lang_name,
+                "error": "Ollama respondeu, mas não retornou nenhuma tradução válida no formato JSON esperado."
+            }
 
         # Reconstrói os segmentos do lote com timestamps preservados
         for idx, seg in enumerate(batch):
