@@ -108,6 +108,7 @@ from core.audio_processor import (
 from core.translator import (
     translate_transcript_segments, save_translated_transcript,
     restore_original_transcript, has_original_backup, translate_cut_subtitles,
+    translate_full_video_transcript,
     LANGUAGE_NAMES, get_installed_ollama_models, resolve_ollama_model
 )
 from core.ui_theme import (
@@ -5788,6 +5789,62 @@ if _has_media_ready:
                             f"</div>"
                         )
                         st.markdown(line_html, unsafe_allow_html=True)
+
+                st.markdown("---")
+                col_tr_full_title, _ = st.columns([3, 1])
+                with col_tr_full_title:
+                    st.markdown("##### 🌐 Tradução da Transcrição Completa do Vídeo (Ollama IA)")
+                    st.caption("Traduz todos os blocos do vídeo para legendas sincronizadas em Português ou outro idioma, beneficiando todos os cortes.")
+
+                col_tr_lang, col_tr_mod, col_tr_act = st.columns([1.5, 1.2, 1.3])
+                with col_tr_lang:
+                    _all_lang_opts = [
+                        ("pt-BR", "🇧🇷 Português (Brasil)"),
+                        ("en", "🇺🇸 Inglês (English)"),
+                        ("es", "🇪🇸 Espanhol (Español)")
+                    ]
+                    sel_full_tr_lang = st.selectbox(
+                        "Traduzir para:",
+                        [c for c, _ in _all_lang_opts],
+                        format_func=lambda c: dict(_all_lang_opts).get(c, c),
+                        key="sel_full_tr_lang"
+                    )
+                with col_tr_mod:
+                    _full_models = get_installed_ollama_models() or ["llama3", "qwen2.5", "mistral"]
+                    _cur_full_m = resolve_ollama_model(st.session_state.get("sel_full_tr_model") or ollama_model)
+                    _f_idx = _full_models.index(_cur_full_m) if _cur_full_m in _full_models else 0
+                    sel_full_tr_model = st.selectbox("Modelo IA:", _full_models, index=_f_idx, key="sel_full_tr_model")
+                with col_tr_act:
+                    st.write("")
+                    st.write("")
+                    if st.button("🌐 Traduzir Vídeo Completo", type="primary", use_container_width=True, key="btn_translate_all_video_s1"):
+                        _active_vid = v_id_main or get_current_active_video_id(video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or "") or st.session_state.get("active_video_id") or ""
+                        if _active_vid:
+                            _prog_bar_tr = st.progress(0.0, text="Iniciando tradução com IA...")
+                            def _s1_progress(pct, msg):
+                                _prog_bar_tr.progress(pct, text=msg)
+                            _res_all_tr = translate_full_video_transcript(
+                                video_id=_active_vid,
+                                target_lang=sel_full_tr_lang,
+                                model=sel_full_tr_model,
+                                progress_callback=_s1_progress
+                            )
+                            if _res_all_tr.get("error"):
+                                st.error(f"Erro na tradução: {_res_all_tr['error']}")
+                            else:
+                                st.success(f"🎉 {_res_all_tr['count']} frases traduzidas para {sel_full_tr_lang}!")
+                                st.rerun()
+
+                _s1_backup_vid = v_id_main or st.session_state.get("active_video_id") or ""
+                if _s1_backup_vid and has_original_backup(_s1_backup_vid):
+                    col_rev_full_1, col_rev_full_2 = st.columns([3, 1])
+                    with col_rev_full_1:
+                        st.caption("ℹ️ Este vídeo possui backup do texto original.")
+                    with col_rev_full_2:
+                        if st.button("⏪ Reverter Original", key="btn_revert_s1_full_trans", use_container_width=True):
+                            restore_original_transcript(_s1_backup_vid)
+                            st.success("✅ Transcrição restaurada para o original!")
+                            st.rerun()
         else:
             with st.expander("📜 Transcrição Completa com Whisper (Sob Demanda)", expanded=False):
                 st.info("ℹ️ **Transcrição completa ainda não gerada para este vídeo.** O vídeo já está liberado para reproduzir, pausar, marcar tempos e fazer recortes manuais ou carrossel.")
@@ -7545,6 +7602,35 @@ if _has_media_ready:
                             key="sel_cut_trans_model"
                         )
     
+                    col_btn_tr_now, col_prev_tr = st.columns([1.5, 2.5])
+                    with col_btn_tr_now:
+                        if st.button("🌐 Traduzir Trecho Agora", key="btn_translate_cut_now", use_container_width=True):
+                            _cut_s_time = start_time or "00:00:00.00"
+                            _cut_e_time = end_time or "00:00:15.00"
+                            if _vid_id_sub:
+                                _p_bar = st.progress(0.0, text=f"Traduzindo legendas do corte [{_cut_s_time} → {_cut_e_time}]...")
+                                def _cut_progress(pct, msg):
+                                    _p_bar.progress(pct, text=msg)
+                                _target_file_for_cut = _transcript_path_sub
+                                _res_c_tr = translate_cut_subtitles(
+                                    video_id=_vid_id_sub,
+                                    start_time_str=_cut_s_time,
+                                    end_time_str=_cut_e_time,
+                                    target_lang=sel_cut_lang_code,
+                                    model=sel_cut_trans_model,
+                                    transcript_path=_target_file_for_cut,
+                                    progress_callback=_cut_progress
+                                )
+                                if _res_c_tr.get("error"):
+                                    st.error(f"Erro na tradução: {_res_c_tr['error']}")
+                                else:
+                                    st.session_state["cut_translated_preview"] = _res_c_tr.get("translated_snippet", "")
+                                    st.success(f"✅ {_res_c_tr.get('count', 0)} frases traduzidas com sucesso para {sel_cut_lang_code}!")
+                                    st.rerun()
+
+                    if st.session_state.get("cut_translated_preview"):
+                        st.info(f"🗣️ **Prévia da tradução:** \"{st.session_state['cut_translated_preview'][:180]}...\"")
+
                     if _vid_id_sub and has_original_backup(_vid_id_sub):
                         col_rev1, col_rev2 = st.columns([3, 1.2])
                         with col_rev1:
@@ -9188,10 +9274,11 @@ if _has_media_ready:
                         st.info("📝 **Legendas Sincronizadas**: Utilizando a transcrição preservada da pasta do corte.")
 
                     # Se a tradução de legendas deste corte estiver ativa, traduz automaticamente antes de queimar no vídeo
-                    if subtitle_enabled and st.session_state.get("cut_trans_enabled_tgl") and os.path.exists(_transcript_path_cut):
+                    _is_cut_tr_active = subtitle_enabled and (st.session_state.get("cut_trans_enabled_tgl") or _cfg.get("cut_trans_enabled", False))
+                    if _is_cut_tr_active and os.path.exists(_transcript_path_cut):
                         _target_tr_lang = st.session_state.get("sel_cut_sub_trans_lang", "pt-BR")
                         _target_tr_model = st.session_state.get("sel_cut_trans_model", "llama3")
-                        with st.spinner(f"🌐 Traduzindo legendas do corte para {_target_tr_lang} via IA ({_target_tr_model})..."):
+                        with st.spinner(f"🌐 Traduzindo legendas do corte [{start_time} → {end_time}] para {_target_tr_lang} via IA ({_target_tr_model})..."):
                             import core.translator
                             importlib.reload(core.translator)
                             res_cut_tr = core.translator.translate_cut_subtitles(
@@ -9206,6 +9293,15 @@ if _has_media_ready:
                                 st.warning(f"⚠️ Não foi possível traduzir legendas do corte: {res_cut_tr['error']}. Usando original.")
                             else:
                                 st.toast(f"✅ {res_cut_tr['count']} frase(s) traduzida(s) para {_target_tr_lang}!")
+                                # Se existir pasta de corte preservada com transcricao_corte.json, mantém sincronizado
+                                if existing_folder_path and os.path.isdir(existing_folder_path):
+                                    try:
+                                        import shutil
+                                        _dest_f_tr = os.path.join(existing_folder_path, "transcricao_corte.json")
+                                        if os.path.abspath(_transcript_path_cut) != os.path.abspath(_dest_f_tr):
+                                            shutil.copy2(_transcript_path_cut, _dest_f_tr)
+                                    except Exception:
+                                        pass
 
                     with st.spinner(f"Renderizando corte [{start_time} → {end_time}] no formato {aspect_option}{extra_info}..."):
                         cut_res = cut_video(

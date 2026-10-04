@@ -174,6 +174,44 @@ class TestTranslator(unittest.TestCase):
         self.assertIsNotNone(res["error"])
         self.assertIn("Ollama não retornou traduções", res["error"])
 
+    def test_translate_full_video_transcript(self):
+        from core.translator import translate_full_video_transcript
+        test_vid = "test_vid_full_tr"
+        v_dir = os.path.join("data", test_vid)
+        os.makedirs(v_dir, exist_ok=True)
+        t_path = os.path.join(v_dir, "transcript.json")
+        try:
+            payload = {
+                "segments": [
+                    {"start": 0.0, "end": 2.0, "text": "Hello world."},
+                    {"start": 2.0, "end": 4.0, "text": "Good morning."}
+                ],
+                "full_text": "Hello world. Good morning.",
+                "language": "en"
+            }
+            with open(t_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f)
+
+            with patch("core.translator._call_ollama_json") as mock_ollama:
+                mock_ollama.return_value = [
+                    {"id": 0, "text": "Olá mundo."},
+                    {"id": 1, "text": "Bom dia."}
+                ]
+                res = translate_full_video_transcript(video_id=test_vid, target_lang="pt-BR", model="llama3")
+                self.assertIsNone(res["error"])
+                self.assertEqual(res["count"], 2)
+
+                with open(t_path, "r", encoding="utf-8") as f:
+                    saved = json.load(f)
+                self.assertEqual(saved["segments"][0]["text"], "Olá mundo.")
+                self.assertEqual(saved["segments"][1]["text"], "Bom dia.")
+                self.assertTrue(saved["is_translated"])
+                self.assertTrue(os.path.exists(os.path.join(v_dir, "transcript_original.json")))
+        finally:
+            if os.path.exists(v_dir):
+                shutil.rmtree(v_dir, ignore_errors=True)
+
 
 if __name__ == '__main__':
     unittest.main()
+

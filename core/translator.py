@@ -213,6 +213,23 @@ def translate_transcript_segments(
         prompt = format_translation_prompt(items_payload, target_lang_name, source_lang_name)
         translated_items = _call_ollama_json(prompt, model=model)
 
+        # Fallback de resiliência: se o lote maior falhar, tenta em sublotes de 5 frases
+        if not translated_items and len(batch) > 5:
+            translated_items = []
+            for sub_i in range(0, len(batch), 5):
+                sub_batch = batch[sub_i:sub_i + 5]
+                sub_payload = [{"id": idx, "text": seg.get("text", "")} for idx, seg in enumerate(sub_batch)]
+                sub_prompt = format_translation_prompt(sub_payload, target_lang_name, source_lang_name)
+                sub_res = _call_ollama_json(sub_prompt, model=model)
+                if sub_res and isinstance(sub_res, list):
+                    for sr in sub_res:
+                        if isinstance(sr, dict) and "id" in sr:
+                            try:
+                                sr["id"] = int(sr["id"]) + sub_i
+                            except Exception:
+                                pass
+                        translated_items.append(sr)
+
         if translated_items is None:
             return {
                 "segments": segments,
@@ -227,7 +244,11 @@ def translate_transcript_segments(
         if translated_items and isinstance(translated_items, list):
             for it in translated_items:
                 if isinstance(it, dict) and "id" in it and "text" in it:
-                    trans_map[int(it["id"])] = str(it["text"]).strip()
+                    try:
+                        trans_map[int(it["id"])] = str(it["text"]).strip()
+                    except Exception:
+                        idx_implicit = len(trans_map)
+                        trans_map[idx_implicit] = str(it["text"]).strip()
                 elif isinstance(it, dict) and "text" in it:
                     # Se não vier o id, usa a ordem da lista
                     idx_implicit = len(trans_map)
@@ -355,7 +376,8 @@ def translate_cut_subtitles(
     end_time_str: str,
     target_lang: str = "pt-BR",
     model: str = "llama3",
-    transcript_path: str = None
+    transcript_path: str = None,
+    progress_callback = None
 ) -> dict:
     """
     Traduz especificamente as frases de um trecho/corte delimitado por start_time e end_time,
@@ -402,10 +424,15 @@ def translate_cut_subtitles(
     for idx, seg in enumerate(segments):
         seg_start = seg.get("start", 0.0)
         seg_end = seg.get("end", 0.0)
-        # Sobreposição temporal estrita com o corte
+        # Sobreposição temporal com o corte
         if seg_end > s_sec and seg_start < e_sec:
             target_indices.append(idx)
             target_sub_segments.append(seg)
+
+    # Se não encontrou por sobreposição de horário absoluto mas o arquivo é uma fatia isolada
+    if not target_sub_segments and transcript_path and segments:
+        target_indices = list(range(len(segments)))
+        target_sub_segments = list(segments)
 
     if not target_sub_segments:
         return {"translated_segments": [], "translated_snippet": "", "count": 0, "error": "Nenhuma frase encontrada dentro do intervalo selecionado."}
@@ -415,7 +442,8 @@ def translate_cut_subtitles(
         segments=target_sub_segments,
         target_lang=target_lang,
         model=model,
-        batch_size=20
+        batch_size=15,
+        progress_callback=progress_callback
     )
 
     if trans_res.get("error"):
@@ -456,3 +484,80 @@ def translate_cut_subtitles(
         "video_id": video_id,
         "error": None
     }
+
+
+def translate_full_video_transcript(
+    video_id: str,
+    target_lang: str = "pt-BR",
+    model: str = "llama3",
+    progress_callback = None
+) -> dict:
+    """
+    Traduz a transcrição completa de um vídeo (transcript.json) para o idioma desejado via IA Ollama.
+    Salva backup prévio em transcript_original.json se ainda não existir.
+    """
+    if not video_id:
+        return {"error": "Video ID não informado.", "count": 0}
+
+    v_dir = os.path.join("data", video_id)
+    if not os.path.exists(v_dir) and os.path.exists("data"):
+        for d in os.listdir("data"):
+            if d.startswith(video_id) and os.path.exists(os.path.join("data", d, "transcript.json")):
+                v_dir = os.path.join("data", d)
+                video_id = d
+                break
+
+    t_path = os.path.join(v_dir, "transcript.json")
+    if not os.path.exists(t_path):
+        return {"error": "Arquivo transcript.json não encontrado.", "count": 0}
+
+    try:
+        with open(t_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        return {"error": str(e), "count": 0}
+
+    segments = data.get("segments", [])
+    if not segments:
+        return {"error": "Nenhum segmento encontrado para traduzir.", "count": 0}
+
+    # Backup do original no disco se ainda não existir
+    orig_path = os.path.join(v_dir, "transcript_original.json")
+    if not os.path.exists(orig_path):
+        try:
+            with open(orig_path, "w", encoding="utf-8") as f_orig:
+                json.dump(data, f_orig, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    res = translate_transcript_segments(
+        segments=segments,
+        target_lang=target_lang,
+        model=model,
+        batch_size=15,
+        progress_callback=progress_callback
+    )
+
+    if res.get("error"):
+        return {"error": res["error"], "count": 0}
+
+    new_segs = res.get("segments", [])
+    data["segments"] = new_segs
+    data["full_text"] = res.get("full_text", "")
+    data["is_translated"] = True
+    data["language"] = target_lang
+    data["source"] = f"IA Tradução ({LANGUAGE_NAMES.get(target_lang, target_lang)})"
+
+    try:
+        with open(t_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return {"error": str(e), "count": 0}
+
+    return {
+        "error": None,
+        "count": len(new_segs),
+        "video_id": video_id,
+        "language": target_lang
+    }
+

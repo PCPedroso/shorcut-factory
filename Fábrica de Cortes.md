@@ -18,7 +18,7 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
 | **Processamento de Vídeo** | `FFmpeg` (com `libass` e NVENC) | Recorte, filtros complexos, sidechain compress, equalização e queima de legendas/overlays |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
-| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (207 testes) |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (220 testes) |
 
 ---
 
@@ -31,7 +31,7 @@ shorcut-factory/
 ├── assets/
 │   ├── audio/                 # Trilhas sonoras royalty-free categorizadas (.wav / .mp3)
 │   └── fonts/                 # Tipografias bundled (Montserrat-ExtraBold)
-├── tests/                     # Suíte de Testes Unitários Automatizados (207 testes)
+├── tests/                     # Suíte de Testes Unitários Automatizados (220 testes)
 │   ├── test_preserve_cut_transcript.py # Testes de preservação e reuso de transcrição da pasta do corte na re-renderização
 │   ├── test_static_image_video.py# Testes de substituição de vídeo por imagem estática mantendo áudio e backup
 │   ├── test_frame_capturer.py    # Testes de extração de frames, conversão de tempo, thumbnails e base64
@@ -48,8 +48,10 @@ shorcut-factory/
 │   ├── test_integrations.py      # Testes de webhooks e payloads
 │   ├── test_analyzer_utils.py    # Testes de conversão de tempo e textos
 │   ├── test_ui_theme.py          # Testes de tokens de design system, badges e stepper
+│   ├── test_translator.py        # Testes de tradução de segmentos, cortes e vídeo completo com IA local
 │   └── test_web_downloads.py     # Testes de resiliência em downloads de portais de notícias e web
 ├── core/
+│   ├── translator.py          # Motor de tradução de transcrições completas e cortes sob demanda via IA local (Ollama/Llama 3/Qwen), com sincronia temporal e reversibilidade
 │   ├── frame_capturer.py      # Motor de captura de frames pausados em alta resolução e gestão de capas/thumbnails
 │   ├── ui_theme.py            # Design System Studio: tokens CSS, Glassmorphism, stepper, badges e componentes
 │   ├── quick_editor.py        # Edição rápida / ajuste fino: Trim, Snip & Merge, Speed Up (1.0x-1.5x), Imagem Estática com adaptação automática ao formato do corte e execução FFmpeg segura (_run_ffmpeg_command com CREATE_NO_WINDOW/NVENC) e Limpeza de Versões
@@ -246,11 +248,13 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 - **⏱️ Timer em Tempo Real & Monitoramento de Performance (`core/extractor.py`, `app.py`)**:
   - Medição em milissegundos e exibição de tempo decorrido (`format_elapsed_time`) em todas as etapas da esteira (Download de Áudio, Ingestão de Vídeo, Re-download na Seção 3 e Renderização Final).
   - Feedback visual detalhado com tamanho em megabytes (MB) e resolução do arquivo baixado (ex: `🎥 Vídeo baixado em ⏱️ 4.2s (38.1 MB, 1920x1080)`).
-- **🌐 Tradução Inteligente de Transcrições & Legendas Sob Demanda (`core/translator.py`, `app.py`)**:
-  - **Execução 100% Manual / Pós-Processamento**: Nunca executa automaticamente na ingestão; fica disponível em card retrátil para acionamento pontual pelo usuário.
-  - **Tradução Bidirecional & Multilíngue**: Tradução com IA local (Ollama / Llama 3) entre **Português-BR**, **Inglês** e **Espanhol** (ex: traduzir trechos em inglês para Português, ou traduzir cortes em Português para Inglês para público internacional).
+- **🌐 Tradução Inteligente de Transcrições & Legendas Sob Demanda (`core/translator.py`, `app.py`, `tests/test_translator.py`)**:
+  - **Tradução Completa do Vídeo na Seção 1 (`translate_full_video_transcript`)**: Botão dedicado `🌐 Traduzir Vídeo Completo` com barra de progresso em tempo real, traduzindo todos os blocos de fala de uma só vez para Português (Brasil) ou outros idiomas via IA local (Ollama / Llama 3 / Qwen 2.5), liberando todas as análises e cortes já no idioma traduzido.
+  - **Tradução Dinâmica de Cortes na Seção 3 (`translate_cut_subtitles`)**: Botão de tradução imediata com prévia textual (`🌐 Traduzir Trecho Agora`) e acionamento no botão `Gerar Corte`, cobrindo 100% da duração do trecho fatiado sem interrupções e com sincronização automática na pasta do corte (`transcricao_corte.json`).
+  - **Resiliência e Fallbacks em Sublotes**: Algoritmo resiliente que subdivide lotes maiores caso haja lentidão no LLM local, garantindo que nenhum segmento seja perdido ou descarte frases.
   - **Sincronia Temporal Milimétrica**: Preserva estritamente os timestamps `start` e `end` de cada frase, garantindo sincronia labial perfeita na queima de legendas e nos arquivos `.srt`/`.vtt`.
-  - **Backup & Reversibilidade Imediata**: Salva backup em `data/<video_id>/transcript_original.json` e oferece botão de restauração instantânea `⏪ Restaurar Transcrição Original`.
+  - **Backup & Reversibilidade Imediata**: Salva backup automático em `data/<video_id>/transcript_original.json` e oferece botão de restauração instantânea `⏪ Reverter Original` tanto na Seção 1 quanto na Seção 3.
+  - **Resolução Robusta de Identificadores**: Identificação atômica de ID do vídeo ativo (`v_id_main`) prevenindo inconsistências em projetos já processados.
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
 - **🎨 Modernização de Design System & Ergonomia Visual Streamlit (`core/ui_theme.py`, `app.py`, `.streamlit/config.toml`, `tests/test_ui_theme.py`)**:
   - **Design System Dark Studio**: Tokens CSS profissionais, suporte a Glassmorphism, paleta personalizada (Slate `#090d16`, Indigo `#6366f1`, Pink Neon `#ec4899`, Emerald `#10b981`), fontes *Plus Jakarta Sans* e *JetBrains Mono*.
@@ -359,7 +363,7 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Inclusão do botão explícito **`⏱️ Capturar Tempo`** posicionado diretamente ao lado do campo *Tempo do Frame (HH:MM:SS.ms)* e do botão *👁️ Prévia do Frame* na Seção 3 (Fábrica de Enquadramento) e Seção 4 (Galeria de Cortes / Cards de Thumbnail).
   - **Fluxo Ágil & Confiável**: O usuário pausa o player de vídeo no momento exato desejado e clica em `⏱️ Capturar Tempo`. O timestamp milimétrico (`HH:MM:SS.ms`) do vídeo pausado é imediatamente capturado e injetado no campo, permitindo em seguida gerar a prévia do frame, remover fundo com Rembg, criar capas neon com IA ou definir como capa oficial sem digitação manual.
   - **Dupla Camada de Sincronização (Client-Side & Server-Side)**: O listener Javascript captura o evento no `pointerdown`/`mousedown`, atualizando o componente React, os parâmetros de URL (`captured_frame_time` e `last_frame_snap_time`) e a `session_state` do Streamlit de forma atômica e resiliente.
-- **🧪 Suíte de 207 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 220 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (preserve cut transcript on re-render, quick editor static image format adaptation, frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
 
 ---
