@@ -30,7 +30,9 @@ shorcut-factory/
 ├── conftest.py                # Configuração de ambiente para pytest
 ├── assets/
 │   ├── audio/                 # Trilhas sonoras royalty-free categorizadas (.wav / .mp3)
-│   └── fonts/                 # Tipografias bundled (Montserrat-ExtraBold)
+│   ├── fonts/                 # Tipografias bundled (Montserrat-ExtraBold)
+│   └── icons/                 # Ícones oficiais de alta resolução
+│       └── social/            # Ícones de redes sociais (youtube.png, instagram.png, x.png)
 ├── tests/                     # Suíte de Testes Unitários Automatizados (220 testes)
 │   ├── test_preserve_cut_transcript.py # Testes de preservação e reuso de transcrição da pasta do corte na re-renderização
 │   ├── test_static_image_video.py# Testes de substituição de vídeo por imagem estática mantendo áudio e backup
@@ -48,6 +50,7 @@ shorcut-factory/
 │   ├── test_integrations.py      # Testes de webhooks e payloads
 │   ├── test_analyzer_utils.py    # Testes de conversão de tempo e textos
 │   ├── test_ui_theme.py          # Testes de tokens de design system, badges e stepper
+│   ├── test_social_overlay.py    # Testes de badges e assinaturas de redes sociais (@YouTube, @Instagram, @X)
 │   ├── test_translator.py        # Testes de tradução de segmentos, cortes e vídeo completo com IA local
 │   └── test_web_downloads.py     # Testes de resiliência em downloads de portais de notícias e web
 ├── core/
@@ -63,6 +66,7 @@ shorcut-factory/
 │   ├── analyzer.py            # Análise Q&A/Temática, Séries Sugeridas flexíveis e Kit Viral com IA
 │   ├── video_processor.py     # Pipeline FFmpeg para os 5 formatos de enquadramento + download multi-thread
 │   ├── face_tracker.py        # Detecção facial MediaPipe, Deadband Anchor, Split Screen Proporcional & Auto-Switch
+│   ├── social_overlay.py      # Motor de badges e assinaturas de redes sociais (@YouTube, @Instagram, @X) com ícones oficiais e Glassmorphism
 │   ├── subtitle_burner.py     # Geração de legendas dinâmicas em ASS + Headlines + Emojis + Callout + Reuso e parser de transcrição preservada (resolve_preserved_cut_transcript, parse_srt_to_transcript_dict)
 │   ├── thumbnail_generator.py # Extração de melhor frame (MediaPipe/sharpness) e capas 9:16 multicamadas
 │   ├── audio_mixer.py         # Mixagem de áudio com Ducking dinâmico via sidechaincompress FFmpeg
@@ -255,6 +259,12 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Sincronia Temporal Milimétrica**: Preserva estritamente os timestamps `start` e `end` de cada frase, garantindo sincronia labial perfeita na queima de legendas e nos arquivos `.srt`/`.vtt`.
   - **Backup & Reversibilidade Imediata**: Salva backup automático em `data/<video_id>/transcript_original.json` e oferece botão de restauração instantânea `⏪ Reverter Original` tanto na Seção 1 quanto na Seção 3.
   - **Resolução Robusta de Identificadores**: Identificação atômica de ID do vídeo ativo (`v_id_main`) prevenindo inconsistências em projetos já processados.
+- **🌐 Seleção e Download Flexível de Faixas de Legendas do YouTube (`core/transcriber.py`, `app.py`, `tests/test_youtube_subtitles_selection.py`)**:
+  - **Detecção e Mapeamento de Faixas de Legendas**: Varredura inteligente de todas as faixas oficiais e automáticas disponibilizadas pelo YouTube (`list_available_youtube_transcripts`), com ordenação prioritária para Português (`pt`, `pt-BR`, `pt-PT`), seguido de Inglês (`en`), Espanhol (`es`) e demais idiomas.
+  - **Download Avulso Instantâneo sem Baixar o Vídeo Pesado**: Botão dedicado `📥 Baixar Apenas Legenda (<IDIOMA>)` na Seção 1, permitindo obter todos os blocos de texto e timestamps em 1 a 2 segundos antes mesmo de baixar arquivos pesados de vídeo MP4.
+  - **Suporte a Vídeos em Idioma Estrangeiro com Legenda em Português**: Permite selecionar legendas em Português-BR para vídeos com áudio em inglês (como podcasts e entrevistas internacionais), adotando as legendas traduzidas ou oficiais do YouTube diretamente como `transcript.json` do projeto.
+  - **Troca de Legenda em Projetos Existentes**: Popover integrado `🌐 Trocar Legenda (YouTube)` nas ações modulares da Seção 1, permitindo trocar o idioma da transcrição com 1 clique e backup automático da anterior (`transcript_backup_prev.json`), sem necessidade de apagar ou reprocessar o vídeo já baixado.
+  - **Compatibilidade com Fatiamento de Tempo (Time-Range Slicing)**: Caso haja intervalo configurado em `Início` e `Fim`, as falas baixadas são automaticamente fatiadas e re-indexadas no intervalo selecionado.
 - **🛡️ Estabilização Deadband Anchor no Rastreamento Facial (Zona Morta 90px)** (`core/face_tracker.py`).
 - **🎨 Modernização de Design System & Ergonomia Visual Streamlit (`core/ui_theme.py`, `app.py`, `.streamlit/config.toml`, `tests/test_ui_theme.py`)**:
   - **Design System Dark Studio**: Tokens CSS profissionais, suporte a Glassmorphism, paleta personalizada (Slate `#090d16`, Indigo `#6366f1`, Pink Neon `#ec4899`, Emerald `#10b981`), fontes *Plus Jakarta Sans* e *JetBrains Mono*.
@@ -363,8 +373,21 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Inclusão do botão explícito **`⏱️ Capturar Tempo`** posicionado diretamente ao lado do campo *Tempo do Frame (HH:MM:SS.ms)* e do botão *👁️ Prévia do Frame* na Seção 3 (Fábrica de Enquadramento) e Seção 4 (Galeria de Cortes / Cards de Thumbnail).
   - **Fluxo Ágil & Confiável**: O usuário pausa o player de vídeo no momento exato desejado e clica em `⏱️ Capturar Tempo`. O timestamp milimétrico (`HH:MM:SS.ms`) do vídeo pausado é imediatamente capturado e injetado no campo, permitindo em seguida gerar a prévia do frame, remover fundo com Rembg, criar capas neon com IA ou definir como capa oficial sem digitação manual.
   - **Dupla Camada de Sincronização (Client-Side & Server-Side)**: O listener Javascript captura o evento no `pointerdown`/`mousedown`, atualizando o componente React, os parâmetros de URL (`captured_frame_time` e `last_frame_snap_time`) e a `session_state` do Streamlit de forma atômica e resiliente.
-- **🧪 Suíte de 220 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (preserve cut transcript on re-render, quick editor static image format adaptation, frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
+- **🏷️ Assinatura e Badges de Redes Sociais nos Cortes (@YouTube, @Instagram, @X) (`core/social_overlay.py`, `app.py`, `tests/test_social_overlay.py`)**:
+  - **Identificadores Flexíveis por Canal**: Suporte a YouTube, Instagram e X (Twitter) com seleção por checkbox e texto livre para o `@` ou descrição em cada canal.
+  - **Ícones Oficiais Proporcionais à Tipografia**: Redimensionamento proporcional automático preservando a taxa de proporção (1.08x do tamanho da fonte) e compatibilidade com ícones personalizados adicionados na pasta `assets/icons/social/`.
+  - **Estilos Visuais de Alta Conversão**:
+    - *Pílula Glassmorphism*: Container unificado translúcido dark com bordas suaves de vidro.
+    - *Pílulas Individuais*: Cada rede social em sua própria cápsula arredondada elegante.
+    - *Flutuante (Sem Fundo)*: Ícones e tipografia diretamente sobrepostos ao vídeo com sombra projetada suave.
+  - **Posicionamento & Safe Zones para Shorts/Reels/TikTok**:
+    - Posições **Bottom (Inferior)** e **Top (Superior)** com calibragem vertical de segurança (evitando sobreposição com legendas nativas e botões de interface de Reels/TikTok).
+    - Slider de ajuste fino milimétrico de margem vertical (`offset_y`).
+  - **Modo Monocromático Minimalista**: Opção de converter todos os ícones e tipografia em branco puro com transparência preservada.
+  - **Prévia em Tempo Real no Frame do Vídeo**: Botão dedicado na interface que renderiza instantaneamente o selo sobre o frame ativo antes da renderização.
+  - **Queima Acelerada por Hardware (NVENC GPU com Fallback CPU)**: Pipeline FFmpeg rápido sem perda de áudio integrado à esteira de pós-processamento do corte.
+- **🧪 Suíte de 228 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (social media badges/overlay, preserve cut transcript on re-render, quick editor static image format adaptation, frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
 
 ---
 

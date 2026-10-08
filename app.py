@@ -28,6 +28,7 @@ import core.frame_capturer
 import core.quick_editor
 import core.overlay_manager
 import core.ui_theme
+import core.social_overlay
 
 importlib.reload(core.extractor)
 importlib.reload(core.transcriber)
@@ -48,6 +49,7 @@ importlib.reload(core.frame_capturer)
 importlib.reload(core.quick_editor)
 importlib.reload(core.overlay_manager)
 importlib.reload(core.ui_theme)
+importlib.reload(core.social_overlay)
 
 from core.extractor import (
     download_audio, get_video_metadata, get_video_id,
@@ -55,7 +57,10 @@ from core.extractor import (
     parse_time_str, format_time_sec, format_elapsed_time,
     get_video_components_status
 )
-from core.transcriber import transcribe_audio, fetch_youtube_transcript, append_incremental_transcript
+from core.transcriber import (
+    transcribe_audio, fetch_youtube_transcript, append_incremental_transcript,
+    list_available_youtube_transcripts, format_language_label, extract_youtube_video_id
+)
 from core.analyzer import analyze_transcript, build_suggested_bundles, build_golden_rule_micro_cuts, normalize_time_mask
 from core.video_processor import (
     download_full_video, cut_video, get_video_resolution,
@@ -1293,6 +1298,25 @@ def format_time(seconds):
     s = int(seconds % 60)
     return f"{h:02d}:{m:02d}:{s:02d}"
 
+def _has_video_media(vid: str) -> bool:
+    if not vid:
+        return False
+    d = os.path.join("data", vid)
+    v_p = os.path.join(d, "video_full.mp4")
+    a_p = os.path.join(d, "audio.mp3")
+    t_p = os.path.join(d, "transcript.json")
+    try:
+        if os.path.exists(v_p) and os.path.getsize(v_p) > 10240:
+            return True
+        if os.path.exists(a_p) and os.path.getsize(a_p) > 10240:
+            return True
+        if os.path.exists(t_p) and os.path.getsize(t_p) > 10:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def get_current_active_video_id(url: str = None) -> str:
     """
     Retorna o video_id efetivo levando em consideração fatiamento de tempo (Time-Range Slicing),
@@ -1305,6 +1329,15 @@ def get_current_active_video_id(url: str = None) -> str:
     target_url = url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
     base_vid = get_video_id(target_url) if target_url else ""
     if not base_vid:
+        if act_id and os.path.exists(os.path.join("data", act_id)):
+            return act_id
+        if _cfg.get("auto_load_last_project", False) and not st.session_state.get("_project_cleared_by_user", False):
+            try:
+                saved_vid = _cfg.get("last_active_video_id")
+                if saved_vid and _has_video_media(saved_vid):
+                    return saved_vid
+            except Exception:
+                pass
         return act_id or ""
 
     s_slice = parse_time_str(st.session_state.get("input_yt_slice_start", ""))
@@ -3706,11 +3739,25 @@ def load_video_saved_artifacts(video_id: str):
     """Carrega todas as ações e análises salvas individualmente para o vídeo."""
     if not video_id:
         return
+    st.session_state["_project_cleared_by_user"] = False
     st.session_state["active_video_id"] = video_id
     v_dir = os.path.join("data", video_id)
     
     # 1. Transcrição
     t_file = os.path.join(v_dir, "transcript.json")
+    if not os.path.exists(t_file) and os.path.isdir(v_dir):
+        # Fallback inteligente: se existir transcrição _cut_tr_*.json salva no diretório, reutiliza
+        for fname in os.listdir(v_dir):
+            if fname.startswith("_cut_tr_") and fname.endswith(".json"):
+                cand_f = os.path.join(v_dir, fname)
+                if os.path.getsize(cand_f) > 1024:
+                    try:
+                        import shutil
+                        shutil.copy2(cand_f, t_file)
+                        break
+                    except Exception:
+                        pass
+
     if os.path.exists(t_file):
         try:
             with open(t_file, "r", encoding="utf-8") as f:
@@ -3718,6 +3765,8 @@ def load_video_saved_artifacts(video_id: str):
                 st.session_state.full_text = t_data.get("full_text", "")
                 st.session_state.segments = t_data.get("segments", [])
                 st.session_state.transcript_source = t_data.get("source", "YouTube Oficial")
+                st.session_state.transcript_lang = t_data.get("language", "")
+                st.session_state.transcript_lang_name = t_data.get("language_name", "")
                 st.session_state.transcription_done = True
         except Exception:
             pass
@@ -3767,9 +3816,69 @@ def load_video_saved_artifacts(video_id: str):
     else:
         st.session_state.saved_steps = []
 
+    # 6. Vídeo Original & URL
+    v_full_file = os.path.join(v_dir, "video_full.mp4")
+    if os.path.exists(v_full_file) and os.path.getsize(v_full_file) > 10240:
+        st.session_state.video_ready = True
+
+    meta_file = os.path.join(v_dir, "metadata.json")
+    if os.path.exists(meta_file):
+        try:
+            with open(meta_file, "r", encoding="utf-8") as f_meta:
+                _m = json.load(f_meta)
+                if _m.get("url"):
+                    st.session_state.video_url = _m["url"]
+                    st.session_state.input_yt_url = _m["url"]
+        except Exception:
+            pass
+
+    if not st.session_state.get("video_url"):
+        _u = f"local://{video_id}" if str(video_id).startswith("local_") else f"https://www.youtube.com/watch?v={video_id}"
+        st.session_state.video_url = _u
+        st.session_state.input_yt_url = _u
+
+    save_setting("last_active_video_id", video_id)
+
+
+def clear_current_project():
+    """Limpa o projeto ativo da sessão e das configurações persistentes, permitindo iniciar um projeto limpo."""
+    keys_to_clear = [
+        "active_video_id", "video_url", "input_yt_url", "transcription_done",
+        "video_ready", "full_text", "segments", "transcript_source",
+        "pautas", "bundles", "shorts", "saved_steps", "ai_results",
+        "input_yt_slice_start", "input_yt_slice_end", "player_synced_time",
+        "final_start_time", "final_end_time", "custom_slice_active"
+    ]
+    for k in keys_to_clear:
+        if k in st.session_state:
+            if isinstance(st.session_state[k], bool):
+                st.session_state[k] = False
+            elif isinstance(st.session_state[k], list):
+                st.session_state[k] = []
+            elif isinstance(st.session_state[k], dict):
+                st.session_state[k] = {}
+            else:
+                st.session_state[k] = ""
+    st.session_state["_project_cleared_by_user"] = True
+    save_setting("last_active_video_id", "")
+    save_setting("last_video_url", "")
+    _cfg["last_active_video_id"] = ""
+    _cfg["last_video_url"] = ""
+
 
 # Barra Lateral (Biblioteca & Configurações)
 st.sidebar.header("📚 Biblioteca de Vídeos")
+
+_cur_act_id = st.session_state.get("active_video_id", "")
+if _cur_act_id:
+    st.sidebar.caption(f"📌 **Vídeo ativo:** `{_cur_act_id}`")
+    if st.sidebar.button("🧹 Limpar Projeto / Iniciar Novo", key="btn_clear_active_proj", use_container_width=True, help="Descarrega o vídeo e limpa todas as análises atuais para começar do zero"):
+        clear_current_project()
+        st.rerun()
+else:
+    if st.sidebar.button("✨ Iniciar Novo Projeto (Limpo)", key="btn_new_project_clean", use_container_width=True, help="Garante que a tela comece vazia para carregar um novo vídeo"):
+        clear_current_project()
+        st.rerun()
 
 library_videos = get_library()
 if library_videos:
@@ -3820,6 +3929,15 @@ else:
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ Configurações")
+
+auto_load_last = st.sidebar.checkbox(
+    "Restaurar último projeto ao iniciar",
+    value=bool(_cfg.get("auto_load_last_project", False)),
+    help="Se ativado, a aplicação abre automaticamente o último vídeo processado. Se desativado (recomendado), a aplicação sempre inicia com a tela limpa para novos vídeos."
+)
+if auto_load_last != bool(_cfg.get("auto_load_last_project", False)):
+    save_setting("auto_load_last_project", auto_load_last)
+    _cfg["auto_load_last_project"] = auto_load_last
 
 _devices = ["cuda", "cpu"]
 _dev_idx = _devices.index(_cfg.get("device_option", "cuda")) if _cfg.get("device_option") in _devices else 0
@@ -3916,6 +4034,13 @@ if 'video_url' not in st.session_state:
 if 'input_yt_url' not in st.session_state:
     st.session_state.input_yt_url = st.session_state.video_url
 
+# Restauração automática do último vídeo ativo apenas se explicitamente habilitado
+if _cfg.get("auto_load_last_project", False) and not st.session_state.get("_project_cleared_by_user", False):
+    if not st.session_state.get("active_video_id") or not _has_video_media(st.session_state.get("active_video_id")):
+        _last_vid = _cfg.get("last_active_video_id")
+        if _last_vid and _has_video_media(_last_vid):
+            load_video_saved_artifacts(_last_vid)
+
 video_url = st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
 strategy_choice = st.session_state.get("analysis_strategy_radio") or _cfg.get("analysis_strategy", "🎙️ Entrevistas, Sabatinas & Podcasts (Perguntas e Respostas Exatas)")
 
@@ -3949,11 +4074,26 @@ if show_sec1:
     )
     
     if input_mode.startswith("🌐 Link"):
+        def _on_yt_url_change():
+            val = st.session_state.get("input_yt_url", "").strip()
+            if val:
+                st.session_state["video_url"] = val
+                _v_id = get_video_id(val)
+                if _v_id:
+                    st.session_state["active_video_id"] = _v_id
+                    save_setting("last_active_video_id", _v_id)
+
+        if not st.session_state.get("input_yt_url") and st.session_state.get("video_url"):
+            st.session_state["input_yt_url"] = st.session_state["video_url"]
+
         video_url = st.text_input(
             "Cole a URL do vídeo (YouTube, Instagram Reel/Post, TikTok, etc.):",
             key="input_yt_url",
+            on_change=_on_yt_url_change,
             placeholder="https://www.youtube.com/watch?v=... ou https://www.instagram.com/reel/..."
         )
+        if video_url and video_url != st.session_state.get("video_url"):
+            st.session_state["video_url"] = video_url
     
         with st.expander("⏱️ Baixar Apenas um Trecho Específico (Lives / Podcasts Longos)", expanded=False):
             st.caption("💡 **Time-Range Slicing**: Em vez de baixar gigabytes de um vídeo ou live de 2 a 4 horas, baixe apenas o trecho desejado. É até **50x mais rápido** e consome muito menos disco!")
@@ -4106,6 +4246,11 @@ if show_sec1:
                                         end_sec=active_slice_end
                                     )
                                 if os.path.exists(target_vfull):
+                                    st.session_state["video_ready"] = True
+                                    st.session_state["active_video_id"] = target_check_id
+                                    st.session_state["video_url"] = video_url
+                                    save_setting("last_active_video_id", target_check_id)
+                                    load_video_saved_artifacts(target_check_id)
                                     st.success("🎥 Vídeo baixado com sucesso!")
                                     st.rerun()
                                 else:
@@ -4162,6 +4307,72 @@ if show_sec1:
                             st.rerun()
                     else:
                         st.button("📝 Transcrição Pendente", disabled=True, key="btn_inc_top_wait_tr", use_container_width=True)
+
+                    _yt_mod_id = extract_youtube_video_id(target_check_id)
+                    if _yt_mod_id:
+                        with st.popover("🌐 Trocar Legenda (YouTube)", use_container_width=True):
+                            st.markdown("##### 🌐 Trocar Legenda Oficial do YouTube")
+                            st.caption("Baixe outra faixa de legenda para este vídeo (ex: Português-BR para vídeos com áudio em inglês):")
+                            _avail_subs_mod = list_available_youtube_transcripts(_yt_mod_id)
+                            if _avail_subs_mod:
+                                _def_s_idx = 0
+                                for _i_s, _s_item in enumerate(_avail_subs_mod):
+                                    if _s_item["code"].lower() in ("pt", "pt-br", "pt_br"):
+                                        _def_s_idx = _i_s
+                                        break
+                                _chosen_track = st.selectbox(
+                                    "Idioma disponível:",
+                                    options=_avail_subs_mod,
+                                    index=_def_s_idx,
+                                    format_func=lambda s: s["label"],
+                                    key=f"sel_change_sub_{target_check_id}"
+                                )
+                                if st.button("📥 Baixar e Aplicar Legenda", type="primary", key=f"btn_apply_sub_change_{target_check_id}", use_container_width=True):
+                                    with st.spinner(f"Baixando legenda em {_chosen_track['name']}..."):
+                                        _res_track = fetch_youtube_transcript(_yt_mod_id, selected_language=_chosen_track["code"])
+                                    if _res_track.get("transcript_segments"):
+                                        _t_segs = _res_track["transcript_segments"]
+                                        if active_slice_start is not None or active_slice_end is not None:
+                                            s_min = active_slice_start or 0.0
+                                            s_max = active_slice_end if active_slice_end is not None else float('inf')
+                                            _sl_segs = []
+                                            for seg in _t_segs:
+                                                seg_start = seg.get("start", 0.0)
+                                                seg_end = seg.get("end", 0.0)
+                                                if seg_end >= s_min and seg_start <= s_max:
+                                                    adj = dict(seg)
+                                                    adj["start"] = max(0.0, seg_start - s_min)
+                                                    adj["end"] = max(0.0, seg_end - s_min)
+                                                    _sl_segs.append(adj)
+                                            _t_segs = _sl_segs
+
+                                        if os.path.exists(target_tr_file):
+                                            try:
+                                                import shutil
+                                                shutil.copy2(target_tr_file, os.path.join(target_data_dir, "transcript_backup_prev.json"))
+                                            except Exception:
+                                                pass
+
+                                        st.session_state.transcription_done = True
+                                        st.session_state.full_text = " ".join([s["text"] for s in _t_segs])
+                                        st.session_state.segments = _t_segs
+                                        st.session_state.transcript_source = _res_track.get("source", f"YouTube Oficial ({_chosen_track['name']})")
+                                        
+                                        with open(target_tr_file, "w", encoding="utf-8") as f:
+                                            json.dump({
+                                                "full_text": st.session_state.full_text,
+                                                "segments": st.session_state.segments,
+                                                "source": st.session_state.transcript_source,
+                                                "language": _chosen_track["code"],
+                                                "language_name": _chosen_track["name"]
+                                            }, f, ensure_ascii=False, indent=4)
+                                        
+                                        st.success(f"✅ Legenda atualizada com sucesso para {_chosen_track['name']} ({len(_t_segs)} falas)!")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Erro ao baixar legenda: {_res_track.get('error')}")
+                            else:
+                                st.info("Nenhuma faixa de legenda encontrada no YouTube para este vídeo.")
 
                 with act_col4:
                     with st.popover("⚠️ Limpar e Recomeçar"):
@@ -4260,6 +4471,94 @@ if show_sec1:
                             st.session_state.transcription_done = False
                             st.rerun()
                 st.divider()
+
+        # 🌐 Seleção de Legenda Oficial do YouTube (Pré-processamento / Download Avulso)
+        selected_yt_sub_lang = None
+        raw_base_vid = get_video_id(video_url) if video_url else ""
+        if raw_base_vid and not raw_base_vid.startswith(("ig_", "tt_", "tw_", "local_", "web_")):
+            avail_subs_main = list_available_youtube_transcripts(raw_base_vid)
+            if avail_subs_main:
+                with st.expander("🌐 Idioma da Legenda / Transcrição (YouTube)", expanded=True):
+                    st.caption("Selecione qual faixa de legendas oficiais do YouTube você deseja carregar para este vídeo (ex: Português-BR para vídeos com áudio em inglês):")
+                    def_s_idx = 0
+                    for _idx_s, _s_item in enumerate(avail_subs_main):
+                        if _s_item["code"].lower() in ("pt", "pt-br", "pt_br"):
+                            def_s_idx = _idx_s
+                            break
+                    col_s_box, col_s_btn = st.columns([2.5, 1.5])
+                    with col_s_box:
+                        chosen_main_sub = st.selectbox(
+                            "Faixa de Legenda Oficial:",
+                            options=avail_subs_main,
+                            index=def_s_idx,
+                            format_func=lambda s: s["label"],
+                            key=f"main_sub_sel_{raw_base_vid}",
+                            help="Selecione o idioma da legenda desejada (ex: Português-BR para vídeos em inglês)."
+                        )
+                        if chosen_main_sub:
+                            selected_yt_sub_lang = chosen_main_sub["code"]
+                    with col_s_btn:
+                        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                        btn_dl_sub_quick = st.button(
+                            f"📥 Baixar Legenda ({chosen_main_sub['code'].upper()})",
+                            key=f"btn_dl_sub_quick_{raw_base_vid}",
+                            help="Baixa imediatamente a legenda oficial selecionada e gera a transcrição do projeto em segundos, sem baixar o vídeo MP4 primeiro.",
+                            use_container_width=True
+                        )
+
+                    if btn_dl_sub_quick and chosen_main_sub:
+                        with st.spinner(f"Baixando legenda oficial em {chosen_main_sub['name']} ({chosen_main_sub['code']})..."):
+                            sub_res = fetch_youtube_transcript(raw_base_vid, selected_language=chosen_main_sub["code"])
+                        if sub_res.get("transcript_segments"):
+                            _t_segs = sub_res["transcript_segments"]
+                            if active_slice_start is not None or active_slice_end is not None:
+                                s_min = active_slice_start or 0.0
+                                s_max = active_slice_end if active_slice_end is not None else float('inf')
+                                _sl_segs = []
+                                for seg in _t_segs:
+                                    seg_start = seg.get("start", 0.0)
+                                    seg_end = seg.get("end", 0.0)
+                                    if seg_end >= s_min and seg_start <= s_max:
+                                        adj = dict(seg)
+                                        adj["start"] = max(0.0, seg_start - s_min)
+                                        adj["end"] = max(0.0, seg_end - s_min)
+                                        _sl_segs.append(adj)
+                                _t_segs = _sl_segs
+
+                            target_proj_id = target_check_id if ('target_check_id' in locals() and target_check_id) else (
+                                f"{raw_base_vid}_t_{int(active_slice_start or 0)}_{int(active_slice_end)}" if (active_slice_start is not None or active_slice_end is not None) else raw_base_vid
+                            )
+                            target_proj_dir = os.path.join("data", target_proj_id)
+                            os.makedirs(target_proj_dir, exist_ok=True)
+                            target_proj_tr = os.path.join(target_proj_dir, "transcript.json")
+                            if os.path.exists(target_proj_tr):
+                                try:
+                                    import shutil
+                                    shutil.copy2(target_proj_tr, os.path.join(target_proj_dir, "transcript_backup_prev.json"))
+                                except Exception:
+                                    pass
+
+                            st.session_state.transcription_done = True
+                            st.session_state.full_text = " ".join([s["text"] for s in _t_segs])
+                            st.session_state.segments = _t_segs
+                            st.session_state.transcript_source = sub_res.get("source", f"YouTube Oficial ({chosen_main_sub['name']})")
+                            st.session_state.active_video_id = target_proj_id
+                            st.session_state.video_url = video_url
+                            save_setting("last_active_video_id", target_proj_id)
+
+                            with open(target_proj_tr, "w", encoding="utf-8") as f:
+                                json.dump({
+                                    "full_text": st.session_state.full_text,
+                                    "segments": st.session_state.segments,
+                                    "source": st.session_state.transcript_source,
+                                    "language": chosen_main_sub["code"],
+                                    "language_name": chosen_main_sub["name"]
+                                }, f, ensure_ascii=False, indent=4)
+                            
+                            st.success(f"⚡ Legenda em **{chosen_main_sub['name']}** carregada com sucesso ({len(_t_segs)} falas)!")
+                            st.rerun()
+                        else:
+                            st.error(f"Erro ao baixar legenda: {sub_res.get('error')}")
 
         col_yt_b1, col_yt_b2 = st.columns([1.5, 1])
         with col_yt_b1:
@@ -4576,6 +4875,12 @@ if show_sec1:
                                                 end_sec=active_slice_end
                                             )
                                         if os.path.exists(_vfull_cache_path):
+                                            _eff_id = target_check_id if 'target_check_id' in locals() and target_check_id else video_id
+                                            st.session_state["video_ready"] = True
+                                            st.session_state["active_video_id"] = _eff_id
+                                            st.session_state["video_url"] = video_url
+                                            save_setting("last_active_video_id", _eff_id)
+                                            load_video_saved_artifacts(_eff_id)
                                             st.success("🎥 Vídeo baixado com sucesso!")
                                             st.rerun()
                                         else:
@@ -4629,6 +4934,72 @@ if show_sec1:
                             else:
                                 st.button("📝 Transcrição Pendente", disabled=True, key="btn_inc_tr_wait", use_container_width=True)
 
+                            _yt_mod_id2 = extract_youtube_video_id(video_id)
+                            if _yt_mod_id2:
+                                with st.popover("🌐 Trocar Legenda (YouTube)", use_container_width=True):
+                                    st.markdown("##### 🌐 Trocar Legenda Oficial do YouTube")
+                                    st.caption("Baixe outra faixa de legenda para este vídeo (ex: Português-BR para vídeos em inglês):")
+                                    _avail_subs_mod2 = list_available_youtube_transcripts(_yt_mod_id2)
+                                    if _avail_subs_mod2:
+                                        _def_s_idx2 = 0
+                                        for _i_s2, _s_item2 in enumerate(_avail_subs_mod2):
+                                            if _s_item2["code"].lower() in ("pt", "pt-br", "pt_br"):
+                                                _def_s_idx2 = _i_s2
+                                                break
+                                        _chosen_track2 = st.selectbox(
+                                            "Idioma disponível:",
+                                            options=_avail_subs_mod2,
+                                            index=_def_s_idx2,
+                                            format_func=lambda s: s["label"],
+                                            key=f"sel_change_sub_inc_{video_id}"
+                                        )
+                                        if st.button("📥 Baixar e Aplicar Legenda", type="primary", key=f"btn_apply_sub_change_inc_{video_id}", use_container_width=True):
+                                            with st.spinner(f"Baixando legenda em {_chosen_track2['name']}..."):
+                                                _res_track2 = fetch_youtube_transcript(_yt_mod_id2, selected_language=_chosen_track2["code"])
+                                            if _res_track2.get("transcript_segments"):
+                                                _t_segs2 = _res_track2["transcript_segments"]
+                                                if active_slice_start is not None or active_slice_end is not None:
+                                                    s_min = active_slice_start or 0.0
+                                                    s_max = active_slice_end if active_slice_end is not None else float('inf')
+                                                    _sl_segs2 = []
+                                                    for seg in _t_segs2:
+                                                        seg_start = seg.get("start", 0.0)
+                                                        seg_end = seg.get("end", 0.0)
+                                                        if seg_end >= s_min and seg_start <= s_max:
+                                                            adj = dict(seg)
+                                                            adj["start"] = max(0.0, seg_start - s_min)
+                                                            adj["end"] = max(0.0, seg_end - s_min)
+                                                            _sl_segs2.append(adj)
+                                                    _t_segs2 = _sl_segs2
+
+                                                if os.path.exists(transcript_file):
+                                                    try:
+                                                        import shutil
+                                                        shutil.copy2(transcript_file, os.path.join(data_dir, "transcript_backup_prev.json"))
+                                                    except Exception:
+                                                        pass
+
+                                                st.session_state.transcription_done = True
+                                                st.session_state.full_text = " ".join([s["text"] for s in _t_segs2])
+                                                st.session_state.segments = _t_segs2
+                                                st.session_state.transcript_source = _res_track2.get("source", f"YouTube Oficial ({_chosen_track2['name']})")
+                                                
+                                                with open(transcript_file, "w", encoding="utf-8") as f:
+                                                    json.dump({
+                                                        "full_text": st.session_state.full_text,
+                                                        "segments": st.session_state.segments,
+                                                        "source": st.session_state.transcript_source,
+                                                        "language": _chosen_track2["code"],
+                                                        "language_name": _chosen_track2["name"]
+                                                    }, f, ensure_ascii=False, indent=4)
+                                                
+                                                st.success(f"✅ Legenda atualizada com sucesso para {_chosen_track2['name']} ({len(_t_segs2)} falas)!")
+                                                st.rerun()
+                                            else:
+                                                st.error(f"Erro ao baixar legenda: {_res_track2.get('error')}")
+                                    else:
+                                        st.info("Nenhuma faixa de legenda encontrada no YouTube para este vídeo.")
+
                         with act_col4:
                             with st.popover("⚠️ Limpar e Recomeçar"):
                                 st.caption("Isso excluirá os arquivos locais deste vídeo e refará o processamento do zero.")
@@ -4651,7 +5022,10 @@ if show_sec1:
                         transcribe_res = {}
                         if not base_vid.startswith(("ig_", "tt_", "tw_", "local_", "web_")):
                             with st.spinner("Buscando transcrição oficial do YouTube (alta precisão e fidelidade)..."):
-                                raw_yt_tr = fetch_youtube_transcript(base_vid)
+                                raw_yt_tr = fetch_youtube_transcript(
+                                    base_vid,
+                                    selected_language=selected_yt_sub_lang if 'selected_yt_sub_lang' in locals() and selected_yt_sub_lang else None
+                                )
     
                             if raw_yt_tr.get("transcript_segments"):
                                 # Se há corte por tempo ativo, filtra e re-baseia os segmentos oficiais
@@ -4733,10 +5107,14 @@ if show_sec1:
                             st.session_state.transcription_done = False
                             st.session_state.full_text = ""
                             st.session_state.segments = []
-                            st.session_state.video_ready = True
-                            st.session_state.active_video_id = video_id
                             st.success("🎉 **Vídeo e áudio prontos para visualização e recortes imediatos!**")
                             st.info("💡 **Transcrição completa com Whisper mantida sob demanda:** O vídeo pode ser fatiado e exportado agora mesmo. A transcrição completa pode ser gerada a qualquer momento caso queira buscar palavras ou minerar pautas com IA.")
+
+                        st.session_state.active_video_id = video_id
+                        st.session_state.video_url = video_url
+                        if os.path.exists(_vfull_path) and os.path.getsize(_vfull_path) > 10240:
+                            st.session_state.video_ready = True
+                        save_setting("last_active_video_id", video_id)
 
                         if is_live_flag and not os.path.exists(_vfull_path):
                             st.markdown("### 🔴 Transmissão Ao Vivo (LIVE) Detectada")
@@ -5087,7 +5465,20 @@ if show_sec1:
             first_file = file_a if order_choice.startswith("1️⃣") else file_b
             second_file = file_b if order_choice.startswith("1️⃣") else file_a
     
-            st.markdown("### ⚙️ 2. Ajustes Visuais da Composição")
+            st.markdown("### 🔀 2. Estilo de União dos Vídeos")
+            dual_style_choice = st.radio(
+                "Como você deseja unir os dois vídeos?",
+                [
+                    "🔗 **Juntar Vídeos em Sequência (Continuação Direta)** — O 1º vídeo roda em tela cheia até o fim; assim que termina, o 2º vídeo começa imediatamente como continuação.",
+                    "🎭 **Composição Dividida (Split ➔ Tela Cheia)** — O 1º vídeo roda no topo enquanto o 2º fica pausado em preto e branco embaixo. Ao final do 1º, o 2º assume a tela cheia."
+                ],
+                index=0,
+                key="dual_style_mode_selection",
+                help="Escolha 'Continuação Direta' para colar um vídeo depois do outro continuamente, ou 'Composição Dividida' para tela repartida inicial."
+            )
+            is_direct_concat_ui = dual_style_choice.startswith("🔗")
+
+            st.markdown("### ⚙️ 3. Ajustes do Projeto Composto")
             col_d1, col_d2 = st.columns([2, 2])
             with col_d1:
                 default_dual_title = f"{os.path.splitext(first_file.name)[0]} + {os.path.splitext(second_file.name)[0]}"
@@ -5096,38 +5487,51 @@ if show_sec1:
                     value=default_dual_title,
                     key="custom_dual_title"
                 )
-                dual_freeze_bw = st.checkbox(
-                    "🖼️ Efeito Monocromático (Preto e Branco) no frame congelado da base",
-                    value=True,
-                    help="Mantém o segundo vídeo em preto e branco enquanto o primeiro vídeo está tocando no topo.",
-                    key="dual_freeze_bw_toggle"
-                )
+                if not is_direct_concat_ui:
+                    dual_freeze_bw = st.checkbox(
+                        "🖼️ Efeito Monocromático (Preto e Branco) no frame congelado da base",
+                        value=True,
+                        help="Mantém o segundo vídeo em preto e branco enquanto o primeiro vídeo está tocando no topo.",
+                        key="dual_freeze_bw_toggle"
+                    )
+                else:
+                    dual_freeze_bw = False
     
             with col_d2:
-                dual_freeze_ts = st.number_input(
-                    "⏱️ Segundo do frame congelado do 2º vídeo:",
-                    min_value=0.0,
-                    max_value=3600.0,
-                    value=0.0,
-                    step=0.5,
-                    help="Timestamp do segundo vídeo que será capturado para servir de imagem congelada na base.",
-                    key="dual_freeze_ts_input"
-                )
-                col_d2_sub1, col_d2_sub2 = st.columns(2)
-                with col_d2_sub1:
+                if not is_direct_concat_ui:
+                    dual_freeze_ts = st.number_input(
+                        "⏱️ Segundo do frame congelado do 2º vídeo:",
+                        min_value=0.0,
+                        max_value=3600.0,
+                        value=0.0,
+                        step=0.5,
+                        help="Timestamp do segundo vídeo que será capturado para servir de imagem congelada na base.",
+                        key="dual_freeze_ts_input"
+                    )
+                    col_d2_sub1, col_d2_sub2 = st.columns(2)
+                    with col_d2_sub1:
+                        dual_aspect_choice = st.selectbox(
+                            "📐 Formato Final:",
+                            ["9:16 (Vertical Reels/TikTok/Shorts)", "16:9 (Horizontal)"],
+                            index=0,
+                            key="dual_aspect_choice"
+                        )
+                    with col_d2_sub2:
+                        dual_divider_color = st.selectbox(
+                            "Linha Divisória:",
+                            ["black", "white", "gray", "none"],
+                            format_func=lambda x: {"black": "Preta", "white": "Branca", "gray": "Cinza", "none": "Sem Linha"}[x],
+                            index=0,
+                            key="dual_divider_color_choice"
+                        )
+                else:
+                    dual_freeze_ts = 0.0
+                    dual_divider_color = "none"
                     dual_aspect_choice = st.selectbox(
-                        "📐 Formato Final:",
+                        "📐 Formato Final do Vídeo Unificado:",
                         ["9:16 (Vertical Reels/TikTok/Shorts)", "16:9 (Horizontal)"],
                         index=0,
                         key="dual_aspect_choice"
-                    )
-                with col_d2_sub2:
-                    dual_divider_color = st.selectbox(
-                        "Linha Divisória:",
-                        ["black", "white", "gray", "none"],
-                        format_func=lambda x: {"black": "Preta", "white": "Branca", "gray": "Cinza", "none": "Sem Linha"}[x],
-                        index=0,
-                        key="dual_divider_color_choice"
                     )
     
             # 3. Ambientação Sonora Independente para Cada Vídeo
@@ -5236,9 +5640,10 @@ if show_sec1:
     
             col_dual_b1, col_dual_b2 = st.columns([1.5, 1])
             with col_dual_b1:
-                btn_process_dual_local = st.button("🚀 Processar Composição Dupla (Split ➔ Full Screen)", type="primary", key="btn_process_dual_local", use_container_width=True)
+                btn_action_label = "🚀 Juntar Vídeos em Sequência (Continuação Direta)" if is_direct_concat_ui else "🚀 Processar Composição Dupla (Split ➔ Full Screen)"
+                btn_process_dual_local = st.button(btn_action_label, type="primary", key="btn_process_dual_local", use_container_width=True)
             with col_dual_b2:
-                btn_audio_dual = st.button("🎵 Extrair Áudio da Composição (MP3)", key="btn_extract_audio_dual", use_container_width=True)
+                btn_audio_dual = st.button("🎵 Extrair Áudio da Junção (MP3)", key="btn_extract_audio_dual", use_container_width=True)
     
             if btn_audio_dual:
                 video_id = generate_local_dual_video_id(first_file.name, second_file.name)
@@ -5250,7 +5655,7 @@ if show_sec1:
                 audio_path = os.path.join(data_dir, "audio.mp3")
                 v_title = custom_dual_title.strip() if custom_dual_title.strip() else default_dual_title
     
-                with st.spinner("🎵 Extraindo e unificando trilha de áudio da composição dupla com ambientação sonora..."):
+                with st.spinner("🎵 Extraindo e unificando trilha de áudio dos vídeos combinados..."):
                     with open(raw_v1_path, "wb") as f1_out:
                         f1_out.write(first_file.getbuffer())
                     with open(raw_v2_path, "wb") as f2_out:
@@ -5260,6 +5665,7 @@ if show_sec1:
                         video1_path=raw_v1_path,
                         video2_path=raw_v2_path,
                         output_path=v_full_path,
+                        composition_mode="concat" if is_direct_concat_ui else "split_sequence",
                         freeze_timestamp_sec=float(dual_freeze_ts),
                         freeze_monochrome=dual_freeze_bw,
                         aspect_ratio="9:16" if "9:16" in dual_aspect_choice else "16:9",
@@ -5275,7 +5681,7 @@ if show_sec1:
                         extract_audio_from_local_video(v_full_path, audio_path)
     
                 if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
-                    st.success(f"🎉 Áudio da composição dupla extraído com sucesso: **{v_title}**")
+                    st.success(f"🎉 Áudio unificado extraído com sucesso: **{v_title}**")
                     col_adp1, col_adp2 = st.columns([2, 1])
                     with col_adp1:
                         safe_display_audio(audio_path, format="audio/mp3")
@@ -5314,11 +5720,13 @@ if show_sec1:
                         f2_out.write(second_file.getbuffer())
     
                 # 2. Renderiza a Composição Sequencial Completa
-                with st.spinner("🎬 Renderizando composição inteligente (Split com Base P&B ➔ Tela Cheia com Trilhas)..."):
+                spinner_msg = "🎬 Unindo vídeos em sequência contínua (1º Vídeo ➔ 2º Vídeo em Tela Cheia)..." if is_direct_concat_ui else "🎬 Renderizando composição inteligente (Split com Base P&B ➔ Tela Cheia com Trilhas)..."
+                with st.spinner(spinner_msg):
                     comp_res = compose_dual_video_split_sequence(
                         video1_path=raw_v1_path,
                         video2_path=raw_v2_path,
                         output_path=v_full_path,
+                        composition_mode="concat" if is_direct_concat_ui else "split_sequence",
                         freeze_timestamp_sec=float(dual_freeze_ts),
                         freeze_monochrome=dual_freeze_bw,
                         aspect_ratio="9:16" if "9:16" in dual_aspect_choice else "16:9",
@@ -5334,8 +5742,9 @@ if show_sec1:
                 if comp_res.get("error"):
                     st.error(f"Erro na composição dos vídeos: {comp_res['error']}")
                 else:
+                    success_msg = "✨ Vídeos unidos em sequência com sucesso!" if is_direct_concat_ui else "✨ Composição gerada com sucesso!"
                     st.success(
-                        f"✨ Composição gerada com sucesso! Duração total: **{comp_res.get('total_duration', 0.0):.1f}s** "
+                        f"{success_msg} Duração total: **{comp_res.get('total_duration', 0.0):.1f}s** "
                         f"(1º Vídeo: `{comp_res.get('video1_duration', 0.0):.1f}s` | 2º Vídeo: `{comp_res.get('video2_duration', 0.0):.1f}s`)"
                     )
     
@@ -5344,6 +5753,7 @@ if show_sec1:
                     tot_dur = comp_res.get("total_duration") or get_video_duration(v_full_path)
                     extract_thumbnail_from_video(v_full_path, thumb_path, timestamp_sec=min(2.0, max(0.0, tot_dur * 0.1)))
     
+                    channel_label = "Junção Sequencial (1º ➔ 2º)" if is_direct_concat_ui else "Composição Dupla (Split ➔ Full)"
                     add_or_update_video_in_library(
                         video_id=video_id,
                         title=v_title,
@@ -5351,7 +5761,7 @@ if show_sec1:
                         url=local_url,
                         thumbnail_url=thumb_path if os.path.exists(thumb_path) else None,
                         duration_sec=int(tot_dur),
-                        channel="Composição Dupla (Split ➔ Full)",
+                        channel=channel_label,
                         is_live=False
                     )
     
@@ -5389,8 +5799,9 @@ if show_sec1:
 
 active_u_main = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
 v_id_main = get_current_active_video_id(active_u_main) or get_video_id(active_u_main) or st.session_state.get("active_video_id") or ""
-if v_id_main and not st.session_state.get("active_video_id"):
-    st.session_state["active_video_id"] = v_id_main
+if v_id_main:
+    if not st.session_state.get("active_video_id") or st.session_state.get("active_video_id") != v_id_main or not st.session_state.get("transcription_done"):
+        load_video_saved_artifacts(v_id_main)
 main_dir = os.path.join("data", v_id_main) if v_id_main else None
 main_audio_path = os.path.join(main_dir, "audio.mp3") if main_dir else None
 main_video_path = os.path.join(main_dir, "video_full.mp4") if main_dir else None
@@ -6928,7 +7339,199 @@ if _has_media_ready:
         split_image_paths = []
         split_media_position = "bottom"
         split_blur_margin_pct = 5.0
-    
+        social_overlay_config = None
+
+        # ─────────────────────────────────────────────────────────────────
+        # 🎛️ Área Útil & Remoção de Patrocínios / Bordas (Crop Manual)
+        # ─────────────────────────────────────────────────────────────────
+        from core.video_processor import (
+            CROP_MARGIN_PRESETS,
+            sanitize_crop_margins,
+            has_active_crop_margins
+        )
+        from core.frame_capturer import (
+            generate_roi_preview_image,
+            generate_cropped_preview_image
+        )
+
+        saved_crop_preset = _cfg.get("crop_preset_choice", "none")
+        if saved_crop_preset not in CROP_MARGIN_PRESETS:
+            saved_crop_preset = "none"
+
+        preset_keys = list(CROP_MARGIN_PRESETS.keys())
+        preset_names = [CROP_MARGIN_PRESETS[k]["name"] for k in preset_keys]
+        saved_preset_idx = preset_keys.index(saved_crop_preset)
+
+        with st.expander("🎛️ Área Útil & Remoção de Patrocínios / Bordas (Crop Manual)", expanded=(saved_crop_preset != "none")):
+            st.markdown(
+                "Elimine anúncios laterais em formato L (como os do *Iron Talks* com QR Code e celulares), "
+                "faixas de superchats ou rodapés de patrocínio, mantendo **apenas a cena limpa do estúdio** "
+                "sem distorcer os oradores."
+            )
+
+            def _on_crop_preset_change():
+                p_key = preset_keys[preset_names.index(st.session_state.crop_preset_radio)]
+                save_setting("crop_preset_choice", p_key)
+                if p_key != "custom":
+                    p_m = CROP_MARGIN_PRESETS[p_key]["margins"]
+                    st.session_state["slider_crop_right"] = float(p_m["right"] * 100.0)
+                    st.session_state["slider_crop_bottom"] = float(p_m["bottom"] * 100.0)
+                    st.session_state["slider_crop_left"] = float(p_m["left"] * 100.0)
+                    st.session_state["slider_crop_top"] = float(p_m["top"] * 100.0)
+
+            def _on_slider_change():
+                save_setting("crop_margin_top", float(st.session_state.get("slider_crop_top", 0.0)) / 100.0)
+                save_setting("crop_margin_bottom", float(st.session_state.get("slider_crop_bottom", 0.0)) / 100.0)
+                save_setting("crop_margin_left", float(st.session_state.get("slider_crop_left", 0.0)) / 100.0)
+                save_setting("crop_margin_right", float(st.session_state.get("slider_crop_right", 0.0)) / 100.0)
+
+            col_cp1, col_cp2 = st.columns([1.8, 1.2])
+            with col_cp1:
+                selected_preset_name = st.radio(
+                    "🎯 Selecione um Modelo / Predefinição:",
+                    preset_names,
+                    index=saved_preset_idx,
+                    key="crop_preset_radio",
+                    on_change=_on_crop_preset_change
+                )
+                selected_preset_key = preset_keys[preset_names.index(selected_preset_name)]
+                preset_info = CROP_MARGIN_PRESETS[selected_preset_key]
+                st.caption(f"💡 {preset_info['description']}")
+
+            if "slider_crop_right" not in st.session_state:
+                p_m = preset_info["margins"] if selected_preset_key != "custom" else {
+                    "top": float(_cfg.get("crop_margin_top", 0.0)),
+                    "bottom": float(_cfg.get("crop_margin_bottom", 0.0)),
+                    "left": float(_cfg.get("crop_margin_left", 0.0)),
+                    "right": float(_cfg.get("crop_margin_right", 0.0)),
+                }
+                st.session_state["slider_crop_right"] = float(p_m["right"] * 100.0)
+                st.session_state["slider_crop_bottom"] = float(p_m["bottom"] * 100.0)
+                st.session_state["slider_crop_left"] = float(p_m["left"] * 100.0)
+                st.session_state["slider_crop_top"] = float(p_m["top"] * 100.0)
+
+            st.markdown("##### ✂️ Ajuste Fino das Margens de Corte (% da tela descartada)")
+            col_m1, col_m2 = st.columns(2)
+            with col_m1:
+                crop_right_pct = st.slider(
+                    "👉 Cortar Lateral Direita (%):",
+                    min_value=0.0,
+                    max_value=45.0,
+                    step=0.5,
+                    format="%.1f%%",
+                    key="slider_crop_right",
+                    on_change=_on_slider_change,
+                    help="Ideal para remover QR codes, banners de patrocinadores e mockups de celular na lateral direita."
+                )
+                crop_left_pct = st.slider(
+                    "👈 Cortar Lateral Esquerda (%):",
+                    min_value=0.0,
+                    max_value=45.0,
+                    step=0.5,
+                    format="%.1f%%",
+                    key="slider_crop_left",
+                    on_change=_on_slider_change,
+                    help="Remove bordas ou vinhetas no lado esquerdo do vídeo."
+                )
+
+            with col_m2:
+                crop_bottom_pct = st.slider(
+                    "👇 Cortar Rodapé / Inferior (%):",
+                    min_value=0.0,
+                    max_value=45.0,
+                    step=0.5,
+                    format="%.1f%%",
+                    key="slider_crop_bottom",
+                    on_change=_on_slider_change,
+                    help="Ideal para remover tickers de cotações/investimentos, superchats ou logos no rodapé."
+                )
+                crop_top_pct = st.slider(
+                    "👆 Cortar Margem Superior (%):",
+                    min_value=0.0,
+                    max_value=45.0,
+                    step=0.5,
+                    format="%.1f%%",
+                    key="slider_crop_top",
+                    on_change=_on_slider_change,
+                    help="Remove letreiros, tarjas de emissoras ou barras pretas superiores."
+                )
+
+            current_crop_margins = sanitize_crop_margins({
+                "top": crop_top_pct / 100.0,
+                "bottom": crop_bottom_pct / 100.0,
+                "left": crop_left_pct / 100.0,
+                "right": crop_right_pct / 100.0
+            })
+
+            with col_cp2:
+                if has_active_crop_margins(current_crop_margins):
+                    st.success(
+                        f"✅ **Filtro de ROI Ativo** (Dir: {crop_right_pct:.1f}% | Inf: {crop_bottom_pct:.1f}% | Esq: {crop_left_pct:.1f}% | Sup: {crop_top_pct:.1f}%)\n\n"
+                        "As margens selecionadas serão removidas do vídeo final sem distorcer o estúdio."
+                    )
+                else:
+                    st.info("ℹ️ Vídeo original completo (100% da tela preservada).")
+
+            save_setting("crop_margin_top", current_crop_margins["top"])
+            save_setting("crop_margin_bottom", current_crop_margins["bottom"])
+            save_setting("crop_margin_left", current_crop_margins["left"])
+            save_setting("crop_margin_right", current_crop_margins["right"])
+
+            _active_crop_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+            _active_vid_id = get_current_active_video_id(_active_crop_url)
+            _v_full_path = os.path.join("data", _active_vid_id, "video_full.mp4") if _active_vid_id else ""
+            _ts_preview = start_time if start_time else "00:00:01"
+
+            col_btn_m, col_btn_f = st.columns(2)
+            with col_btn_m:
+                btn_preview_roi = st.button("🔍 Visualizar Área Selecionada (Máscara ROI)", key="btn_prev_roi_mask", use_container_width=True)
+            with col_btn_f:
+                btn_preview_cropped = st.button("🖼️ Prévia do Corte Final Renderizado", key="btn_prev_cropped_res", use_container_width=True)
+
+            if btn_preview_roi:
+                if os.path.exists(_v_full_path):
+                    with st.spinner("Gerando máscara da Área Útil (ROI)..."):
+                        out_roi_preview = os.path.join("data", _active_vid_id, "preview_roi_mask.jpg")
+                        roi_res = generate_roi_preview_image(_v_full_path, _ts_preview, out_roi_preview, current_crop_margins)
+                        if roi_res.get("path") and os.path.exists(roi_res["path"]):
+                            st.session_state["cached_roi_preview_img"] = roi_res["path"]
+                            st.session_state["cached_roi_preview_type"] = "mask"
+                            st.session_state["cached_roi_preview_time"] = _ts_preview
+                        else:
+                            st.error(f"Erro ao gerar prévia da máscara: {roi_res.get('error')}")
+                else:
+                    st.info("ℹ️ Baixe o vídeo ou selecione um corte para gerar a prévia.")
+
+            if btn_preview_cropped:
+                if os.path.exists(_v_full_path):
+                    with st.spinner("Renderizando prévia proporcional do resultado final..."):
+                        out_cropped_preview = os.path.join("data", _active_vid_id, "preview_crop_result.jpg")
+                        crop_res = generate_cropped_preview_image(
+                            _v_full_path,
+                            _ts_preview,
+                            out_cropped_preview,
+                            current_crop_margins,
+                            target_aspect=selected_aspect,
+                            horizontal_zoom=horizontal_zoom_val
+                        )
+                        if crop_res.get("path") and os.path.exists(crop_res["path"]):
+                            st.session_state["cached_roi_preview_img"] = crop_res["path"]
+                            st.session_state["cached_roi_preview_type"] = "final"
+                            st.session_state["cached_roi_preview_time"] = _ts_preview
+                        else:
+                            st.error(f"Erro ao gerar prévia final: {crop_res.get('error')}")
+                else:
+                    st.info("ℹ️ Baixe o vídeo ou selecione um corte para gerar a prévia.")
+
+            cached_roi_img = st.session_state.get("cached_roi_preview_img")
+            if cached_roi_img and os.path.exists(cached_roi_img):
+                c_type = st.session_state.get("cached_roi_preview_type", "mask")
+                c_time = st.session_state.get("cached_roi_preview_time", _ts_preview)
+                if c_type == "mask":
+                    st.image(cached_roi_img, caption=f"Máscara ROI em {c_time} — Vermelho = Descartado | Moldura Verde = Preservado", use_container_width=True)
+                else:
+                    st.image(cached_roi_img, caption=f"Resultado Final em {c_time} ({aspect_option}) — Sem Propagandas e Sem Distorção", use_container_width=True)
+
         if selected_aspect == "9:16_split":
             with st.expander("👥 Ajustes do Layout Dividido (Split Screen 9:16)", expanded=True):
                 saved_split_src = _cfg.get("split_source_type", "main_video")
@@ -7219,7 +7822,8 @@ if _has_media_ready:
                                 split_video_path=split_video_path,
                                 split_image_paths=split_image_paths,
                                 split_media_position=split_media_position,
-                                split_blur_margin_pct=split_blur_margin_pct
+                                split_blur_margin_pct=split_blur_margin_pct,
+                                crop_margins=current_crop_margins
                             )
                             if p_res.get("path") and os.path.exists(p_res["path"]):
                                 st.session_state["cached_split_preview_path"] = p_res["path"]
@@ -7305,7 +7909,8 @@ if _has_media_ready:
                                     prev_path,
                                     person_preference=person_pref_val,
                                     auto_zoom=face_zoom_active,
-                                    margin_ratio=face_margin_val
+                                    margin_ratio=face_margin_val,
+                                    crop_margins=current_crop_margins
                                 )
                                 if p_res.get("path") and os.path.exists(p_res["path"]):
                                     if p_res.get("dual_shot"):
@@ -7402,7 +8007,7 @@ if _has_media_ready:
     
                         if st.button("👁️ Visualizar Prévia com Fundo Desfocado", key="btn_prev_blur"):
                             prev_b_path = os.path.join("data", video_id, "preview_blur.jpg")
-                            p_res = generate_blur_preview_image(v_full, start_time, prev_b_path, blur_zoom_val, blur_pan_val, blur_int_val)
+                            p_res = generate_blur_preview_image(v_full, start_time, prev_b_path, blur_zoom_val, blur_pan_val, blur_int_val, crop_margins=current_crop_margins)
                             if p_res.get("path") and os.path.exists(p_res["path"]):
                                 dual_caption = " [DUAL SHOT]" if auto_p.get("dual_shot") else ""
                                 st.image(p_res["path"], caption=f"Prévia 9:16 Fundo Desfocado em {start_time}{dual_caption} (Zoom: {blur_zoom_val:.2f}x)", use_container_width=True)
@@ -7492,7 +8097,7 @@ if _has_media_ready:
                         if os.path.exists(v_full):
                             from core.face_tracker import generate_169_preview_image
                             prev_169_path = os.path.join("data", video_id, "preview_169.jpg")
-                            p_res = generate_169_preview_image(v_full, start_time, prev_169_path, zoom_factor=horizontal_zoom_val)
+                            p_res = generate_169_preview_image(v_full, start_time, prev_169_path, zoom_factor=horizontal_zoom_val, crop_margins=current_crop_margins)
                             if p_res.get("path") and os.path.exists(p_res["path"]):
                                 st.image(p_res["path"], caption=f"Prévia 16:9 em {start_time} com Zoom {horizontal_zoom_val:.2f}x", use_container_width=True)
                             else:
@@ -7577,7 +8182,17 @@ if _has_media_ready:
     
                 if cut_trans_enabled:
                     st.caption("✨ A tradução deste trecho será executada e aplicada automaticamente ao clicar em **Gerar Corte**, preservando 100% da sincronização de tempo.")
-    
+
+                    _s_val = parse_time_str(start_time) or 0.0
+                    _e_val = parse_time_str(end_time) or 0.0
+                    _dur_span = (_e_val - _s_val) if (_e_val > _s_val) else 0.0
+                    if _dur_span > 600:
+                        st.warning(
+                            f"⚠️ **Atenção — Trecho longo selecionado ({int(_dur_span // 60)} min):** "
+                            "A tradução com IA local para um intervalo deste tamanho pode levar de 10 a 20 minutos. "
+                            "Se o seu objetivo for um corte rápido (Shorts/Reels de 1 a 3 min), defina os tempos inicial e final antes de traduzir!"
+                        )
+
                     col_ct1, col_ct2 = st.columns([1.5, 1])
                     with col_ct1:
                         _cut_lang_opts = [
@@ -7601,7 +8216,7 @@ if _has_media_ready:
                             index=_t_idx,
                             key="sel_cut_trans_model"
                         )
-    
+
                     col_btn_tr_now, col_prev_tr = st.columns([1.5, 2.5])
                     with col_btn_tr_now:
                         if st.button("🌐 Traduzir Trecho Agora", key="btn_translate_cut_now", use_container_width=True):
@@ -7611,7 +8226,23 @@ if _has_media_ready:
                                 _p_bar = st.progress(0.0, text=f"Traduzindo legendas do corte [{_cut_s_time} → {_cut_e_time}]...")
                                 def _cut_progress(pct, msg):
                                     _p_bar.progress(pct, text=msg)
-                                _target_file_for_cut = _transcript_path_sub
+
+                                # Resolve arquivo de transcrição (transcript.json ou _cut_tr_ do corte)
+                                _target_file_for_cut = _transcript_path_sub if (_transcript_path_sub and os.path.exists(_transcript_path_sub)) else None
+                                if not _target_file_for_cut:
+                                    _v_d = os.path.join("data", _vid_id_sub)
+                                    if os.path.isdir(_v_d):
+                                        _safe_s = re.sub(r'[^0-9A-Za-z_-]', '-', str(_cut_s_time)).strip('-')
+                                        _safe_e = re.sub(r'[^0-9A-Za-z_-]', '-', str(_cut_e_time)).strip('-')
+                                        _c_cand = os.path.join(_v_d, f"_cut_tr_{_safe_s}_{_safe_e}.json")
+                                        if os.path.exists(_c_cand):
+                                            _target_file_for_cut = _c_cand
+                                        else:
+                                            for _cf in os.listdir(_v_d):
+                                                if _cf.startswith("_cut_tr_") and _cf.endswith(".json") and os.path.getsize(os.path.join(_v_d, _cf)) > 100:
+                                                    _target_file_for_cut = os.path.join(_v_d, _cf)
+                                                    break
+
                                 _res_c_tr = translate_cut_subtitles(
                                     video_id=_vid_id_sub,
                                     start_time_str=_cut_s_time,
@@ -7621,6 +8252,7 @@ if _has_media_ready:
                                     transcript_path=_target_file_for_cut,
                                     progress_callback=_cut_progress
                                 )
+                                _p_bar.empty()
                                 if _res_c_tr.get("error"):
                                     st.error(f"Erro na tradução: {_res_c_tr['error']}")
                                 else:
@@ -7924,6 +8556,170 @@ if _has_media_ready:
             elif not available_tracks:
                 st.info("Nenhuma trilha encontrada em assets/audio.")
     
+        # ─────────────────────────────────────────────────────────────────
+        # 🏷️ Assinatura & Redes Sociais no Corte (@YouTube, @Instagram, @X)
+        # ─────────────────────────────────────────────────────────────────
+        social_overlay_enabled = _cfg.get("social_overlay_enabled", False)
+        saved_social_pos = _cfg.get("social_overlay_position", "Inferior (Bottom)")
+        saved_social_offset_y = int(_cfg.get("social_overlay_offset_y", 0))
+        saved_social_font_size = int(_cfg.get("social_overlay_font_size", 32))
+        saved_social_style = _cfg.get("social_overlay_style", "Pílula Glassmorphism (Recomendado)")
+        saved_social_icon_style = _cfg.get("social_overlay_icon_style", "Cores Oficiais da Marca")
+        saved_yt_enabled = bool(_cfg.get("social_youtube_enabled", True))
+        saved_yt_handle = str(_cfg.get("social_youtube_handle", ""))
+        saved_ig_enabled = bool(_cfg.get("social_instagram_enabled", True))
+        saved_ig_handle = str(_cfg.get("social_instagram_handle", ""))
+        saved_x_enabled = bool(_cfg.get("social_x_enabled", False))
+        saved_x_handle = str(_cfg.get("social_x_handle", ""))
+
+        with st.expander("🏷️ Assinatura & Redes Sociais no Corte (@YouTube, @Instagram, @X)", expanded=social_overlay_enabled):
+            social_overlay_enabled = st.toggle(
+                "✨ Ativar Selo de Redes Sociais no Corte",
+                value=social_overlay_enabled,
+                key="social_overlay_tgl",
+                on_change=lambda: save_setting("social_overlay_enabled", st.session_state.social_overlay_tgl),
+                help="Insere ícones oficiais e o @ ou descrição para YouTube, Instagram e X em estilo elegante (Glassmorphism ou Minimalista)."
+            )
+
+            col_sc_pos1, col_sc_pos2, col_sc_pos3 = st.columns([1.5, 1.2, 1.3])
+            with col_sc_pos1:
+                pos_options = ["Inferior (Bottom)", "Superior (Top)"]
+                pos_idx = pos_options.index(saved_social_pos) if saved_social_pos in pos_options else 0
+                social_overlay_position = st.radio(
+                    "📍 Posição no Vídeo:",
+                    pos_options,
+                    index=pos_idx,
+                    horizontal=True,
+                    key="social_pos_radio"
+                )
+            with col_sc_pos2:
+                social_overlay_offset_y = st.slider(
+                    "↕️ Ajuste Fino de Margem (px):",
+                    min_value=-150,
+                    max_value=150,
+                    value=saved_social_offset_y,
+                    step=5,
+                    key="social_offset_slider",
+                    help="Desloca verticalmente a assinatura para evitar sobrepor legendas ou elementos da interface do Reels/TikTok."
+                )
+            with col_sc_pos3:
+                social_overlay_font_size = st.slider(
+                    "🔤 Tamanho da Fonte (px):",
+                    min_value=20,
+                    max_value=54,
+                    value=saved_social_font_size,
+                    step=2,
+                    key="social_font_size_slider",
+                    help="O tamanho dos ícones é redimensionado automaticamente de forma proporcional à tipografia."
+                )
+
+            col_sc_st1, col_sc_st2 = st.columns([1.5, 1.5])
+            with col_sc_st1:
+                style_options = ["Pílula Glassmorphism (Recomendado)", "Pílulas Individuais", "Flutuante (Sem Fundo)"]
+                style_idx = style_options.index(saved_social_style) if saved_social_style in style_options else 0
+                social_overlay_style = st.selectbox(
+                    "🎨 Estilo do Selo:",
+                    style_options,
+                    index=style_idx,
+                    key="social_style_sel"
+                )
+            with col_sc_st2:
+                icon_style_options = ["Cores Oficiais da Marca", "Monocromático Minimalista (Branco)"]
+                icon_style_idx = icon_style_options.index(saved_social_icon_style) if saved_social_icon_style in icon_style_options else 0
+                social_overlay_icon_style = st.selectbox(
+                    "🖼️ Estilo dos Ícones:",
+                    icon_style_options,
+                    index=icon_style_idx,
+                    key="social_icon_style_sel"
+                )
+
+            st.markdown("##### 📱 Canais & Identificadores (@):")
+            col_net_yt, col_net_ig, col_net_x = st.columns(3)
+
+            with col_net_yt:
+                social_youtube_enabled = st.checkbox("▶️ YouTube", value=saved_yt_enabled, key="chk_soc_yt")
+                social_youtube_handle = st.text_input(
+                    "Descrição / @ do YouTube:",
+                    value=saved_yt_handle,
+                    placeholder="@meucanal",
+                    key="txt_soc_yt_handle",
+                    disabled=not social_youtube_enabled
+                )
+
+            with col_net_ig:
+                social_instagram_enabled = st.checkbox("📷 Instagram", value=saved_ig_enabled, key="chk_soc_ig")
+                social_instagram_handle = st.text_input(
+                    "Descrição / @ do Instagram:",
+                    value=saved_ig_handle,
+                    placeholder="@meuperfil",
+                    key="txt_soc_ig_handle",
+                    disabled=not social_instagram_enabled
+                )
+
+            with col_net_x:
+                social_x_enabled = st.checkbox("✖️ X (Twitter)", value=saved_x_enabled, key="chk_soc_x")
+                social_x_handle = st.text_input(
+                    "Descrição / @ do X:",
+                    value=saved_x_handle,
+                    placeholder="@meuperfil",
+                    key="txt_soc_x_handle",
+                    disabled=not social_x_enabled
+                )
+
+            _style_map = {
+                "Pílula Glassmorphism (Recomendado)": "pill_glass",
+                "Pílulas Individuais": "pill_individual",
+                "Flutuante (Sem Fundo)": "floating"
+            }
+            _icon_style_map = {
+                "Cores Oficiais da Marca": "official",
+                "Monocromático Minimalista (Branco)": "monochrome"
+            }
+            _pos_val = "bottom" if "Bottom" in social_overlay_position else "top"
+
+            social_overlay_config = {
+                "enabled": social_overlay_enabled,
+                "position": _pos_val,
+                "offset_y": int(social_overlay_offset_y),
+                "font_size": int(social_overlay_font_size),
+                "style": _style_map.get(social_overlay_style, "pill_glass"),
+                "icon_style": _icon_style_map.get(social_overlay_icon_style, "official"),
+                "text_color": "#FFFFFF",
+                "networks": {
+                    "youtube": {"enabled": social_youtube_enabled, "handle": social_youtube_handle.strip()},
+                    "instagram": {"enabled": social_instagram_enabled, "handle": social_instagram_handle.strip()},
+                    "x": {"enabled": social_x_enabled, "handle": social_x_handle.strip()}
+                }
+            }
+
+            col_btn_prev, col_btn_folder = st.columns([1.5, 1.5])
+            with col_btn_folder:
+                if st.button("📂 Abrir Pasta de Ícones das Redes", key="btn_open_social_icons", use_container_width=True):
+                    _soc_icons_dir = os.path.abspath(os.path.join("assets", "icons", "social"))
+                    os.makedirs(_soc_icons_dir, exist_ok=True)
+                    os.startfile(_soc_icons_dir)
+
+            with col_btn_prev:
+                if st.button("👁️ Visualizar Prévia do Selo", key="btn_prev_social_overlay", use_container_width=True):
+                    from core.social_overlay import render_social_overlay_on_frame
+                    _v_act = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                    _v_id_pr = get_current_active_video_id(_v_act)
+                    _v_full_pr = os.path.join("data", _v_id_pr, "video_full.mp4") if _v_id_pr else ""
+                    _pr_frame = None
+                    if _v_full_pr and os.path.exists(_v_full_pr):
+                        from core.frame_capturer import capture_single_frame_rgb
+                        _pr_frame = capture_single_frame_rgb(_v_full_pr, start_time or "00:00:01.00")
+                    if _pr_frame is None:
+                        _pr_frame = np.full((1920, 1080, 3), 32, dtype=np.uint8)
+                    elif selected_aspect != "16:9":
+                        _fh, _fw = _pr_frame.shape[:2]
+                        if _fw > _fh:
+                            _pr_frame = cv2.resize(_pr_frame, (1080, 1920))
+                    
+                    _preview_composite = render_social_overlay_on_frame(_pr_frame, social_overlay_config)
+                    if _preview_composite is not None:
+                        st.image(_preview_composite, caption="Prévia da Assinatura de Redes Sociais no Vídeo", use_container_width=True)
+
         # Salva continuamente todas as configurações ativas
         save_all_settings({
             "device_option": device_option,
@@ -7963,6 +8759,18 @@ if _has_media_ready:
             "climax_zoom_enabled": climax_zoom_enabled,
             "climax_zoom_factor": climax_zoom_factor,
             "thumbnail_enabled": thumbnail_enabled,
+            "social_overlay_enabled": social_overlay_enabled,
+            "social_overlay_position": social_overlay_position,
+            "social_overlay_offset_y": social_overlay_offset_y,
+            "social_overlay_font_size": social_overlay_font_size,
+            "social_overlay_style": social_overlay_style,
+            "social_overlay_icon_style": social_overlay_icon_style,
+            "social_youtube_enabled": social_youtube_enabled,
+            "social_youtube_handle": social_youtube_handle,
+            "social_instagram_enabled": social_instagram_enabled,
+            "social_instagram_handle": social_instagram_handle,
+            "social_x_enabled": social_x_enabled,
+            "social_x_handle": social_x_handle,
             "bg_music_enabled": bg_music_enabled,
             "bg_music_track_id": bg_music_track_id,
             "bg_music_volume": bg_music_volume,
@@ -8753,6 +9561,8 @@ if _has_media_ready:
                                     climax_zoom_enabled=climax_zoom_enabled,
                                     climax_zoom_factor=climax_zoom_factor,
                                     thumbnail_enabled=False,
+                                    crop_margins=current_crop_margins,
+                                    social_overlay_config=social_overlay_config,
                                 )
                                 if _cut_res_c.get("error"):
                                     _batch_errors.append(f"{_cp['filename']}: {_cut_res_c['error']}")
@@ -9278,30 +10088,36 @@ if _has_media_ready:
                     if _is_cut_tr_active and os.path.exists(_transcript_path_cut):
                         _target_tr_lang = st.session_state.get("sel_cut_sub_trans_lang", "pt-BR")
                         _target_tr_model = st.session_state.get("sel_cut_trans_model", "llama3")
-                        with st.spinner(f"🌐 Traduzindo legendas do corte [{start_time} → {end_time}] para {_target_tr_lang} via IA ({_target_tr_model})..."):
-                            import core.translator
-                            importlib.reload(core.translator)
-                            res_cut_tr = core.translator.translate_cut_subtitles(
-                                video_id=video_id,
-                                start_time_str=start_time,
-                                end_time_str=end_time,
-                                target_lang=_target_tr_lang,
-                                model=_target_tr_model,
-                                transcript_path=_transcript_path_cut
-                            )
-                            if res_cut_tr.get("error"):
-                                st.warning(f"⚠️ Não foi possível traduzir legendas do corte: {res_cut_tr['error']}. Usando original.")
-                            else:
-                                st.toast(f"✅ {res_cut_tr['count']} frase(s) traduzida(s) para {_target_tr_lang}!")
-                                # Se existir pasta de corte preservada com transcricao_corte.json, mantém sincronizado
-                                if existing_folder_path and os.path.isdir(existing_folder_path):
-                                    try:
-                                        import shutil
-                                        _dest_f_tr = os.path.join(existing_folder_path, "transcricao_corte.json")
-                                        if os.path.abspath(_transcript_path_cut) != os.path.abspath(_dest_f_tr):
-                                            shutil.copy2(_transcript_path_cut, _dest_f_tr)
-                                    except Exception:
-                                        pass
+                        _cut_tr_pbar = st.progress(0.0, text=f"🌐 Traduzindo legendas do corte [{start_time} → {end_time}] para {_target_tr_lang} via IA ({_target_tr_model})...")
+                        def _cut_tr_callback(pct, msg):
+                            _cut_tr_pbar.progress(pct, text=msg)
+
+                        import core.translator
+                        importlib.reload(core.translator)
+                        res_cut_tr = core.translator.translate_cut_subtitles(
+                            video_id=video_id,
+                            start_time_str=start_time,
+                            end_time_str=end_time,
+                            target_lang=_target_tr_lang,
+                            model=_target_tr_model,
+                            transcript_path=_transcript_path_cut,
+                            progress_callback=_cut_tr_callback
+                        )
+                        _cut_tr_pbar.empty()
+                        if res_cut_tr.get("error"):
+                            st.warning(f"⚠️ Não foi possível traduzir legendas do corte: {res_cut_tr['error']}. Usando original.")
+                        else:
+                            st.toast(f"✅ {res_cut_tr['count']} frase(s) traduzida(s) para {_target_tr_lang}!")
+                        
+                        # Se existir pasta de corte preservada com transcricao_corte.json, mantém sincronizado
+                        if existing_folder_path and os.path.isdir(existing_folder_path):
+                            try:
+                                import shutil
+                                _dest_f_tr = os.path.join(existing_folder_path, "transcricao_corte.json")
+                                if os.path.abspath(_transcript_path_cut) != os.path.abspath(_dest_f_tr):
+                                    shutil.copy2(_transcript_path_cut, _dest_f_tr)
+                            except Exception:
+                                pass
 
                     with st.spinner(f"Renderizando corte [{start_time} → {end_time}] no formato {aspect_option}{extra_info}..."):
                         cut_res = cut_video(
@@ -9363,6 +10179,8 @@ if _has_media_ready:
                             climax_zoom_enabled=climax_zoom_enabled,
                             climax_zoom_factor=climax_zoom_factor,
                             thumbnail_enabled=thumbnail_enabled,
+                            crop_margins=current_crop_margins,
+                            social_overlay_config=social_overlay_config,
                         )
                         if cut_res.get("error"):
                             st.error(f"Erro ao cortar: {cut_res['error']}")
@@ -9374,15 +10192,19 @@ if _has_media_ready:
                             _pb_badge = " ⏳ Barra" if progress_bar_enabled else ""
                             _cz_badge = " 🎯 Clímax" if climax_zoom_enabled else ""
                             _th_badge = " 🖼️ Thumbnail" if thumbnail_enabled and cut_res.get("thumbnail_path") else ""
-                            st.success(f"🎉 Corte gerado com sucesso! Resolução: **{out_res}** | Formato: **{aspect_option}**{_sub_badge}{_hl_badge}{_mus_badge}{_pb_badge}{_cz_badge}{_th_badge}")
+                            _crop_badge = " ✂️ ROI Limpo" if has_active_crop_margins(current_crop_margins) else ""
+                            _soc_badge = " 🏷️ @Redes" if (social_overlay_config and social_overlay_config.get("enabled")) else ""
+                            st.success(f"🎉 Corte gerado com sucesso! Resolução: **{out_res}** | Formato: **{aspect_option}**{_sub_badge}{_hl_badge}{_mus_badge}{_pb_badge}{_cz_badge}{_th_badge}{_crop_badge}{_soc_badge}")
                             
-                            # Avisos de legendas / áudio
+                            # Avisos de legendas / áudio / redes sociais
                             if cut_res.get("subtitle_error"):
                                 st.warning(f"⚠️ Legendas não aplicadas: {cut_res['subtitle_error']}")
                             elif cut_res.get("subtitle_warning"):
                                 st.info(f"ℹ️ {cut_res['subtitle_warning']}")
                             if cut_res.get("audio_warning"):
                                 st.info(f"ℹ️ {cut_res['audio_warning']}")
+                            if cut_res.get("social_warning"):
+                                st.warning(f"⚠️ Assinatura de redes sociais: {cut_res['social_warning']}")
                             
                             gen_thumb_path = cut_res.get("thumbnail_path")
                             has_gen_thumb = gen_thumb_path and os.path.exists(gen_thumb_path)

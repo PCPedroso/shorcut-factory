@@ -21,6 +21,13 @@ DEFAULT_SETTINGS = {
     # Enquadramento selecionado (índice da lista)
     "aspect_option": "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)",
 
+    # Remoção de Bordas & Patrocínios (ROI / Enquadramento Manual)
+    "crop_preset_choice": "none",
+    "crop_margin_top": 0.0,
+    "crop_margin_bottom": 0.0,
+    "crop_margin_left": 0.0,
+    "crop_margin_right": 0.0,
+
     # Rastreamento Facial Inteligente (Smart Face 9:16)
     "face_target_choice": "🎯 Automático (Maior Dominância)",
     "face_auto_zoom": True,
@@ -98,7 +105,23 @@ DEFAULT_SETTINGS = {
     "climax_zoom_factor": 1.14,
     "thumbnail_enabled": True,
 
-    # Última URL aberta
+    # --- Fase 5: Assinatura de Redes Sociais nos Cortes ---
+    "social_overlay_enabled": False,
+    "social_overlay_position": "Inferior (Bottom)",
+    "social_overlay_offset_y": 0,
+    "social_overlay_font_size": 32,
+    "social_overlay_style": "Pílula Glassmorphism (Recomendado)",
+    "social_overlay_icon_style": "Cores Oficiais da Marca",
+    "social_youtube_enabled": True,
+    "social_youtube_handle": "",
+    "social_instagram_enabled": True,
+    "social_instagram_handle": "",
+    "social_x_enabled": False,
+    "social_x_handle": "",
+
+    # Inicialização & Projeto Ativo
+    "auto_load_last_project": False,
+    "last_active_video_id": "",
     "last_video_url": ""
 }
 

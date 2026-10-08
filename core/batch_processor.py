@@ -301,6 +301,7 @@ def process_batch_cuts(
             callout_duration=params.get("callout_duration", 4.5),
             climax_zoom_enabled=eff_climax_zoom,
             thumbnail_enabled=params.get("thumbnail_enabled", True),
+            social_overlay_config=params.get("social_overlay_config", None),
         )
 
         _log(f"Retorno de cut_video: {cut_res}")

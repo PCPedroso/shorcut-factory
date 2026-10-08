@@ -35,6 +35,94 @@ if paths_to_add:
     os.environ["PATH"] = os.pathsep.join(paths_to_add) + os.pathsep + current_path
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Presets e Utilitários de Recorte Manual / Remoção de Propagandas e Bordas (ROI)
+# ──────────────────────────────────────────────────────────────────────────────
+
+CROP_MARGIN_PRESETS = {
+    "none": {
+        "name": "🚫 Nenhum (Vídeo Original Completo)",
+        "margins": {"top": 0.0, "bottom": 0.0, "left": 0.0, "right": 0.0},
+        "description": "Mantém o enquadramento completo do vídeo original sem cortes de bordas."
+    },
+    "l_banner_sponsor": {
+        "name": "📺 Banner L / Patrocínio (Iron Talks / Direita: 28%, Rodapé: 24%)",
+        "margins": {"top": 0.0, "bottom": 0.24, "left": 0.0, "right": 0.28},
+        "description": "Remove a propaganda vertical na lateral direita (QR Code/celular) e o ticker inferior de investimentos."
+    },
+    "superchat_footer": {
+        "name": "💬 Rodapé / Superchat / Doações (Inferior: 20%)",
+        "margins": {"top": 0.0, "bottom": 0.20, "left": 0.0, "right": 0.0},
+        "description": "Elimina faixas de comentários, superchats e logos na parte inferior da tela."
+    },
+    "letterbox_cleanup": {
+        "name": "🎬 Barras Pretas / Letterbox (Superior: 10%, Inferior: 10%)",
+        "margins": {"top": 0.10, "bottom": 0.10, "left": 0.0, "right": 0.0},
+        "description": "Remove barras pretas superior e inferior de vídeos gravados em aspecto ultrawide."
+    },
+    "custom": {
+        "name": "🎛️ Ajuste Personalizado (Sliders Manuais)",
+        "margins": {"top": 0.0, "bottom": 0.0, "left": 0.0, "right": 0.0},
+        "description": "Permite ajuste fino individual em percentual para cada uma das 4 bordas."
+    }
+}
+
+
+def sanitize_crop_margins(crop_margins: dict = None) -> dict:
+    """
+    Valida e normaliza as margens de recorte (0.0 a 0.45 por borda).
+    Garante que a largura e altura úteis nunca sejam zeradas ou invertidas (soma < 0.90).
+    """
+    if not isinstance(crop_margins, dict):
+        return {"top": 0.0, "bottom": 0.0, "left": 0.0, "right": 0.0}
+
+    top = max(0.0, min(0.45, float(crop_margins.get("top", 0.0) or 0.0)))
+    bottom = max(0.0, min(0.45, float(crop_margins.get("bottom", 0.0) or 0.0)))
+    left = max(0.0, min(0.45, float(crop_margins.get("left", 0.0) or 0.0)))
+    right = max(0.0, min(0.45, float(crop_margins.get("right", 0.0) or 0.0)))
+
+    # Proteção para garantir que a área preservada tenha pelo menos 10% da dimensão original
+    if left + right >= 0.90:
+        factor_x = 0.85 / (left + right)
+        left = round(left * factor_x, 4)
+        right = round(right * factor_x, 4)
+
+    if top + bottom >= 0.90:
+        factor_y = 0.85 / (top + bottom)
+        top = round(top * factor_y, 4)
+        bottom = round(bottom * factor_y, 4)
+
+    return {"top": round(top, 4), "bottom": round(bottom, 4), "left": round(left, 4), "right": round(right, 4)}
+
+
+def has_active_crop_margins(crop_margins: dict = None) -> bool:
+    """Retorna True se houver pelo menos uma margem de recorte superior a 0.1%."""
+    if not crop_margins or not isinstance(crop_margins, dict):
+        return False
+    m = sanitize_crop_margins(crop_margins)
+    return any(m[k] > 0.001 for k in ("top", "bottom", "left", "right"))
+
+
+def build_roi_crop_filter(crop_margins: dict, stream_tag: str = "0:v", out_tag: str = "roi") -> str:
+    """
+    Gera a cláusula de filtro FFmpeg para recorte assimétrico da ROI preservada.
+    Exemplo: [0:v]crop=w='trunc(iw*0.7200/2)*2':h='trunc(ih*0.7600/2)*2':x='trunc(iw*0.0000/2)*2':y='trunc(ih*0.0000/2)*2'[roi]
+    """
+    m = sanitize_crop_margins(crop_margins)
+    w_factor = 1.0 - m["left"] - m["right"]
+    h_factor = 1.0 - m["top"] - m["bottom"]
+    x_factor = m["left"]
+    y_factor = m["top"]
+    return (
+        f"[{stream_tag}]crop="
+        f"w='trunc(iw*{w_factor:.4f}/2)*2':"
+        f"h='trunc(ih*{h_factor:.4f}/2)*2':"
+        f"x='trunc(iw*{x_factor:.4f}/2)*2':"
+        f"y='trunc(ih*{y_factor:.4f}/2)*2'"
+        f"[{out_tag}]"
+    )
+
+
 def parse_time_to_seconds(time_str: str) -> float:
     """Converte formato HH:MM:SS, HH:MM:SS.ms ou MM:SS para segundos (float)."""
     if not time_str:
@@ -924,17 +1012,21 @@ def cut_video(
     climax_zoom_factor: float = 1.14,
     thumbnail_enabled: bool = True,
     thumbnail_output_path: str = None,
+    crop_margins: dict = None,
+    social_overlay_config: dict = None,
 ) -> dict:
     """
     Corta e formata o vídeo com alta precisão e esteira completa de pós-produção via FFmpeg.
     
     Parâmetros:
     - aspect_ratio_mode:
-        - '16:9': Horizontal original (1080p Full HD com suporte a zoom/aproximação geral)
+        - '16:9': Horizontal original (1080p Full HD com suporte a zoom/aproximação geral e remoção de bordas/patrocínios)
         - '9:16_blur': Vertical 1080x1920 com fundo ampliado e desfocado (Auto-Reframing dinâmico ou manual)
         - '9:16_crop': Vertical 1080x1920 com corte central preenchendo 100% da tela
         - '9:16_smart_face': Vertical 1080x1920 com rastreamento inteligente de rosto
         - '9:16_split': Vertical 1080x1920 Dividido (Topo e Base: Oradores, Vídeo Secundário em Looping ou Slideshow de Imagens)
+    - crop_margins: Dicionário opcional com margens de recorte {'top': float, 'bottom': float, 'left': float, 'right': float}
+      para remover anúncios, patrocínios em formato L, barras de superchat ou letterboxes.
     """
     try:
         if os.path.exists(output_path):
@@ -943,6 +1035,8 @@ def cut_video(
         out_dir = os.path.dirname(output_path)
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
+
+        has_crop = has_active_crop_margins(crop_margins)
 
         if aspect_ratio_mode == "9:16_smart_face":
             # Pipeline 9:16 com Rastreamento Inteligente de Rosto (MediaPipe BlazeFace + Target Lock + Cinematic Panning)
@@ -954,7 +1048,8 @@ def cut_video(
                 output_video_path=output_path,
                 auto_zoom=face_auto_zoom,
                 margin_ratio=face_margin_ratio,
-                person_preference=person_preference
+                person_preference=person_preference,
+                crop_margins=crop_margins
             )
             return _apply_all_post_processing(
                 result, output_path, start_time_str, end_time_str,
@@ -965,7 +1060,8 @@ def cut_video(
                 callout_enabled, callout_text, callout_duration,
                 climax_zoom_enabled, climax_zoom_factor,
                 thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
-                bg_music_start_offset, video_start_offset
+                bg_music_start_offset, video_start_offset,
+                social_overlay_config=social_overlay_config
             )
 
         elif aspect_ratio_mode == "9:16_split":
@@ -988,7 +1084,8 @@ def cut_video(
                 split_video_path=split_video_path,
                 split_image_paths=split_image_paths,
                 split_media_position=split_media_position,
-                split_blur_margin_pct=split_blur_margin_pct
+                split_blur_margin_pct=split_blur_margin_pct,
+                crop_margins=crop_margins
             )
             return _apply_all_post_processing(
                 result, output_path, start_time_str, end_time_str,
@@ -999,7 +1096,8 @@ def cut_video(
                 callout_enabled, callout_text, callout_duration,
                 climax_zoom_enabled, climax_zoom_factor,
                 thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
-                bg_music_start_offset, video_start_offset
+                bg_music_start_offset, video_start_offset,
+                social_overlay_config=social_overlay_config
             )
 
         elif aspect_ratio_mode == "9:16_blur":
@@ -1015,7 +1113,8 @@ def cut_video(
                     blur_zoom=blur_zoom,
                     person_preference=person_preference,
                     face_margin_ratio=face_margin_ratio,
-                    auto_tracking=True
+                    auto_tracking=True,
+                    crop_margins=crop_margins
                 )
                 return _apply_all_post_processing(
                     result, output_path, start_time_str, end_time_str,
@@ -1026,7 +1125,8 @@ def cut_video(
                     callout_enabled, callout_text, callout_duration,
                     climax_zoom_enabled, climax_zoom_factor,
                     thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
-                    bg_music_start_offset, video_start_offset
+                    bg_music_start_offset, video_start_offset,
+                    social_overlay_config=social_overlay_config
                 )
             else:
                 # Modo Manual Estático
@@ -1034,17 +1134,25 @@ def cut_video(
                 if w_fg % 2 != 0:
                     w_fg += 1
 
+                if has_crop:
+                    roi_clause = build_roi_crop_filter(crop_margins, "0:v", "roi") + ";"
+                    src_tag = "[roi]"
+                else:
+                    roi_clause = ""
+                    src_tag = "[0:v]"
+
                 if w_fg > 1080:
                     max_crop_x = w_fg - 1080
                     crop_x = int(max_crop_x * (blur_pan + 1.0) / 2.0)
-                    fg_filter = f"[0:v]scale={w_fg}:-2,crop=1080:ih:{crop_x}:0[fg]"
+                    fg_filter = f"{src_tag}scale={w_fg}:-2,crop=1080:ih:{crop_x}:0[fg]"
                     overlay_filter = "[bg][fg]overlay=0:(H-h)/2[v]"
                 else:
-                    fg_filter = f"[0:v]scale={w_fg}:-2[fg]"
+                    fg_filter = f"{src_tag}scale={w_fg}:-2[fg]"
                     overlay_filter = "[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
 
                 filter_complex = (
-                    f"[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur={blur_intensity}:5,eq=brightness=-0.10[bg];"
+                    f"{roi_clause}"
+                    f"{src_tag}scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur={blur_intensity}:5,eq=brightness=-0.10[bg];"
                     f"{fg_filter};"
                     f"{overlay_filter}"
                 )
@@ -1067,7 +1175,11 @@ def cut_video(
 
         elif aspect_ratio_mode == "9:16_crop":
             # Pipeline 9:16 Corte Central (1080x1920 preenchendo 100% da tela)
-            filter_complex = "[0:v]crop=ih*(9/16):ih:(iw-ow)/2:0,scale=1080:1920[v]"
+            if has_crop:
+                roi_clause = build_roi_crop_filter(crop_margins, "0:v", "roi")
+                filter_complex = f"{roi_clause};[roi]crop=ih*(9/16):ih:(iw-ow)/2:0,scale=1080:1920[v]"
+            else:
+                filter_complex = "[0:v]crop=ih*(9/16):ih:(iw-ow)/2:0,scale=1080:1920[v]"
             cmd = [
                 FFMPEG_EXE, "-y",
                 "-ss", start_time_str,
@@ -1086,9 +1198,53 @@ def cut_video(
                 output_path
             ]
         else:
-            # Padrão 16:9 Horizontal (Com suporte a aproximação / zoom geral)
+            # Padrão 16:9 Horizontal (Com suporte a aproximação / zoom geral e remoção de bordas/patrocínios)
             effective_hz_zoom = max(1.0, float(horizontal_zoom))
-            if effective_hz_zoom > 1.001:
+            if has_crop:
+                m = sanitize_crop_margins(crop_margins)
+                w_factor = 1.0 - m["left"] - m["right"]
+                h_factor = 1.0 - m["top"] - m["bottom"]
+                x_factor = m["left"]
+                y_factor = m["top"]
+                crop_part = (
+                    f"crop=w='trunc(iw*{w_factor:.4f}/2)*2':"
+                    f"h='trunc(ih*{h_factor:.4f}/2)*2':"
+                    f"x='trunc(iw*{x_factor:.4f}/2)*2':"
+                    f"y='trunc(ih*{y_factor:.4f}/2)*2'"
+                )
+                if effective_hz_zoom > 1.001:
+                    scale_w = int(round(1920 * effective_hz_zoom))
+                    if scale_w % 2 != 0:
+                        scale_w += 1
+                    filter_complex = (
+                        f"[0:v]{crop_part},"
+                        f"scale={scale_w}:-2:force_original_aspect_ratio=increase,"
+                        f"crop=1920:1080:(in_w-out_w)/2:(in_h-out_h)/2[v]"
+                    )
+                else:
+                    filter_complex = (
+                        f"[0:v]{crop_part},"
+                        f"scale=1920:1080:force_original_aspect_ratio=increase,"
+                        f"crop=1920:1080:(in_w-out_w)/2:(in_h-out_h)/2[v]"
+                    )
+                cmd = [
+                    FFMPEG_EXE, "-y",
+                    "-ss", start_time_str,
+                    "-to", end_time_str,
+                    "-i", input_path,
+                    "-filter_complex", filter_complex,
+                    "-map", "[v]",
+                    "-map", "0:a?",
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-crf", "20",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-pix_fmt", "yuv420p",
+                    "-movflags", "+faststart",
+                    output_path
+                ]
+            elif effective_hz_zoom > 1.001:
                 filter_complex = f"[0:v]crop=iw/{effective_hz_zoom}:ih/{effective_hz_zoom}:(in_w-out_w)/2:(in_h-out_h)/2,scale=1920:1080[v]"
                 cmd = [
                     FFMPEG_EXE, "-y",
@@ -1137,7 +1293,8 @@ def cut_video(
                 callout_enabled, callout_text, callout_duration,
                 climax_zoom_enabled, climax_zoom_factor,
                 thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
-                bg_music_start_offset, video_start_offset
+                bg_music_start_offset, video_start_offset,
+                social_overlay_config=social_overlay_config
             )
 
         # Fallback MoviePy se FFmpeg direto retornar erro
@@ -1149,6 +1306,18 @@ def cut_video(
                 clip = video.subclipped(start_s, end_s)
             except AttributeError:
                 clip = video.subclip(start_s, end_s)
+
+            if has_crop:
+                m = sanitize_crop_margins(crop_margins)
+                cw, ch = clip.size
+                cx1 = int(round(cw * m["left"]))
+                cx2 = int(round(cw * (1.0 - m["right"])))
+                cy1 = int(round(ch * m["top"]))
+                cy2 = int(round(ch * (1.0 - m["bottom"])))
+                try:
+                    clip = clip.cropped(x1=cx1, y1=cy1, x2=cx2, y2=cy2)
+                except AttributeError:
+                    clip = clip.crop(x1=cx1, y1=cy1, x2=cx2, y2=cy2)
 
             clip.write_videofile(
                 output_path,
@@ -1166,7 +1335,8 @@ def cut_video(
             callout_enabled, callout_text, callout_duration,
             climax_zoom_enabled, climax_zoom_factor,
             thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
-            bg_music_start_offset, video_start_offset
+            bg_music_start_offset, video_start_offset,
+            social_overlay_config=social_overlay_config
         )
     except Exception as e:
         return {"path": None, "error": str(e)}
@@ -1209,7 +1379,8 @@ def _apply_all_post_processing(
     aspect_mode: str = "9:16_smart_face",
     source_video_path: str = None,
     bg_music_start_offset: float = 0.0,
-    video_start_offset: float = 0.0
+    video_start_offset: float = 0.0,
+    social_overlay_config: dict = None
 ) -> dict:
     """
     Esteira unificada de pós-produção (Fases 2, 3 e 4):
@@ -1385,6 +1556,23 @@ def _apply_all_post_processing(
             curr_path = sub_result["path"]
             result["path"] = curr_path
 
+    # --- 3.5. Assinatura & Redes Sociais no Vídeo (@YouTube, @Instagram, @X) ---
+    if social_overlay_config and social_overlay_config.get("enabled", False):
+        try:
+            from core.social_overlay import apply_social_overlay_to_video
+            social_res = apply_social_overlay_to_video(
+                video_path=curr_path,
+                output_path=output_path,
+                config=social_overlay_config
+            )
+            if social_res.get("error"):
+                result["social_warning"] = social_res["error"]
+            elif social_res.get("path") and os.path.exists(social_res["path"]):
+                curr_path = social_res["path"]
+                result["path"] = curr_path
+        except Exception as e:
+            result["social_warning"] = str(e)
+
     # --- 4. Trilha Sonora de Fundo & Audio Ducking Inteligente ---
     if bg_music_enabled and bg_music_track_path and os.path.exists(bg_music_track_path):
         from core.audio_mixer import apply_audio_ducking
@@ -1555,6 +1743,7 @@ def compose_dual_video_split_sequence(
     video1_path: str,
     video2_path: str,
     output_path: str = "video_composed_full.mp4",
+    composition_mode: str = "split_sequence",
     freeze_timestamp_sec: float = 0.0,
     freeze_monochrome: bool = True,
     aspect_ratio: str = "9:16",
@@ -1568,13 +1757,12 @@ def compose_dual_video_split_sequence(
 ) -> dict:
     """
     Renderiza composição sequencial inteligente de 2 vídeos:
-    1. Parte 1 (duração = Vídeo 1):
-       - Topo: Vídeo 1 reproduzindo normalmente com seu áudio.
-       - Base: Frame estático do Vídeo 2 (em freeze_timestamp_sec), opcionalmente monocromático (preto e branco).
-       - Trilha Sonora 1: Música de fundo específica para a Parte 1 (com Audio Ducking).
-    2. Parte 2 (duração = Vídeo 2):
-       - O Vídeo 2 assume tela cheia (1080x1920 ou 1920x1080) e toca até o final com seu áudio.
-       - Trilha Sonora 2: Música de fundo específica para a Parte 2 (com Audio Ducking).
+    - Modo 'concat': Junção direta / continuação.
+      1. Parte 1 (duração = Vídeo 1): Vídeo 1 em tela cheia (100% da tela) com áudio ativo e trilha 1 opcional.
+      2. Parte 2 (duração = Vídeo 2): Vídeo 2 em tela cheia (100% da tela) como continuação direta do primeiro.
+    - Modo 'split_sequence':
+      1. Parte 1 (duração = Vídeo 1): Topo com Vídeo 1 e Base com frame congelado do Vídeo 2 (opcionalmente P&B).
+      2. Parte 2 (duração = Vídeo 2): Vídeo 2 em tela cheia com áudio ativo.
     """
     temp_frozen_png = None
     try:
@@ -1612,28 +1800,31 @@ def compose_dual_video_split_sequence(
             except Exception:
                 pass
 
-        # 1. Extrai frame estático do Vídeo 2
-        temp_frozen_png = os.path.join(out_dir, "temp_freeze_bottom.png") if out_dir else "temp_freeze_bottom.png"
-        cap2 = cv2.VideoCapture(video2_path)
-        cap2.set(cv2.CAP_PROP_POS_MSEC, max(0.0, min(float(freeze_timestamp_sec), max(0.0, dur2 - 0.1))) * 1000.0)
-        ret2, frame2 = cap2.read()
-        cap2.release()
+        is_direct_concat = (composition_mode == "concat")
 
-        if not ret2 or frame2 is None:
-            # Fallback para primeiro frame
+        # 1. Extrai frame estático do Vídeo 2 apenas se estiver em modo split_sequence
+        if not is_direct_concat:
+            temp_frozen_png = os.path.join(out_dir, "temp_freeze_bottom.png") if out_dir else "temp_freeze_bottom.png"
             cap2 = cv2.VideoCapture(video2_path)
+            cap2.set(cv2.CAP_PROP_POS_MSEC, max(0.0, min(float(freeze_timestamp_sec), max(0.0, dur2 - 0.1))) * 1000.0)
             ret2, frame2 = cap2.read()
             cap2.release()
 
-        if not ret2 or frame2 is None:
-            bot_frame = np.zeros((slot_h, target_w, 3), dtype=np.uint8)
-        else:
-            bot_frame = fit_frame_to_aspect_slot(frame2, target_w, slot_h)
-            if freeze_monochrome:
-                gray = cv2.cvtColor(bot_frame, cv2.COLOR_BGR2GRAY)
-                bot_frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+            if not ret2 or frame2 is None:
+                # Fallback para primeiro frame
+                cap2 = cv2.VideoCapture(video2_path)
+                ret2, frame2 = cap2.read()
+                cap2.release()
 
-        cv2.imwrite(temp_frozen_png, bot_frame)
+            if not ret2 or frame2 is None:
+                bot_frame = np.zeros((slot_h, target_w, 3), dtype=np.uint8)
+            else:
+                bot_frame = fit_frame_to_aspect_slot(frame2, target_w, slot_h)
+                if freeze_monochrome:
+                    gray = cv2.cvtColor(bot_frame, cv2.COLOR_BGR2GRAY)
+                    bot_frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+            cv2.imwrite(temp_frozen_png, bot_frame)
 
         # 2. Resolução de Trilhas Musicais
         v1_music_path = None
@@ -1648,7 +1839,7 @@ def compose_dual_video_split_sequence(
             if not v2_music_path or not os.path.exists(v2_music_path):
                 v2_music_path = None
 
-        # 3. Renderização Isolada da Parte 1 (Split Top + Base Congelada + Trilha 1)
+        # 3. Renderização Isolada da Parte 1
         temp_seg1_mp4 = os.path.join(out_dir, "temp_seg1_dual.mp4") if out_dir else "temp_seg1_dual.mp4"
         temp_seg2_mp4 = os.path.join(out_dir, "temp_seg2_dual.mp4") if out_dir else "temp_seg2_dual.mp4"
         temp_concat_txt = os.path.join(out_dir, "temp_concat_list.txt") if out_dir else "temp_concat_list.txt"
@@ -1657,39 +1848,68 @@ def compose_dual_video_split_sequence(
         has_a2 = check_has_audio_stream(video2_path)
 
         # -- SEGMENTO 1 --
-        seg1_inputs = [
-            FFMPEG_EXE, "-y",
-            "-i", video1_path,
-            "-loop", "1", "-t", f"{dur1:.3f}", "-i", temp_frozen_png
-        ]
-        if v1_music_path:
-            seg1_inputs.extend(["-stream_loop", "-1", "-i", v1_music_path])
+        if is_direct_concat:
+            # Vídeo 1 em Tela Cheia
+            seg1_inputs = [
+                FFMPEG_EXE, "-y",
+                "-i", video1_path
+            ]
+            if v1_music_path:
+                seg1_inputs.extend(["-stream_loop", "-1", "-i", v1_music_path])
 
-        seg1_filters = []
-        seg1_filters.append(f"[0:v]scale={target_w}:{slot_h}:force_original_aspect_ratio=increase,crop={target_w}:{slot_h},setsar=1,fps=30[v1_top]")
-        seg1_filters.append(f"[1:v]scale={target_w}:{slot_h}:force_original_aspect_ratio=increase,crop={target_w}:{slot_h},setsar=1,fps=30[v2_bot]")
-        seg1_filters.append("[v1_top][v2_bot]vstack=inputs=2[seg1_raw]")
+            seg1_filters = [
+                f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h},setsar=1,fps=30[seg1_v]"
+            ]
 
-        if divider_width > 0 and divider_color != "none":
-            div_col = "black" if divider_color == "black" else ("white" if divider_color == "white" else "gray")
-            seg1_filters.append(f"[seg1_raw]drawbox=x=0:y={slot_h - divider_width // 2}:w={target_w}:h={divider_width}:color={div_col}@1:t=fill[seg1_v]")
-        else:
-            seg1_filters.append("[seg1_raw]null[seg1_v]")
-
-        if has_a1:
-            seg1_filters.append(f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=0:{dur1:.3f},asetpts=PTS-STARTPTS[v1_voice]")
-        else:
-            seg1_filters.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={dur1:.3f}[v1_voice]")
-
-        if v1_music_path:
-            seg1_filters.append(f"[2:a]atrim=0:{dur1:.3f},asetpts=PTS-STARTPTS,volume={video1_audio_volume:.2f},aformat=sample_rates=48000:channel_layouts=stereo[m1_raw]")
-            if audio_ducking_enabled and has_a1:
-                seg1_filters.append(f"[m1_raw][v1_voice]sidechaincompress=threshold=0.08:ratio=5:attack=30:release=300[m1_ducked]")
-                seg1_filters.append(f"[v1_voice][m1_ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[seg1_a]")
+            if has_a1:
+                seg1_filters.append(f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=0:{dur1:.3f},asetpts=PTS-STARTPTS[v1_voice]")
             else:
-                seg1_filters.append(f"[v1_voice][m1_raw]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[seg1_a]")
+                seg1_filters.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={dur1:.3f}[v1_voice]")
+
+            if v1_music_path:
+                seg1_filters.append(f"[1:a]atrim=0:{dur1:.3f},asetpts=PTS-STARTPTS,volume={video1_audio_volume:.2f},aformat=sample_rates=48000:channel_layouts=stereo[m1_raw]")
+                if audio_ducking_enabled and has_a1:
+                    seg1_filters.append(f"[m1_raw][v1_voice]sidechaincompress=threshold=0.08:ratio=5:attack=30:release=300[m1_ducked]")
+                    seg1_filters.append(f"[v1_voice][m1_ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[seg1_a]")
+                else:
+                    seg1_filters.append(f"[v1_voice][m1_raw]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[seg1_a]")
+            else:
+                seg1_filters.append("[v1_voice]aformat=sample_rates=48000:channel_layouts=stereo[seg1_a]")
         else:
-            seg1_filters.append("[v1_voice]aformat=sample_rates=48000:channel_layouts=stereo[seg1_a]")
+            # Vídeo 1 no Topo + Frame Vídeo 2 na Base (Split Sequence)
+            seg1_inputs = [
+                FFMPEG_EXE, "-y",
+                "-i", video1_path,
+                "-loop", "1", "-t", f"{dur1:.3f}", "-i", temp_frozen_png
+            ]
+            if v1_music_path:
+                seg1_inputs.extend(["-stream_loop", "-1", "-i", v1_music_path])
+
+            seg1_filters = []
+            seg1_filters.append(f"[0:v]scale={target_w}:{slot_h}:force_original_aspect_ratio=increase,crop={target_w}:{slot_h},setsar=1,fps=30[v1_top]")
+            seg1_filters.append(f"[1:v]scale={target_w}:{slot_h}:force_original_aspect_ratio=increase,crop={target_w}:{slot_h},setsar=1,fps=30[v2_bot]")
+            seg1_filters.append("[v1_top][v2_bot]vstack=inputs=2[seg1_raw]")
+
+            if divider_width > 0 and divider_color != "none":
+                div_col = "black" if divider_color == "black" else ("white" if divider_color == "white" else "gray")
+                seg1_filters.append(f"[seg1_raw]drawbox=x=0:y={slot_h - divider_width // 2}:w={target_w}:h={divider_width}:color={div_col}@1:t=fill[seg1_v]")
+            else:
+                seg1_filters.append("[seg1_raw]null[seg1_v]")
+
+            if has_a1:
+                seg1_filters.append(f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=0:{dur1:.3f},asetpts=PTS-STARTPTS[v1_voice]")
+            else:
+                seg1_filters.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={dur1:.3f}[v1_voice]")
+
+            if v1_music_path:
+                seg1_filters.append(f"[2:a]atrim=0:{dur1:.3f},asetpts=PTS-STARTPTS,volume={video1_audio_volume:.2f},aformat=sample_rates=48000:channel_layouts=stereo[m1_raw]")
+                if audio_ducking_enabled and has_a1:
+                    seg1_filters.append(f"[m1_raw][v1_voice]sidechaincompress=threshold=0.08:ratio=5:attack=30:release=300[m1_ducked]")
+                    seg1_filters.append(f"[v1_voice][m1_ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[seg1_a]")
+                else:
+                    seg1_filters.append(f"[v1_voice][m1_raw]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[seg1_a]")
+            else:
+                seg1_filters.append("[v1_voice]aformat=sample_rates=48000:channel_layouts=stereo[seg1_a]")
 
         cmd_seg1 = seg1_inputs + [
             "-filter_complex", ";".join(seg1_filters),
