@@ -172,43 +172,46 @@ def render_social_overlay_image(video_width: int, video_height: int, config: dic
         return img
 
     font_size = max(16, min(72, int(config.get("font_size", 32))))
-    font = _get_font(font_size)
     monochrome = (config.get("icon_style", "official") == "monochrome")
     style_mode = config.get("style", "pill_glass")  # pill_glass, pill_individual, floating
     text_color = config.get("text_color", "#FFFFFF")
 
-    # Escala proporcional do ícone: 1.05x o tamanho da fonte
-    icon_h = max(16, int(round(font_size * 1.08)))
+    # Ajuste automático de escala caso a largura total exceda o frame disponível
+    while font_size >= 16:
+        font = _get_font(font_size)
+        icon_h = max(16, int(round(font_size * 1.08)))
+        gap_icon_text = max(6, int(font_size * 0.28))
+        inter_network_gap = max(14, int(font_size * 0.70))
+        padding_x = max(14, int(font_size * 0.55))
+        padding_y = max(8, int(font_size * 0.32))
 
-    # Mede dimensões de cada item
-    rendered_items = []
-    gap_icon_text = max(6, int(font_size * 0.28))
+        rendered_items = []
+        for it in items:
+            icon_img = load_social_icon(it["key"], icon_h, monochrome=monochrome)
+            txt = it["handle"]
+            bbox = font.getbbox(txt)
+            txt_w = bbox[2] - bbox[0]
+            txt_h = bbox[3] - bbox[1]
 
-    for it in items:
-        icon_img = load_social_icon(it["key"], icon_h, monochrome=monochrome)
-        txt = it["handle"]
-        bbox = font.getbbox(txt)
-        txt_w = bbox[2] - bbox[0]
-        txt_h = bbox[3] - bbox[1]
+            item_content_w = icon_img.width + gap_icon_text + txt_w
+            item_content_h = max(icon_img.height, txt_h)
 
-        item_content_w = icon_img.width + gap_icon_text + txt_w
-        item_content_h = max(icon_img.height, txt_h)
+            rendered_items.append({
+                "key": it["key"],
+                "handle": txt,
+                "icon": icon_img,
+                "txt_w": txt_w,
+                "txt_h": txt_h,
+                "txt_offset_y": bbox[1],
+                "content_w": item_content_w,
+                "content_h": item_content_h
+            })
 
-        rendered_items.append({
-            "key": it["key"],
-            "handle": txt,
-            "icon": icon_img,
-            "txt_w": txt_w,
-            "txt_h": txt_h,
-            "txt_offset_y": bbox[1],
-            "content_w": item_content_w,
-            "content_h": item_content_h
-        })
-
-    # Espaçamento entre as redes sociais
-    inter_network_gap = max(14, int(font_size * 0.70))
-    padding_x = max(14, int(font_size * 0.55))
-    padding_y = max(8, int(font_size * 0.32))
+        total_content_w = sum(ri["content_w"] for ri in rendered_items) + (inter_network_gap * (len(rendered_items) - 1))
+        container_w = total_content_w + (padding_x * 2)
+        if container_w <= video_width - 40 or font_size <= 18:
+            break
+        font_size -= 2
 
     # Posição Vertical (Safe Zones para 9:16)
     pos_type = str(config.get("position", "bottom")).lower()
@@ -357,6 +360,101 @@ def render_social_overlay_on_frame(base_frame_rgb: np.ndarray, config: dict) -> 
         ).astype(np.uint8)
 
     return result_rgb
+
+
+def get_formatted_preview_frame(
+    video_path: str,
+    timestamp_str: str = "00:00:01.00",
+    aspect_mode: str = "9:16_blur",
+    blur_zoom: float = 1.35,
+    blur_pan: float = 0.0,
+    blur_intensity: int = 25,
+    person_preference: str = "auto",
+    margin_ratio: float = 1.55,
+    crop_margins: dict = None
+) -> np.ndarray:
+    """
+    Gera um frame prévio fiel ao formato de vídeo selecionado (9:16 Blur, 9:16 Smart Face, 16:9, etc.)
+    em RGB (H, W, 3) como array NumPy, sem distorcer o aspecto original.
+    """
+    if not video_path or not os.path.exists(video_path):
+        return np.full((1920, 1080, 3), 32, dtype=np.uint8)
+
+    t_str = str(timestamp_str or "00:00:01.00").strip()
+
+    # 1. 9:16 com Fundo Desfocado (Blur)
+    if aspect_mode == "9:16_blur":
+        try:
+            import tempfile
+            from core.face_tracker import generate_blur_preview_image
+            tmp_blur_path = os.path.join(tempfile.gettempdir(), f"preview_blur_{os.getpid()}.jpg")
+            res = generate_blur_preview_image(
+                video_path,
+                t_str,
+                tmp_blur_path,
+                zoom=float(blur_zoom or 1.35),
+                pan=float(blur_pan or 0.0),
+                blur_intensity=int(blur_intensity or 25),
+                crop_margins=crop_margins
+            )
+            if res.get("path") and os.path.exists(res["path"]):
+                bgr = cv2.imread(res["path"])
+                try:
+                    os.remove(res["path"])
+                except Exception:
+                    pass
+                if bgr is not None:
+                    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        except Exception:
+            pass
+
+    # 2. 9:16 com Rastreamento Inteligente de Rosto (Smart Face)
+    elif aspect_mode == "9:16_smart_face":
+        try:
+            import tempfile
+            from core.face_tracker import generate_face_preview_image
+            tmp_face_path = os.path.join(tempfile.gettempdir(), f"preview_face_{os.getpid()}.jpg")
+            res = generate_face_preview_image(
+                video_path,
+                t_str,
+                tmp_face_path,
+                person_preference=person_preference or "auto",
+                auto_zoom=True,
+                margin_ratio=float(margin_ratio or 1.55),
+                crop_margins=crop_margins
+            )
+            if res.get("path") and os.path.exists(res["path"]):
+                bgr = cv2.imread(res["path"])
+                try:
+                    os.remove(res["path"])
+                except Exception:
+                    pass
+                if bgr is not None:
+                    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        except Exception:
+            pass
+
+    # 3. 16:9 Horizontal
+    elif aspect_mode == "16:9":
+        from core.frame_capturer import capture_single_frame_rgb
+        raw_rgb = capture_single_frame_rgb(video_path, t_str)
+        if raw_rgb is not None:
+            return raw_rgb
+
+    # 4. 9:16 Central Crop ou Fallback
+    from core.frame_capturer import capture_single_frame_rgb
+    raw_rgb = capture_single_frame_rgb(video_path, t_str)
+    if raw_rgb is not None:
+        ih, iw = raw_rgb.shape[:2]
+        if aspect_mode in ("9:16_crop", "9:16_blur", "9:16_smart_face", "9:16_split"):
+            target_w = int(round(ih * 9.0 / 16.0))
+            if target_w <= iw:
+                x_start = max(0, (iw - target_w) // 2)
+                cropped = raw_rgb[:, x_start:x_start + target_w]
+                return cv2.resize(cropped, (1080, 1920))
+        return raw_rgb
+
+    return np.full((1920, 1080, 3), 32, dtype=np.uint8)
 
 
 def apply_social_overlay_to_video(

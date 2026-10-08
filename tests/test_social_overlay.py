@@ -159,7 +159,38 @@ class TestSocialOverlay(unittest.TestCase):
                 try: os.remove(tmp_out)
                 except Exception: pass
 
+    def test_render_social_overlay_auto_scaling(self):
+        # Muito texto com fonte grande deve auto-ajustar para não ultrapassar a tela
+        cfg = {
+            "enabled": True,
+            "position": "bottom",
+            "offset_y": 0,
+            "font_size": 48,
+            "style": "pill_glass",
+            "icon_style": "official",
+            "text_color": "#FFFFFF",
+            "networks": {
+                "youtube": {"enabled": True, "handle": "@CanalMuitoLongoComNomeExtensoDemais"},
+                "x": {"enabled": True, "handle": "@OutroCanalMuitoLongoTambem"}
+            }
+        }
+        img = render_social_overlay_image(1080, 1920, cfg)
+        self.assertIsInstance(img, Image.Image)
+        arr = np.array(img)
+        visible_xs = np.where(arr[:, :, 3] > 0)[1]
+        self.assertGreater(len(visible_xs), 0)
+        # O início e fim devem respeitar as bordas da tela
+        self.assertGreaterEqual(visible_xs.min(), 5)
+        self.assertLessEqual(visible_xs.max(), 1075)
+
+    def test_get_formatted_preview_frame(self):
+        from core.social_overlay import get_formatted_preview_frame
+        # Se vídeo não existir, retorna canvas padrão neutro
+        frame = get_formatted_preview_frame("non_existent.mp4", "00:00:01", aspect_mode="9:16_blur")
+        self.assertEqual(frame.shape, (1920, 1080, 3))
+
 
 if __name__ == '__main__':
     unittest.main()
+
 

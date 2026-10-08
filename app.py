@@ -8693,32 +8693,58 @@ if _has_media_ready:
             }
 
             col_btn_prev, col_btn_folder = st.columns([1.5, 1.5])
+            with col_btn_prev:
+                _btn_prev_label = "🔄 Atualizar Prévia do Selo" if st.session_state.get("show_social_preview") else "👁️ Visualizar Prévia do Selo"
+                if st.button(_btn_prev_label, key="btn_prev_social_overlay", use_container_width=True):
+                    st.session_state["show_social_preview"] = True
+
             with col_btn_folder:
                 if st.button("📂 Abrir Pasta de Ícones das Redes", key="btn_open_social_icons", use_container_width=True):
                     _soc_icons_dir = os.path.abspath(os.path.join("assets", "icons", "social"))
                     os.makedirs(_soc_icons_dir, exist_ok=True)
                     os.startfile(_soc_icons_dir)
 
-            with col_btn_prev:
-                if st.button("👁️ Visualizar Prévia do Selo", key="btn_prev_social_overlay", use_container_width=True):
-                    from core.social_overlay import render_social_overlay_on_frame
-                    _v_act = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-                    _v_id_pr = get_current_active_video_id(_v_act)
-                    _v_full_pr = os.path.join("data", _v_id_pr, "video_full.mp4") if _v_id_pr else ""
-                    _pr_frame = None
-                    if _v_full_pr and os.path.exists(_v_full_pr):
-                        from core.frame_capturer import capture_single_frame_rgb
-                        _pr_frame = capture_single_frame_rgb(_v_full_pr, start_time or "00:00:01.00")
-                    if _pr_frame is None:
-                        _pr_frame = np.full((1920, 1080, 3), 32, dtype=np.uint8)
-                    elif selected_aspect != "16:9":
-                        _fh, _fw = _pr_frame.shape[:2]
-                        if _fw > _fh:
-                            _pr_frame = cv2.resize(_pr_frame, (1080, 1920))
-                    
-                    _preview_composite = render_social_overlay_on_frame(_pr_frame, social_overlay_config)
+            if st.session_state.get("show_social_preview"):
+                from core.social_overlay import get_formatted_preview_frame, render_social_overlay_on_frame
+                _v_act = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                _v_id_pr = get_current_active_video_id(_v_act)
+                _v_full_pr = os.path.join("data", _v_id_pr, "video_full.mp4") if _v_id_pr else ""
+
+                # Obtém frame fielmente formatado de acordo com o modo de enquadramento ativo
+                _pr_frame = get_formatted_preview_frame(
+                    video_path=_v_full_pr,
+                    timestamp_str=start_time or "00:00:01.00",
+                    aspect_mode=selected_aspect,
+                    blur_zoom=blur_zoom_val if 'blur_zoom_val' in locals() else 1.35,
+                    blur_pan=blur_pan_val if 'blur_pan_val' in locals() else 0.0,
+                    blur_intensity=blur_int_val if 'blur_int_val' in locals() else 25,
+                    person_preference=person_pref_val if 'person_pref_val' in locals() else "auto",
+                    margin_ratio=face_margin_val if 'face_margin_val' in locals() else 1.55,
+                    crop_margins=current_crop_margins if 'current_crop_margins' in locals() else None
+                )
+
+                # Força enabled=True exclusivamente na prévia para exibir o resultado configurado
+                _preview_cfg = dict(social_overlay_config)
+                _preview_cfg["enabled"] = True
+
+                _active_items = _preview_cfg.get("networks", {})
+                _has_active = any(v.get("enabled") and str(v.get("handle", "")).strip() for v in _active_items.values())
+
+                if not _has_active:
+                    st.warning("⚠️ Nenhuma rede social está com o checkbox marcado e com o @ preenchido. Marque ao menos um canal acima para exibir o selo.")
+                else:
+                    _preview_composite = render_social_overlay_on_frame(_pr_frame, _preview_cfg)
                     if _preview_composite is not None:
-                        st.image(_preview_composite, caption="Prévia da Assinatura de Redes Sociais no Vídeo", use_container_width=True)
+                        col_pv1, col_pv2 = st.columns([3.5, 1.2])
+                        with col_pv1:
+                            st.image(_preview_composite, caption=f"Prévia da Assinatura ({selected_aspect}) — Posição: {social_overlay_position} | Fonte: {social_overlay_font_size}px", use_container_width=True)
+                        with col_pv2:
+                            if st.button("❌ Ocultar Prévia", key="btn_hide_social_prev", use_container_width=True):
+                                st.session_state["show_social_preview"] = False
+                                st.rerun()
+
+                if not social_overlay_enabled and _has_active:
+                    st.info("💡 **Dica:** O selo está configurado! Mantenha a chave **✨ Ativar Selo de Redes Sociais no Corte** ligada para gravá-lo no corte final.")
 
         # Salva continuamente todas as configurações ativas
         save_all_settings({
