@@ -118,6 +118,41 @@ def test_dual_split_compose_with_soundtracks(tmp_path):
     assert os.path.getsize(composed_path) > 0
 
 
+def test_dual_compose_direct_concat(tmp_path):
+    # Cria dois vídeos sintéticos simples de 1 segundo cada
+    v1_path = str(tmp_path / "vid1_concat.mp4")
+    v2_path = str(tmp_path / "vid2_concat.mp4")
+    
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out1 = cv2.VideoWriter(v1_path, fourcc, 10.0, (640, 360))
+    for _ in range(10):
+        frame1 = np.zeros((360, 640, 3), dtype=np.uint8)
+        frame1[:, :] = (0, 255, 0)
+        out1.write(frame1)
+    out1.release()
+
+    out2 = cv2.VideoWriter(v2_path, fourcc, 10.0, (640, 360))
+    for _ in range(10):
+        frame2 = np.zeros((360, 640, 3), dtype=np.uint8)
+        frame2[:, :] = (255, 255, 0)
+        out2.write(frame2)
+    out2.release()
+
+    composed_path = str(tmp_path / "composed_concat.mp4")
+    res = compose_dual_video_split_sequence(
+        video1_path=v1_path,
+        video2_path=v2_path,
+        output_path=composed_path,
+        composition_mode="concat",
+        aspect_ratio="9:16"
+    )
+    assert res.get("error") is None
+    assert os.path.exists(composed_path)
+    assert os.path.getsize(composed_path) > 0
+    dur = get_video_duration(composed_path)
+    assert dur > 1.5
+
+
 def test_compose_error_handling(tmp_path):
     bad_res = compose_dual_video_split_sequence(
         video1_path=str(tmp_path / "nao_existe.mp4"),
@@ -125,3 +160,4 @@ def test_compose_error_handling(tmp_path):
         output_path=str(tmp_path / "out.mp4")
     )
     assert bad_res.get("error") is not None
+

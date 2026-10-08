@@ -18,7 +18,7 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
 | **Processamento de Vídeo** | `FFmpeg` (com `libass` e NVENC) | Recorte, filtros complexos, sidechain compress, equalização e queima de legendas/overlays |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
-| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (220 testes) |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (246 testes) |
 
 ---
 
@@ -33,7 +33,10 @@ shorcut-factory/
 │   ├── fonts/                 # Tipografias bundled (Montserrat-ExtraBold)
 │   └── icons/                 # Ícones oficiais de alta resolução
 │       └── social/            # Ícones de redes sociais (youtube.png, instagram.png, x.png)
-├── tests/                     # Suíte de Testes Unitários Automatizados (220 testes)
+├── tests/                     # Suíte de Testes Unitários Automatizados (246 testes)
+│   ├── test_clear_project_and_startup.py # Testes de inicialização limpa e reset de projetos
+│   ├── test_roi_crop.py          # Testes de remoção de patrocínios em L, tarjas e máscaras de ROI
+│   ├── test_youtube_subtitles_selection.py # Testes de mapeamento e download de legendas multilinguagem do YouTube
 │   ├── test_preserve_cut_transcript.py # Testes de preservação e reuso de transcrição da pasta do corte na re-renderização
 │   ├── test_static_image_video.py# Testes de substituição de vídeo por imagem estática mantendo áudio e backup
 │   ├── test_frame_capturer.py    # Testes de extração de frames, conversão de tempo, thumbnails e base64
@@ -386,7 +389,7 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Modo Monocromático Minimalista**: Opção de converter todos os ícones e tipografia em branco puro com transparência preservada.
   - **Prévia em Tempo Real no Frame do Vídeo**: Botão dedicado na interface que renderiza instantaneamente o selo sobre o frame ativo antes da renderização.
   - **Queima Acelerada por Hardware (NVENC GPU com Fallback CPU)**: Pipeline FFmpeg rápido sem perda de áudio integrado à esteira de pós-processamento do corte.
-- **🧪 Suíte de 228 Testes Unitários Automatizados (`tests/`)**:
+- **🧪 Suíte de 246 Testes Unitários Automatizados (`tests/`)**:
   - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (social media badges/overlay, preserve cut transcript on re-render, quick editor static image format adaptation, frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
 
 ---

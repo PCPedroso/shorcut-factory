@@ -30,14 +30,153 @@ def extract_youtube_video_id(url_or_id: str) -> str:
     return ""
 
 
-def fetch_youtube_transcript(video_id: str, preferred_languages: list = None) -> dict:
+def format_language_label(code: str, name: str, is_generated: bool = False) -> str:
+    """Retorna um rótulo amigável com bandeira e status da faixa de legenda."""
+    c = str(code or "").strip().lower()
+    flag = "🌐 "
+    if c in ("pt", "pt-br", "pt_br"):
+        flag = "🇧🇷 "
+    elif c in ("pt-pt", "pt_pt"):
+        flag = "🇵🇹 "
+    elif c in ("en", "en-us", "en-gb"):
+        flag = "🇺🇸 "
+    elif c in ("es", "es-419", "es-es"):
+        flag = "🇪🇸 "
+    elif c in ("fr", "fr-fr"):
+        flag = "🇫🇷 "
+    elif c in ("de", "de-de"):
+        flag = "🇩🇪 "
+    elif c in ("it", "it-it"):
+        flag = "🇮🇹 "
+    elif c in ("ja", "ja-jp"):
+        flag = "🇯🇵 "
+    elif c in ("ko", "ko-kr"):
+        flag = "🇰🇷 "
+    elif c in ("ru", "ru-ru"):
+        flag = "🇷🇺 "
+    elif c in ("zh", "zh-cn", "zh-tw"):
+        flag = "🇨🇳 "
+
+    status = " (Automática)" if is_generated else " (Oficial)"
+    display_name = name or code or "Desconhecido"
+    return f"{flag}{display_name} [{code}]{status}"
+
+
+_YT_TRANSCRIPTS_CACHE = {}
+
+
+def list_available_youtube_transcripts(video_id: str) -> list:
     """
-    Obtém a transcrição oficial do YouTube com prioridade absoluta para Português (pt-BR, pt, pt-PT, pt-orig).
+    Lista todas as faixas de transcrição/legendas disponíveis no YouTube para o vídeo.
+    Retorna uma lista de dicionários ordenados (Português primeiro, depois Inglês, etc.):
+      [{"code": str, "name": str, "is_generated": bool, "is_translatable": bool, "label": str}]
+    """
+    clean_id = extract_youtube_video_id(video_id)
+    if not clean_id:
+        return []
+
+    global _YT_TRANSCRIPTS_CACHE
+    if clean_id in _YT_TRANSCRIPTS_CACHE:
+        return _YT_TRANSCRIPTS_CACHE[clean_id]
+
+    items = []
+    # 1. YouTubeTranscriptApi
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        ytt = YouTubeTranscriptApi()
+        t_list = ytt.list(clean_id)
+        for t in t_list:
+            code = getattr(t, "language_code", "")
+            name = getattr(t, "language", code)
+            is_gen = getattr(t, "is_generated", False)
+            is_trans = getattr(t, "is_translatable", False)
+            items.append({
+                "code": code,
+                "name": name,
+                "is_generated": is_gen,
+                "is_translatable": is_trans,
+                "label": format_language_label(code, name, is_gen)
+            })
+    except Exception:
+        pass
+
+    # 2. Fallback via yt-dlp se YouTubeTranscriptApi falhar
+    if not items:
+        try:
+            import yt_dlp
+            from core.extractor import get_cookie_file
+
+            url = f"https://www.youtube.com/watch?v={clean_id}"
+            ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True}
+            cookie_file = get_cookie_file()
+            if cookie_file:
+                ydl_opts['cookiefile'] = cookie_file
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                manual = info.get('subtitles') or {}
+                auto = info.get('automatic_captions') or {}
+                seen_codes = set()
+                for c, fmts in manual.items():
+                    seen_codes.add(c)
+                    name = next((f.get('name') for f in fmts if f.get('name')), c)
+                    items.append({
+                        "code": c,
+                        "name": name,
+                        "is_generated": False,
+                        "is_translatable": True,
+                        "label": format_language_label(c, name, False)
+                    })
+                for c, fmts in auto.items():
+                    if c not in seen_codes:
+                        seen_codes.add(c)
+                        name = next((f.get('name') for f in fmts if f.get('name')), c)
+                        items.append({
+                            "code": c,
+                            "name": name,
+                            "is_generated": True,
+                            "is_translatable": True,
+                            "label": format_language_label(c, name, True)
+                        })
+        except Exception:
+            pass
+
+    # Ordenação inteligente: Português primeiro (pt, pt-BR, pt-PT), depois Inglês, Espanhol, e outros
+    def _sort_key(item):
+        c = str(item.get("code", "")).lower()
+        gen_penalty = 1 if item.get("is_generated") else 0
+        if "pt" in c:
+            return (0, gen_penalty, item.get("name", ""))
+        if "en" in c:
+            return (1, gen_penalty, item.get("name", ""))
+        if "es" in c:
+            return (2, gen_penalty, item.get("name", ""))
+        return (3, gen_penalty, item.get("name", ""))
+
+    items.sort(key=_sort_key)
+    _YT_TRANSCRIPTS_CACHE[clean_id] = items
+    return items
+
+
+def fetch_youtube_transcript(video_id: str, preferred_languages: list = None, selected_language: str = None) -> dict:
+    """
+    Obtém a transcrição oficial do YouTube com suporte a idioma selecionado ou prioridade em Português.
     Utiliza motor duplo:
       1. YouTubeTranscriptApi (com varredura de legendas manuais e geradas automaticamente)
       2. Fallback via yt-dlp (extração direta dos streams json3 de automatic_captions/subtitles)
     """
-    if preferred_languages is None:
+    if selected_language:
+        sel_clean = str(selected_language).strip()
+        c_low = sel_clean.lower()
+        if c_low in ('pt', 'pt-br', 'pt_br'):
+            preferred_languages = [sel_clean, 'pt-BR', 'pt', 'pt-PT', 'pt-orig', 'a.pt']
+        elif c_low in ('en', 'en-us', 'en-gb'):
+            preferred_languages = [sel_clean, 'en', 'en-US', 'en-GB', 'a.en']
+        elif c_low in ('es', 'es-419', 'es-es'):
+            preferred_languages = [sel_clean, 'es', 'es-419', 'es-ES', 'a.es']
+        else:
+            preferred_languages = [sel_clean]
+    elif preferred_languages is None:
         preferred_languages = ['pt', 'pt-BR', 'pt-PT', 'pt-orig', 'a.pt', 'en', 'es']
 
     clean_id = extract_youtube_video_id(video_id)
@@ -48,11 +187,13 @@ def fetch_youtube_transcript(video_id: str, preferred_languages: list = None) ->
             "source": None,
             "available_languages": [],
             "selected_language": None,
+            "selected_language_code": None,
             "error": "ID do YouTube inválido."
         }
 
     available_languages = []
     selected_lang_name = "Português"
+    selected_lang_code = preferred_languages[0] if preferred_languages else "pt"
     last_err = None
 
     # -- MOTOR 1: YouTubeTranscriptApi --
@@ -79,11 +220,26 @@ def fetch_youtube_transcript(video_id: str, preferred_languages: list = None) ->
                 try:
                     tr = t_list.find_generated_transcript(preferred_languages)
                 except Exception:
+                    try:
+                        tr = t_list.find_manually_created_transcript(preferred_languages)
+                    except Exception:
+                        pass
+
+            # Se pediu um idioma específico e não achou direto na lista, tenta tradução automática do YouTube
+            if tr is None and selected_language:
+                try:
+                    # Encontra qualquer faixa translatable disponível
+                    for cand_t in t_list:
+                        if getattr(cand_t, "is_translatable", False):
+                            tr = cand_t.translate(selected_language)
+                            break
+                except Exception:
                     pass
 
             if tr is not None:
                 fetched = tr.fetch()
-                selected_lang_name = tr.language
+                selected_lang_name = getattr(tr, "language", selected_lang_name)
+                selected_lang_code = getattr(tr, "language_code", selected_lang_code)
             else:
                 fetched = ytt.fetch(clean_id, languages=preferred_languages)
         except Exception:
@@ -115,6 +271,7 @@ def fetch_youtube_transcript(video_id: str, preferred_languages: list = None) ->
                     "source": f"YouTube Oficial ({selected_lang_name})",
                     "available_languages": available_languages,
                     "selected_language": selected_lang_name,
+                    "selected_language_code": selected_lang_code,
                     "error": None
                 }
     except Exception as e1:
@@ -139,8 +296,9 @@ def fetch_youtube_transcript(video_id: str, preferred_languages: list = None) ->
 
             # Prioridade de busca
             target_formats = None
-            found_lang_key = "pt"
-            for lang_k in preferred_languages + ['pt', 'pt-BR', 'pt-PT', 'pt-orig']:
+            found_lang_key = preferred_languages[0] if preferred_languages else "pt"
+            search_langs = preferred_languages + (['pt', 'pt-BR', 'pt-PT', 'pt-orig'] if not selected_language else [])
+            for lang_k in search_langs:
                 if lang_k in manual_subtitles:
                     target_formats = manual_subtitles[lang_k]
                     found_lang_key = lang_k
@@ -179,6 +337,7 @@ def fetch_youtube_transcript(video_id: str, preferred_languages: list = None) ->
                                 "source": f"YouTube Oficial ({found_lang_key})",
                                 "available_languages": available_languages,
                                 "selected_language": found_lang_key,
+                                "selected_language_code": found_lang_key,
                                 "error": None
                             }
     except Exception as e2:
@@ -190,6 +349,7 @@ def fetch_youtube_transcript(video_id: str, preferred_languages: list = None) ->
         "source": None,
         "available_languages": available_languages,
         "selected_language": None,
+        "selected_language_code": None,
         "error": last_err or "Legendas não encontradas no YouTube."
     }
 

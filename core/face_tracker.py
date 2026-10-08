@@ -273,7 +273,8 @@ def generate_face_preview_image(
     person_preference: str = "auto",
     auto_zoom: bool = True,
     margin_ratio: float = 1.55,
-    max_zoom_factor: float = 1.85
+    max_zoom_factor: float = 1.85,
+    crop_margins: dict = None
 ) -> dict:
     """
     Gera uma imagem de prévia mostrando as pessoas detectadas, quem foi travado como alvo
@@ -293,6 +294,17 @@ def generate_face_preview_image(
 
         if not ret or frame is None:
             return {"path": None, "error": "Falha ao capturar o frame de prévia."}
+
+        if crop_margins:
+            from core.video_processor import has_active_crop_margins, sanitize_crop_margins
+            if has_active_crop_margins(crop_margins):
+                m = sanitize_crop_margins(crop_margins)
+                orig_h, orig_w = frame.shape[:2]
+                x1 = max(0, min(orig_w - 1, int(round(orig_w * m["left"]))))
+                x2 = max(x1 + 1, min(orig_w, int(round(orig_w * (1.0 - m["right"])))))
+                y1 = max(0, min(orig_h - 1, int(round(orig_h * m["top"]))))
+                y2 = max(y1 + 1, min(orig_h, int(round(orig_h * (1.0 - m["bottom"])))))
+                frame = frame[y1:y2, x1:x2]
 
         height, width, _ = frame.shape
         base_crop_w = int(height * 9.0 / 16.0)
@@ -588,7 +600,8 @@ def generate_blur_preview_image(
     output_preview_path: str = "temp_blur_preview.jpg",
     zoom: float = 1.35,
     pan: float = 0.0,
-    blur_intensity: int = 25
+    blur_intensity: int = 25,
+    crop_margins: dict = None
 ) -> dict:
     """
     Gera uma imagem de prévia realista do modo Fundo Desfocado (Blur) com o zoom e enquadramento exatos.
@@ -605,6 +618,17 @@ def generate_blur_preview_image(
 
         if not ret or frame is None:
             return {"path": None, "error": "Falha ao capturar o frame."}
+
+        if crop_margins:
+            from core.video_processor import has_active_crop_margins, sanitize_crop_margins
+            if has_active_crop_margins(crop_margins):
+                m = sanitize_crop_margins(crop_margins)
+                orig_h, orig_w = frame.shape[:2]
+                x1 = max(0, min(orig_w - 1, int(round(orig_w * m["left"]))))
+                x2 = max(x1 + 1, min(orig_w, int(round(orig_w * (1.0 - m["right"])))))
+                y1 = max(0, min(orig_h - 1, int(round(orig_h * m["top"]))))
+                y2 = max(y1 + 1, min(orig_h, int(round(orig_h * m["bottom"]))))
+                frame = frame[y1:y2, x1:x2]
 
         h, w, _ = frame.shape
         import numpy as np
@@ -656,7 +680,8 @@ def crop_video_with_smart_face_tracking(
     auto_zoom: bool = True,
     margin_ratio: float = 1.55,          # Margem de segurança nas laterais do interlocutor
     max_zoom_factor: float = 1.85,       # Zoom máximo permitido
-    person_preference: str = "auto"      # 'auto', 'right', 'left', 'center'
+    person_preference: str = "auto",     # 'auto', 'right', 'left', 'center'
+    crop_margins: dict = None
 ) -> dict:
     """
     Recorta o vídeo no formato 9:16 (1080x1920) acompanhando o orador principal.
@@ -686,6 +711,19 @@ def crop_video_with_smart_face_tracking(
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        active_crop = False
+        if crop_margins:
+            from core.video_processor import has_active_crop_margins, sanitize_crop_margins
+            if has_active_crop_margins(crop_margins):
+                active_crop = True
+                m = sanitize_crop_margins(crop_margins)
+                crop_x1 = max(0, min(width - 1, int(round(width * m["left"]))))
+                crop_x2 = max(crop_x1 + 1, min(width, int(round(width * (1.0 - m["right"])))))
+                crop_y1 = max(0, min(height - 1, int(round(height * m["top"]))))
+                crop_y2 = max(crop_y1 + 1, min(height, int(round(height * (1.0 - m["bottom"])))))
+                width = crop_x2 - crop_x1
+                height = crop_y2 - crop_y1
 
         # Dimensões base para 9:16
         base_crop_w = int(height * 9.0 / 16.0)
@@ -749,6 +787,8 @@ def crop_video_with_smart_face_tracking(
             ret, frame = cap.read()
             if not ret or frame is None:
                 break
+            if active_crop:
+                frame = frame[crop_y1:crop_y2, crop_x1:crop_x2]
 
             # Executa detecção a cada N frames para economizar CPU
             if frame_idx % sample_detection_interval == 0:
@@ -1088,7 +1128,8 @@ def generate_split_preview_image(
     split_video_path: str = None,
     split_image_paths: list = None,
     split_media_position: str = "bottom",
-    split_blur_margin_pct: float = 5.0
+    split_blur_margin_pct: float = 5.0,
+    crop_margins: dict = None
 ) -> dict:
     """
     Gera uma imagem de prévia instantânea do Layout Dividido (Split Screen 9:16),
@@ -1104,6 +1145,17 @@ def generate_split_preview_image(
 
         if not ret or frame is None:
             return {"path": None, "error": "Não foi possível extrair o frame do vídeo para a prévia."}
+
+        if crop_margins:
+            from core.video_processor import has_active_crop_margins, sanitize_crop_margins
+            if has_active_crop_margins(crop_margins):
+                m = sanitize_crop_margins(crop_margins)
+                orig_h, orig_w = frame.shape[:2]
+                x1 = max(0, min(orig_w - 1, int(round(orig_w * m["left"]))))
+                x2 = max(x1 + 1, min(orig_w, int(round(orig_w * (1.0 - m["right"])))))
+                y1 = max(0, min(orig_h - 1, int(round(orig_h * m["top"]))))
+                y2 = max(y1 + 1, min(orig_h, int(round(orig_h * m["bottom"]))))
+                frame = frame[y1:y2, x1:x2]
 
         h, w = frame.shape[:2]
 
@@ -1206,7 +1258,8 @@ def crop_video_with_dynamic_auto_switch(
     split_video_path: str = None,
     split_image_paths: list = None,
     split_media_position: str = "bottom",
-    split_blur_margin_pct: float = 5.0
+    split_blur_margin_pct: float = 5.0,
+    crop_margins: dict = None
 ) -> dict:
     """
     Renderiza vídeo 9:16 em Layout Dividido (Split Screen):
@@ -1229,6 +1282,19 @@ def crop_video_with_dynamic_auto_switch(
         total_cut_frames = max(1, end_frame - start_frame)
 
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+        active_crop = False
+        if crop_margins:
+            from core.video_processor import has_active_crop_margins, sanitize_crop_margins
+            if has_active_crop_margins(crop_margins):
+                active_crop = True
+                m = sanitize_crop_margins(crop_margins)
+                vid_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                vid_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                crop_x1 = max(0, min(vid_w - 1, int(round(vid_w * m["left"]))))
+                crop_x2 = max(crop_x1 + 1, min(vid_w, int(round(vid_w * (1.0 - m["right"])))))
+                crop_y1 = max(0, min(vid_h - 1, int(round(vid_h * m["top"]))))
+                crop_y2 = max(crop_y1 + 1, min(vid_h, int(round(vid_h * (1.0 - m["bottom"])))))
 
         out_dir = os.path.dirname(output_video_path)
         if out_dir:
@@ -1299,6 +1365,8 @@ def crop_video_with_dynamic_auto_switch(
             ret, frame = cap.read()
             if not ret or frame is None:
                 break
+            if active_crop:
+                frame = frame[crop_y1:crop_y2, crop_x1:crop_x2]
 
             h, w = frame.shape[:2]
 
@@ -1457,7 +1525,8 @@ def crop_video_with_smart_blur_tracking(
     blur_zoom: float = 1.35,
     person_preference: str = "auto",
     face_margin_ratio: float = 1.55,
-    auto_tracking: bool = True
+    auto_tracking: bool = True,
+    crop_margins: dict = None
 ) -> dict:
     """
     Renderiza vídeo vertical 9:16 (1080x1920) com fundo desfocado dinâmico e
@@ -1481,6 +1550,19 @@ def crop_video_with_smart_blur_tracking(
         total_cut_frames = int(duration_sec * fps)
 
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+        active_crop = False
+        if crop_margins:
+            from core.video_processor import has_active_crop_margins, sanitize_crop_margins
+            if has_active_crop_margins(crop_margins):
+                active_crop = True
+                m = sanitize_crop_margins(crop_margins)
+                vid_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                vid_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                crop_x1 = max(0, min(vid_w - 1, int(round(vid_w * m["left"]))))
+                crop_x2 = max(crop_x1 + 1, min(vid_w, int(round(vid_w * (1.0 - m["right"])))))
+                crop_y1 = max(0, min(vid_h - 1, int(round(vid_h * m["top"]))))
+                crop_y2 = max(crop_y1 + 1, min(vid_h, int(round(vid_h * (1.0 - m["bottom"])))))
 
         out_dir = os.path.dirname(output_video_path)
         if out_dir:
@@ -1535,6 +1617,8 @@ def crop_video_with_smart_blur_tracking(
             ret, frame = cap.read()
             if not ret or frame is None:
                 break
+            if active_crop:
+                frame = frame[crop_y1:crop_y2, crop_x1:crop_x2]
 
             height, width = frame.shape[:2]
 
@@ -1716,10 +1800,12 @@ def generate_169_preview_image(
     video_path: str,
     timestamp_str: str,
     output_path: str,
-    zoom_factor: float = 1.0
+    zoom_factor: float = 1.0,
+    crop_margins: dict = None
 ) -> dict:
     """
-    Gera uma prévia visual instantânea do enquadramento horizontal 16:9 com zoom/aproximação.
+    Gera uma prévia visual instantânea do enquadramento horizontal 16:9 com zoom/aproximação
+    e suporte à remoção de bordas/patrocínios (ROI).
     """
     try:
         t_sec = parse_time_to_seconds(timestamp_str)
@@ -1731,6 +1817,29 @@ def generate_169_preview_image(
         if not ret or frame is None:
             return {"path": None, "error": "Não foi possível capturar o frame para a prévia 16:9."}
 
+        if crop_margins:
+            from core.video_processor import has_active_crop_margins, sanitize_crop_margins
+            if has_active_crop_margins(crop_margins):
+                m = sanitize_crop_margins(crop_margins)
+                orig_h, orig_w = frame.shape[:2]
+                x1 = max(0, min(orig_w - 1, int(round(orig_w * m["left"]))))
+                x2 = max(x1 + 1, min(orig_w, int(round(orig_w * (1.0 - m["right"])))))
+                y1 = max(0, min(orig_h - 1, int(round(orig_h * m["top"]))))
+                y2 = max(y1 + 1, min(orig_h, int(round(orig_h * m["bottom"]))))
+                frame = frame[y1:y2, x1:x2]
+                h, w = frame.shape[:2]
+
+                target_ratio = 16.0 / 9.0
+                roi_ratio = w / float(h)
+                if roi_ratio > target_ratio:
+                    fit_w = int(round(h * target_ratio))
+                    off_x = (w - fit_w) // 2
+                    frame = frame[:, off_x : off_x + fit_w]
+                else:
+                    fit_h = int(round(w / target_ratio))
+                    off_y = (h - fit_h) // 2
+                    frame = frame[off_y : off_y + fit_h, :]
+
         h, w = frame.shape[:2]
         effective_zoom = max(1.0, float(zoom_factor))
         if effective_zoom > 1.001:
@@ -1739,9 +1848,9 @@ def generate_169_preview_image(
             x1 = max(0, (w - crop_w) // 2)
             y1 = max(0, (h - crop_h) // 2)
             cropped = frame[y1 : y1 + crop_h, x1 : x1 + crop_w]
-            resized = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+            resized = cv2.resize(cropped, (1920, 1080), interpolation=cv2.INTER_LINEAR)
         else:
-            resized = frame
+            resized = cv2.resize(frame, (1920, 1080), interpolation=cv2.INTER_LINEAR)
 
         cv2.imwrite(output_path, resized, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
         return {"path": output_path, "error": None}

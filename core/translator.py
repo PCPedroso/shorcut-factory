@@ -171,7 +171,8 @@ def translate_transcript_segments(
     source_lang: str = None,
     model: str = "llama3",
     batch_size: int = 15,
-    progress_callback=None
+    progress_callback=None,
+    checkpoint_callback=None
 ) -> dict:
     """
     Traduz uma lista de segmentos de transcrição em lotes com IA local (Ollama).
@@ -199,16 +200,22 @@ def translate_transcript_segments(
     source_lang_name = LANGUAGE_NAMES.get(source_lang, source_lang) if source_lang else None
 
     total_segments = len(segments)
+    # Para arquivos maiores, ajusta batch_size para até 20 reduzindo viagens de ida e volta ao Ollama
+    if total_segments >= 40 and batch_size <= 15:
+        effective_batch_size = 20
+    else:
+        effective_batch_size = batch_size
+
     translated_segments = []
     translated_texts_all = []
 
-    # Processa em lotes de batch_size
-    for b_idx in range(0, total_segments, batch_size):
-        batch = segments[b_idx:b_idx + batch_size]
+    # Processa em lotes de effective_batch_size
+    for b_idx in range(0, total_segments, effective_batch_size):
+        batch = segments[b_idx:b_idx + effective_batch_size]
         items_payload = [{"id": idx, "text": seg.get("text", "")} for idx, seg in enumerate(batch)]
 
         if progress_callback:
-            progress_callback(min(1.0, b_idx / total_segments), f"Traduzindo frases {b_idx + 1} a {min(total_segments, b_idx + len(batch))} de {total_segments}...")
+            progress_callback(min(1.0, b_idx / total_segments), f"Traduzindo frases {b_idx + 1} a {min(total_segments, b_idx + len(batch))} de {total_segments} ({int((b_idx / total_segments) * 100)}%)...")
 
         prompt = format_translation_prompt(items_payload, target_lang_name, source_lang_name)
         translated_items = _call_ollama_json(prompt, model=model)
@@ -230,15 +237,6 @@ def translate_transcript_segments(
                                 pass
                         translated_items.append(sr)
 
-        if translated_items is None:
-            return {
-                "segments": segments,
-                "full_text": "",
-                "translated_count": 0,
-                "target_lang": target_lang_name,
-                "error": f"Ollama não retornou traduções para o modelo '{model}'. Verifique se o serviço do Ollama está rodando localmente (http://localhost:11434) e se possui modelos instalados (ex: 'ollama pull llama3')."
-            }
-
         # Mapeia as traduções recebidas
         trans_map = {}
         if translated_items and isinstance(translated_items, list):
@@ -255,13 +253,22 @@ def translate_transcript_segments(
                     trans_map[idx_implicit] = str(it["text"]).strip()
 
         if not trans_map:
-            return {
-                "segments": segments,
-                "full_text": "",
-                "translated_count": 0,
-                "target_lang": target_lang_name,
-                "error": "Ollama respondeu, mas não retornou nenhuma tradução válida no formato JSON esperado."
-            }
+            if b_idx == 0:
+                return {
+                    "segments": segments,
+                    "full_text": "",
+                    "translated_count": 0,
+                    "target_lang": target_lang_name,
+                    "error": f"Ollama não retornou traduções para o modelo '{model}'. Verifique se o serviço do Ollama está rodando localmente (http://localhost:11434) e se possui modelos instalados (ex: 'ollama pull llama3')."
+                }
+            else:
+                # Se falhou em um lote intermediário, preserva original deste lote para não abortar todo o progresso
+                for seg in batch:
+                    new_seg = dict(seg)
+                    new_seg["original_text"] = seg.get("text", "")
+                    translated_segments.append(new_seg)
+                    translated_texts_all.append(seg.get("text", ""))
+                continue
 
         # Reconstrói os segmentos do lote com timestamps preservados
         for idx, seg in enumerate(batch):
@@ -277,6 +284,13 @@ def translate_transcript_segments(
 
             translated_segments.append(new_seg)
             translated_texts_all.append(translated_text)
+
+        # Checkpoint incremental a cada 5 lotes
+        if checkpoint_callback and ((b_idx // effective_batch_size) % 5 == 0 or (b_idx + effective_batch_size >= total_segments)):
+            try:
+                checkpoint_callback(translated_segments)
+            except Exception:
+                pass
 
     if progress_callback:
         progress_callback(1.0, "Tradução concluída!")
@@ -402,6 +416,15 @@ def translate_cut_subtitles(
                         video_id = d
                         break
 
+        # Se ainda não encontrou transcript.json, procura por qualquer transcrição pontual _cut_tr_*.json no diretório
+        if not os.path.exists(t_path) and os.path.isdir(target_vid_dir):
+            for fname in os.listdir(target_vid_dir):
+                if fname.startswith("_cut_tr_") and fname.endswith(".json"):
+                    cand_tr = os.path.join(target_vid_dir, fname)
+                    if os.path.getsize(cand_tr) > 100:
+                        t_path = cand_tr
+                        break
+
     if not os.path.exists(t_path):
         return {"translated_segments": [], "translated_snippet": "", "count": 0, "error": "Arquivo de transcrição não encontrado."}
 
@@ -437,17 +460,16 @@ def translate_cut_subtitles(
     if not target_sub_segments:
         return {"translated_segments": [], "translated_snippet": "", "count": 0, "error": "Nenhuma frase encontrada dentro do intervalo selecionado."}
 
-    # Traduz as frases do corte
-    trans_res = translate_transcript_segments(
-        segments=target_sub_segments,
-        target_lang=target_lang,
-        model=model,
-        batch_size=15,
-        progress_callback=progress_callback
-    )
-
-    if trans_res.get("error"):
-        return {"translated_segments": [], "translated_snippet": "", "count": 0, "error": trans_res["error"]}
+    # Se este trecho já está totalmente traduzido no idioma desejado, reaproveita instantaneamente
+    if data.get("is_translated") and data.get("language") == target_lang and all(s.get("original_text") for s in target_sub_segments):
+        cut_snippet = " ".join([s.get("text", "") for s in target_sub_segments if s.get("text")])
+        return {
+            "translated_segments": target_sub_segments,
+            "translated_snippet": cut_snippet,
+            "count": len(target_sub_segments),
+            "video_id": video_id,
+            "error": None
+        }
 
     # Backup do original no disco se ainda não existir
     orig_path = os.path.join(target_vid_dir, "transcript_original.json")
@@ -457,6 +479,30 @@ def translate_cut_subtitles(
                 json.dump(data, f_out, ensure_ascii=False, indent=2)
         except Exception:
             pass
+
+    # Callback de salvamento incremental para não perder progresso em fatias longas
+    def _checkpoint_cut(partial_segs):
+        try:
+            for idx, new_seg in zip(target_indices[:len(partial_segs)], partial_segs):
+                segments[idx] = new_seg
+            data["segments"] = segments
+            data["full_text"] = " ".join([s.get("text", "") for s in segments if s.get("text")])
+            data["is_translated"] = True
+            data["language"] = target_lang
+            with open(t_path, "w", encoding="utf-8") as f_ckpt:
+                json.dump(data, f_ckpt, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    # Traduz as frases do corte
+    trans_res = translate_transcript_segments(
+        segments=target_sub_segments,
+        target_lang=target_lang,
+        model=model,
+        batch_size=15,
+        progress_callback=progress_callback,
+        checkpoint_callback=_checkpoint_cut
+    )
 
     # Atualiza os segmentos originais com as frases traduzidas
     translated_segs = trans_res.get("segments", [])
@@ -508,6 +554,15 @@ def translate_full_video_transcript(
                 break
 
     t_path = os.path.join(v_dir, "transcript.json")
+    if not os.path.exists(t_path) and os.path.isdir(v_dir):
+        # Procura por transcrição existente gerada como _cut_tr_
+        for fname in os.listdir(v_dir):
+            if fname.startswith("_cut_tr_") and fname.endswith(".json"):
+                cand_tr = os.path.join(v_dir, fname)
+                if os.path.getsize(cand_tr) > 100:
+                    t_path = cand_tr
+                    break
+
     if not os.path.exists(t_path):
         return {"error": "Arquivo transcript.json não encontrado.", "count": 0}
 
@@ -530,12 +585,25 @@ def translate_full_video_transcript(
         except Exception:
             pass
 
+    # Salvamento de checkpoint a cada lote para transcrições longas
+    def _checkpoint_full(partial_segs):
+        try:
+            data["segments"] = partial_segs + segments[len(partial_segs):]
+            data["full_text"] = " ".join([s.get("text", "") for s in data["segments"] if s.get("text")])
+            data["is_translated"] = True
+            data["language"] = target_lang
+            with open(t_path, "w", encoding="utf-8") as f_ckpt:
+                json.dump(data, f_ckpt, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
     res = translate_transcript_segments(
         segments=segments,
         target_lang=target_lang,
         model=model,
         batch_size=15,
-        progress_callback=progress_callback
+        progress_callback=progress_callback,
+        checkpoint_callback=_checkpoint_full
     )
 
     if res.get("error"):
