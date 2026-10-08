@@ -11,7 +11,8 @@ from core.frame_capturer import (
     format_seconds_to_time_str,
     extract_frame_at_timestamp,
     save_captured_frame_as_thumbnail,
-    save_base64_data_as_image
+    save_base64_data_as_image,
+    capture_single_frame_rgb
 )
 
 
@@ -109,6 +110,22 @@ class TestFrameCapturer(unittest.TestCase):
         self.assertIn("tempo do frame", full_js.lower())
         self.assertIn("capturar tempo", full_js.lower())
         self.assertIn("captured_frame_time", full_js)
+
+    def test_capture_single_frame_rgb(self):
+        v_path = os.path.join(self.tmp_dir, "dummy_rgb.mp4")
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        out = cv2.VideoWriter(v_path, fourcc, 10.0, (720, 1280))
+        for i in range(10):
+            frame = np.full((1280, 720, 3), (i * 20, 50, 150), dtype=np.uint8)
+            out.write(frame)
+        out.release()
+
+        frame_rgb = capture_single_frame_rgb(v_path, "00:00:00.50")
+        self.assertIsNotNone(frame_rgb)
+        self.assertIsInstance(frame_rgb, np.ndarray)
+        self.assertEqual(frame_rgb.shape, (1280, 720, 3))
+        # Non-existent video returns None
+        self.assertIsNone(capture_single_frame_rgb("non_existent_video.mp4", 0.0))
 
 
 if __name__ == '__main__':

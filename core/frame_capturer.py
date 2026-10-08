@@ -144,6 +144,21 @@ def extract_frame_at_timestamp(
     return {"frame": None, "error": f"Não foi possível extrair o frame aos {t:.2f}s."}
 
 
+def capture_single_frame_rgb(video_path: str, timestamp_s_or_str=0.0) -> np.ndarray:
+    """
+    Extrai um único frame de vídeo em formato RGB (H, W, 3) como array NumPy.
+    Aceita timestamp em segundos (float) ou string de tempo ('HH:MM:SS.ms').
+    """
+    t_sec = parse_time_str_to_seconds(timestamp_s_or_str)
+    res = extract_frame_at_timestamp(video_path, t_sec)
+    if res.get("frame") is not None:
+        try:
+            return cv2.cvtColor(res["frame"], cv2.COLOR_BGR2RGB)
+        except Exception:
+            return res["frame"]
+    return None
+
+
 def save_captured_frame_as_thumbnail(
     source_video_or_frame,
     output_thumbnail_path: str,
@@ -246,3 +261,262 @@ def save_base64_data_as_image(base64_str: str, output_path: str) -> dict:
         return {"success": True, "path": output_path, "error": None}
     except Exception as exc:
         return {"success": False, "error": f"Erro ao decodificar imagem base64: {str(exc)}"}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Utilitários de Prévia Visual da Região de Interesse (ROI) e Enquadramento Manual
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _draw_text_badge(img, text: str, origin: tuple, bg_color=(15, 15, 15), text_color=(255, 255, 255), font_scale=0.6, thickness=2, padding=6):
+    """Desenha texto com fundo escuro sólido para máxima legibilidade."""
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    (tw, th), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+    x, y = origin
+    x = max(padding, min(img.shape[1] - tw - padding, x))
+    y = max(th + padding, min(img.shape[0] - baseline - padding, y))
+    cv2.rectangle(img, (x - padding, y - th - padding), (x + tw + padding, y + baseline + padding), bg_color, -1)
+    cv2.putText(img, text, (x, y), font, font_scale, text_color, thickness, cv2.LINE_AA)
+
+
+def generate_roi_preview_image(
+    source_video_or_frame,
+    timestamp_s_or_str = 0.0,
+    output_path: str = "preview_roi.jpg",
+    crop_margins: dict = None
+) -> dict:
+    """
+    Gera uma imagem de prévia com máscara visual da Região de Interesse (ROI):
+    - Pinta as bordas a serem cortadas (anúncios, patrocínios em L, rodapés) com máscara vermelha semi-transparente.
+    - Destaca a área limpa que será aproveitada com moldura verde neon estilo viewfinder.
+    - Exibe métricas de dimensões e percentual de recorte de cada margem.
+    """
+    try:
+        from core.video_processor import sanitize_crop_margins, has_active_crop_margins
+
+        if isinstance(source_video_or_frame, np.ndarray):
+            raw_bgr = source_video_or_frame.copy()
+        elif isinstance(source_video_or_frame, str) and os.path.exists(source_video_or_frame):
+            t_sec = parse_time_str_to_seconds(timestamp_s_or_str)
+            ext_res = extract_frame_at_timestamp(source_video_or_frame, t_sec)
+            if ext_res.get("error") or ext_res.get("frame") is None:
+                return {"path": None, "error": ext_res.get("error", "Não foi possível extrair o frame para prévia ROI.")}
+            raw_bgr = ext_res["frame"].copy()
+        else:
+            return {"path": None, "error": "Fonte de vídeo/frame inválida para prévia ROI."}
+
+        h, w = raw_bgr.shape[:2]
+        m = sanitize_crop_margins(crop_margins)
+        has_crop = has_active_crop_margins(crop_margins)
+
+        x1 = max(0, min(w - 1, int(round(w * m["left"]))))
+        x2 = max(x1 + 1, min(w, int(round(w * (1.0 - m["right"])))))
+        y1 = max(0, min(h - 1, int(round(h * m["top"]))))
+        y2 = max(y1 + 1, min(h, int(round(h * (1.0 - m["bottom"])))))
+
+        roi_w = x2 - x1
+        roi_h = y2 - y1
+        roi_area_pct = ((roi_w * roi_h) / float(w * h)) * 100.0
+
+        canvas = raw_bgr.copy()
+
+        if has_crop:
+            # Cria camada de máscara vermelha semi-transparente sobre as bordas descartadas
+            overlay = raw_bgr.copy()
+            red_color = (35, 35, 215)  # BGR
+
+            # Top margin
+            if y1 > 0:
+                overlay[0:y1, :] = red_color
+            # Bottom margin
+            if y2 < h:
+                overlay[y2:h, :] = red_color
+            # Left margin
+            if x1 > 0:
+                overlay[y1:y2, 0:x1] = red_color
+            # Right margin
+            if x2 < w:
+                overlay[y1:y2, x2:w] = red_color
+
+            cv2.addWeighted(overlay, 0.48, canvas, 0.52, 0, canvas)
+
+            # Moldura verde neon contornando a ROI
+            neon_green = (0, 255, 80)
+            cv2.rectangle(canvas, (x1, y1), (x2, y2), neon_green, thickness=3)
+
+            # Cantoneiras reforçadas estilo viewfinder (câmera cinema)
+            bracket_len = min(40, roi_w // 4, roi_h // 4)
+            b_thick = 5
+            # Top-left
+            cv2.line(canvas, (x1, y1), (x1 + bracket_len, y1), neon_green, b_thick)
+            cv2.line(canvas, (x1, y1), (x1, y1 + bracket_len), neon_green, b_thick)
+            # Top-right
+            cv2.line(canvas, (x2, y1), (x2 - bracket_len, y1), neon_green, b_thick)
+            cv2.line(canvas, (x2, y1), (x2, y1 + bracket_len), neon_green, b_thick)
+            # Bottom-left
+            cv2.line(canvas, (x1, y2), (x1 + bracket_len, y2), neon_green, b_thick)
+            cv2.line(canvas, (x1, y2), (x1, y2 - bracket_len), neon_green, b_thick)
+            # Bottom-right
+            cv2.line(canvas, (x2, y2), (x2 - bracket_len, y2), neon_green, b_thick)
+            cv2.line(canvas, (x2, y2), (x2, y2 - bracket_len), neon_green, b_thick)
+
+            # Badges com percentuais de corte nas bordas descartadas
+            if m["right"] > 0.001:
+                cx_tag = x2 + (w - x2) // 2
+                cy_tag = y1 + roi_h // 2
+                _draw_text_badge(canvas, f"CORTE DIR: {m['right']*100:.1f}%", (cx_tag - 80, cy_tag), bg_color=(20, 20, 180), text_color=(255, 255, 255), font_scale=0.55)
+
+            if m["bottom"] > 0.001:
+                cx_tag = x1 + roi_w // 2
+                cy_tag = y2 + (h - y2) // 2
+                _draw_text_badge(canvas, f"CORTE INF (RODAPE): {m['bottom']*100:.1f}%", (cx_tag - 120, cy_tag + 6), bg_color=(20, 20, 180), text_color=(255, 255, 255), font_scale=0.55)
+
+            if m["left"] > 0.001:
+                cx_tag = x1 // 2
+                cy_tag = y1 + roi_h // 2
+                _draw_text_badge(canvas, f"CORTE ESQ: {m['left']*100:.1f}%", (cx_tag - 70, cy_tag), bg_color=(20, 20, 180), text_color=(255, 255, 255), font_scale=0.55)
+
+            if m["top"] > 0.001:
+                cx_tag = x1 + roi_w // 2
+                cy_tag = y1 // 2
+                _draw_text_badge(canvas, f"CORTE SUP: {m['top']*100:.1f}%", (cx_tag - 70, cy_tag), bg_color=(20, 20, 180), text_color=(255, 255, 255), font_scale=0.55)
+
+            # Badge principal da ROI preservada
+            badge_text = f"AREA PRESERVADA: {roi_w}x{roi_h} px ({roi_area_pct:.1f}% util)"
+            _draw_text_badge(canvas, badge_text, (x1 + 14, y1 + 32), bg_color=(10, 10, 10), text_color=neon_green, font_scale=0.65, thickness=2)
+        else:
+            # Sem cortes ativos: exibe badge de 100% integral
+            badge_text = f"ENQUADRAMENTO 100% ORIGINAL: {w}x{h} px"
+            _draw_text_badge(canvas, badge_text, (24, 40), bg_color=(10, 10, 10), text_color=(0, 255, 255), font_scale=0.65, thickness=2)
+
+        out_dir = os.path.dirname(output_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
+        cv2.imwrite(output_path, canvas, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+        return {
+            "path": output_path,
+            "roi": (x1, y1, x2, y2),
+            "dimensions": (roi_w, roi_h),
+            "has_crop": has_crop,
+            "error": None
+        }
+    except Exception as exc:
+        return {"path": None, "error": str(exc)}
+
+
+def generate_cropped_preview_image(
+    source_video_or_frame,
+    timestamp_s_or_str = 0.0,
+    output_path: str = "preview_cropped.jpg",
+    crop_margins: dict = None,
+    target_aspect: str = "16:9",
+    horizontal_zoom: float = 1.0
+) -> dict:
+    """
+    Gera a prévia exata do resultado renderizado final com a ROI aplicada e sem distorção anamórfica:
+    - target_aspect='16:9': Redimensiona e ajusta a ROI limpa para 1920x1080 Full HD (com zoom opcional).
+    - target_aspect='9:16_crop': Recorta a fatia vertical central 9:16 da ROI para 1080x1920.
+    - target_aspect='9:16_blur': Cria fundo desfocado a partir da ROI limpa com foreground 9:16 centralizado.
+    """
+    try:
+        from core.video_processor import sanitize_crop_margins, has_active_crop_margins
+
+        if isinstance(source_video_or_frame, np.ndarray):
+            raw_bgr = source_video_or_frame.copy()
+        elif isinstance(source_video_or_frame, str) and os.path.exists(source_video_or_frame):
+            t_sec = parse_time_str_to_seconds(timestamp_s_or_str)
+            ext_res = extract_frame_at_timestamp(source_video_or_frame, t_sec)
+            if ext_res.get("error") or ext_res.get("frame") is None:
+                return {"path": None, "error": ext_res.get("error", "Não foi possível extrair o frame.")}
+            raw_bgr = ext_res["frame"].copy()
+        else:
+            return {"path": None, "error": "Fonte de vídeo/frame inválida."}
+
+        h, w = raw_bgr.shape[:2]
+        m = sanitize_crop_margins(crop_margins)
+        has_crop = has_active_crop_margins(crop_margins)
+
+        if has_crop:
+            x1 = max(0, min(w - 1, int(round(w * m["left"]))))
+            x2 = max(x1 + 1, min(w, int(round(w * (1.0 - m["right"])))))
+            y1 = max(0, min(h - 1, int(round(h * m["top"]))))
+            y2 = max(y1 + 1, min(h, int(round(h * (1.0 - m["bottom"])))))
+            roi_frame = raw_bgr[y1:y2, x1:x2].copy()
+        else:
+            roi_frame = raw_bgr.copy()
+
+        rh, rw = roi_frame.shape[:2]
+
+        if target_aspect == "16:9":
+            # Ajuste de proporção para 16:9 (1.7778)
+            target_ratio = 16.0 / 9.0
+            roi_ratio = rw / float(rh)
+
+            if roi_ratio > target_ratio:
+                # ROI mais larga que 16:9: apara laterais
+                fit_w = int(round(rh * target_ratio))
+                off_x = (rw - fit_w) // 2
+                cropped_169 = roi_frame[:, off_x : off_x + fit_w]
+            else:
+                # ROI mais alta que 16:9: apara topo/base
+                fit_h = int(round(rw / target_ratio))
+                off_y = (rh - fit_h) // 2
+                cropped_169 = roi_frame[off_y : off_y + fit_h, :]
+
+            # Aplica zoom horizontal adicional se configurado
+            eff_zoom = max(1.0, float(horizontal_zoom or 1.0))
+            if eff_zoom > 1.001:
+                ch, cw = cropped_169.shape[:2]
+                zw = int(round(cw / eff_zoom))
+                zh = int(round(ch / eff_zoom))
+                zx = max(0, (cw - zw) // 2)
+                zy = max(0, (ch - zh) // 2)
+                cropped_169 = cropped_169[zy : zy + zh, zx : zx + zw]
+
+            final_out = cv2.resize(cropped_169, (1920, 1080), interpolation=cv2.INTER_LINEAR)
+
+        elif target_aspect == "9:16_crop":
+            # 9:16 Vertical corte central (9/16 = 0.5625)
+            target_ratio = 9.0 / 16.0
+            roi_ratio = rw / float(rh)
+
+            if roi_ratio > target_ratio:
+                fit_w = int(round(rh * target_ratio))
+                off_x = (rw - fit_w) // 2
+                cropped_916 = roi_frame[:, off_x : off_x + fit_w]
+            else:
+                fit_h = int(round(rw / target_ratio))
+                off_y = (rh - fit_h) // 2
+                cropped_916 = roi_frame[off_y : off_y + fit_h, :]
+
+            final_out = cv2.resize(cropped_916, (1080, 1920), interpolation=cv2.INTER_LINEAR)
+
+        elif target_aspect == "9:16_blur":
+            # Fundo desfocado 1080x1920 gerado exclusivamente da ROI limpa
+            bg = cv2.resize(roi_frame, (1080, 1920), interpolation=cv2.INTER_LINEAR)
+            bg = cv2.GaussianBlur(bg, (99, 99), 30)
+            # Escurece levemente o fundo (-10%)
+            bg = np.clip(bg.astype(np.float32) * 0.90, 0, 255).astype(np.uint8)
+
+            # Foreground proporcional centralizado
+            scale = 1080.0 / float(rw)
+            fg_h = int(round(rh * scale))
+            fg = cv2.resize(roi_frame, (1080, fg_h), interpolation=cv2.INTER_LINEAR)
+
+            off_y = max(0, (1920 - fg_h) // 2)
+            clip_fg_h = min(fg_h, 1920)
+            bg[off_y : off_y + clip_fg_h, :] = fg[:clip_fg_h, :]
+            final_out = bg
+
+        else:
+            final_out = roi_frame
+
+        out_dir = os.path.dirname(output_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
+        cv2.imwrite(output_path, final_out, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+        return {"path": output_path, "error": None}
+    except Exception as exc:
+        return {"path": None, "error": str(exc)}
+
