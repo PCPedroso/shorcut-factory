@@ -7223,7 +7223,17 @@ if _has_media_ready:
             st.session_state.final_start_time = st.session_state.pop("_pending_start_time")
         if "_pending_end_time" in st.session_state:
             st.session_state.final_end_time = st.session_state.pop("_pending_end_time")
-    
+
+        if st.session_state.get("aspect_ratio_choice") == "📱 Vertical 9:16 (🎬 Multicâmera Interativo - 2 a 3 Câmeras por Mouse)":
+            _mc_scs = st.session_state.get("multicam_scenes")
+            if _mc_scs and isinstance(_mc_scs, list) and len(_mc_scs) > 0:
+                from core.multicam_crop import compute_multicam_global_timerange
+                _mc_s, _mc_e = compute_multicam_global_timerange(_mc_scs)
+                if _mc_s:
+                    st.session_state.final_start_time = _mc_s
+                if _mc_e:
+                    st.session_state.final_end_time = _mc_e
+
         if 'final_start_time' not in st.session_state:
             st.session_state.final_start_time = ""
         if 'final_end_time' not in st.session_state:
@@ -7921,9 +7931,10 @@ if _has_media_ready:
                         fallback_start=start_time or "00:00:00.00",
                         fallback_end=end_time or ""
                     )
-                    st.session_state.final_start_time = mc_global_start
+                    # Sincroniza localmente as variáveis de tempo para a renderização do corte
+                    start_time = mc_global_start
                     if mc_global_end:
-                        st.session_state.final_end_time = mc_global_end
+                        end_time = mc_global_end
 
                     if len(mc_scenes) == 1:
                         st.info(f"⏱️ **Intervalo do Corte Sincronizado:** `[{mc_global_start} ➔ {mc_global_end or 'Fim do Vídeo'}]` *(Definido pelo enquadramento desta cena)*")
@@ -7960,11 +7971,21 @@ if _has_media_ready:
                                     "divider_color": "black",
                                     "divider_width": 4
                                 })
+                                st.session_state["multicam_scenes"] = mc_scenes
+                                g_st, g_en = compute_multicam_global_timerange(mc_scenes)
+                                st.session_state["_pending_start_time"] = g_st
+                                if g_en:
+                                    st.session_state["_pending_end_time"] = g_en
                                 st.rerun()
                         with col_del_s:
                             if len(mc_scenes) > 1:
                                 if st.button("🗑️ Remover", key="btn_mc_del_scene", use_container_width=True, help="Exclui a cena selecionada"):
                                     mc_scenes.pop(sel_sc_idx)
+                                    st.session_state["multicam_scenes"] = mc_scenes
+                                    g_st, g_en = compute_multicam_global_timerange(mc_scenes)
+                                    st.session_state["_pending_start_time"] = g_st
+                                    if g_en:
+                                        st.session_state["_pending_end_time"] = g_en
                                     st.rerun()
 
                     def cb_mc_load_ref(scene_idx: int):
@@ -7977,6 +7998,10 @@ if _has_media_ready:
                         st.session_state[f"mc_sc_start_{scene_idx}"] = nav_val
                         if "multicam_scenes" in st.session_state and scene_idx < len(st.session_state["multicam_scenes"]):
                             st.session_state["multicam_scenes"][scene_idx]["start_time"] = nav_val
+                            g_st, g_en = compute_multicam_global_timerange(st.session_state["multicam_scenes"])
+                            st.session_state["_pending_start_time"] = g_st
+                            if g_en:
+                                st.session_state["_pending_end_time"] = g_en
                         st.toast(f"✅ Início da Cena {scene_idx+1} atualizado para {nav_val}!")
 
                     def cb_mc_set_end(scene_idx: int):
@@ -7984,7 +8009,21 @@ if _has_media_ready:
                         st.session_state[f"mc_sc_end_{scene_idx}"] = nav_val
                         if "multicam_scenes" in st.session_state and scene_idx < len(st.session_state["multicam_scenes"]):
                             st.session_state["multicam_scenes"][scene_idx]["end_time"] = nav_val
+                            g_st, g_en = compute_multicam_global_timerange(st.session_state["multicam_scenes"])
+                            st.session_state["_pending_start_time"] = g_st
+                            if g_en:
+                                st.session_state["_pending_end_time"] = g_en
                         st.toast(f"✅ Fim da Cena {scene_idx+1} atualizado para {nav_val}!")
+
+                    def cb_mc_sc_time_changed(field_key: str, scene_idx: int, field_type: str):
+                        normalize_time_key_callback(field_key)
+                        val = st.session_state.get(field_key, "")
+                        if "multicam_scenes" in st.session_state and scene_idx < len(st.session_state["multicam_scenes"]):
+                            st.session_state["multicam_scenes"][scene_idx][field_type] = val
+                            g_st, g_en = compute_multicam_global_timerange(st.session_state["multicam_scenes"])
+                            st.session_state["_pending_start_time"] = g_st
+                            if g_en:
+                                st.session_state["_pending_end_time"] = g_en
 
                     cur_scene = mc_scenes[sel_sc_idx]
 
@@ -8001,16 +8040,16 @@ if _has_media_ready:
                             f"Início da Cena {sel_sc_idx+1} (HH:MM:SS.ms):",
                             placeholder="00:00:00.00",
                             key=f"mc_sc_start_{sel_sc_idx}",
-                            on_change=normalize_time_key_callback,
-                            args=(f"mc_sc_start_{sel_sc_idx}",),
+                            on_change=cb_mc_sc_time_changed,
+                            args=(f"mc_sc_start_{sel_sc_idx}", sel_sc_idx, "start_time"),
                         )
                     with col_et_sc:
                         cur_scene["end_time"] = st.text_input(
                             f"Fim da Cena {sel_sc_idx+1} (HH:MM:SS.ms):",
                             placeholder="00:00:00.00",
                             key=f"mc_sc_end_{sel_sc_idx}",
-                            on_change=normalize_time_key_callback,
-                            args=(f"mc_sc_end_{sel_sc_idx}",),
+                            on_change=cb_mc_sc_time_changed,
+                            args=(f"mc_sc_end_{sel_sc_idx}", sel_sc_idx, "end_time"),
                         )
                     with col_ref_f:
                         ref_ts_input = st.text_input(
@@ -8080,6 +8119,10 @@ if _has_media_ready:
                                         for scn_item in reversed(new_split_scenes):
                                             mc_scenes.insert(sel_sc_idx, scn_item)
                                         st.session_state["multicam_scenes"] = mc_scenes
+                                        g_st, g_en = compute_multicam_global_timerange(mc_scenes)
+                                        st.session_state["_pending_start_time"] = g_st
+                                        if g_en:
+                                            st.session_state["_pending_end_time"] = g_en
                                         st.session_state.pop(f"detected_cuts_{sel_sc_idx}", None)
                                         st.toast(f"✂️ Cena dividida em {len(new_split_scenes)} intervalos correspondentes aos cortes de câmera!")
                                         st.rerun()
