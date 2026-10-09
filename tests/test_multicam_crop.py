@@ -152,3 +152,79 @@ def test_cut_video_multicam_mode_integration(monkeypatch, tmp_path):
 
     assert mock_called["scenes"] == scenes_input
     assert res.get("path") == dummy_out
+
+
+def test_compute_multicam_global_timerange_single_scene():
+    """Valida que com 1 cena, o corte utiliza exatamente o início e fim dessa cena."""
+    from core.multicam_crop import compute_multicam_global_timerange
+    scenes = [{"start_time": "00:01:15.00", "end_time": "00:02:45.50"}]
+    start_t, end_t = compute_multicam_global_timerange(scenes)
+    assert start_t == "00:01:15.00"
+    assert end_t == "00:02:45.50"
+
+
+def test_compute_multicam_global_timerange_multiple_scenes():
+    """Valida que com mais de uma cena, pega o menor início da primeira e maior fim da última."""
+    from core.multicam_crop import compute_multicam_global_timerange
+    scenes = [
+        {"start_time": "00:00:20.00", "end_time": "00:00:45.00"},
+        {"start_time": "00:00:05.00", "end_time": "00:00:20.00"},  # Menor início
+        {"start_time": "00:00:45.00", "end_time": "00:01:30.00"}   # Maior fim
+    ]
+    start_t, end_t = compute_multicam_global_timerange(scenes)
+    assert start_t == "00:00:05.00"
+    assert end_t == "00:01:30.00"
+
+
+def test_snap_box_to_scene_borders():
+    """Valida que snap_box_to_scene_borders alinha com linhas divisórias de alta transição (banners/tarjas)."""
+    import cv2
+    from core.multicam_crop import snap_box_to_scene_borders
+    
+    # Cria uma imagem sintética 1920x1080 com uma tarja inferior nítida em y=800
+    img = np.full((1080, 1920, 3), 180, dtype=np.uint8)
+    # Tarja preta/escura inferior a partir de y=800
+    img[800:, :, :] = 20
+    # Linha divisória branca vertical em x=600
+    img[:, 598:602, :] = 255
+
+    # Retângulo desenhado pelo usuário ligeiramente desalinhado (y_bottom em 815 e x_left em 585)
+    user_box = {"x": 585, "y": 200, "w": 400, "h": 615}  # bottom está em 200+615 = 815
+
+    snapped = snap_box_to_scene_borders(user_box, img, search_margin=30, min_gradient=15.0)
+
+    # O bottom_y deve ter sido puxado para 800 (ou próximo de 800, par)
+    assert abs((snapped["y"] + snapped["h"]) - 800) <= 2
+    # O x_left deve ter sido puxado para 600 (ou próximo de 600, par)
+    assert abs(snapped["x"] - 600) <= 2
+    # Dimensões devem ser pares
+    assert snapped["w"] % 2 == 0
+    assert snapped["h"] % 2 == 0
+
+
+def test_detect_scene_changes_in_range(tmp_path):
+    """Valida a detecção de cortes de cena criando um vídeo sintético com transição de plano."""
+    import cv2
+    from core.multicam_crop import detect_scene_changes_in_range
+
+    video_p = str(tmp_path / "test_scenes.mp4")
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(video_p, fourcc, 10.0, (320, 240))
+
+    # 15 frames pretos (1.5 segundos)
+    for _ in range(15):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        out.write(frame)
+
+    # 15 frames brancos brilhantes (mudança drástica de cena aos 1.5s)
+    for _ in range(15):
+        frame = np.full((240, 320, 3), 255, dtype=np.uint8)
+        out.write(frame)
+
+    out.release()
+
+    cuts = detect_scene_changes_in_range(video_p, start_s=0.0, end_s=3.0, sample_interval_s=0.5, threshold=0.30)
+    assert len(cuts) >= 1
+    # O corte deve ter sido detectado próximo a 1.5 segundos
+    assert any(abs(c["timestamp_s"] - 1.5) <= 0.6 for c in cuts)
+

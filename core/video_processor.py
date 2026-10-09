@@ -1176,12 +1176,17 @@ def cut_video(
 
         elif aspect_ratio_mode == "9:16_multicam":
             # Pipeline 9:16 Multicâmera Interativo Manual (2 a N Câmeras em Pilha Vertical Proporcional)
-            from core.multicam_crop import render_multicam_cut
+            from core.multicam_crop import render_multicam_cut, compute_multicam_global_timerange
             mc_scenes = multicam_scenes or [{
                 "start_time": start_time_str,
                 "end_time": end_time_str,
                 "boxes": []
             }]
+            # Sincroniza o início e fim globais estritamente a partir das cenas configuradas
+            mc_eff_start, mc_eff_end = compute_multicam_global_timerange(mc_scenes, start_time_str, end_time_str)
+            start_time_str = mc_eff_start
+            end_time_str = mc_eff_end
+
             result = render_multicam_cut(
                 input_video_path=input_path,
                 scenes=mc_scenes,

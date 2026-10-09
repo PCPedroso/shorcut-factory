@@ -125,6 +125,237 @@ def normalize_box_coordinates(
     }
 
 
+def compute_multicam_global_timerange(
+    scenes: list,
+    fallback_start: str = "00:00:00.00",
+    fallback_end: str = ""
+) -> tuple:
+    """
+    Calcula o tempo inicial e final global a partir das cenas configuradas:
+    - Se houver apenas 1 cena: usa exatamente o start_time e end_time dessa cena.
+    - Se houver mais de 1 cena: pega o menor tempo inicial (primeira cena cronológica)
+      e o maior tempo final (última cena cronológica) para definir o corte geral.
+    """
+    if not scenes:
+        return (fallback_start or "00:00:00.00"), (fallback_end or "")
+
+    parsed = []
+    for scn in scenes:
+        s_val = scn.get("start_time") or fallback_start or "00:00:00.00"
+        e_val = scn.get("end_time") or fallback_end or ""
+        s_sec = parse_time_str_to_seconds(s_val)
+        e_sec = parse_time_str_to_seconds(e_val) if e_val and str(e_val).strip() else None
+        parsed.append({
+            "start_time": s_val,
+            "end_time": e_val,
+            "start_sec": s_sec,
+            "end_sec": e_sec
+        })
+
+    if len(parsed) == 1:
+        return parsed[0]["start_time"], parsed[0]["end_time"]
+
+    # Menor tempo inicial entre todas as cenas
+    parsed_sorted_start = sorted(parsed, key=lambda x: x["start_sec"])
+    global_start = parsed_sorted_start[0]["start_time"]
+
+    # Maior tempo final entre todas as cenas
+    ends_with_time = [p for p in parsed if p["end_sec"] is not None]
+    if ends_with_time:
+        parsed_sorted_end = sorted(ends_with_time, key=lambda x: x["end_sec"], reverse=True)
+        global_end = parsed_sorted_end[0]["end_time"]
+    else:
+        global_end = parsed[-1]["end_time"]
+
+    return global_start, global_end
+
+
+def snap_box_to_scene_borders(
+    box: dict,
+    frame_bgr: np.ndarray,
+    search_margin: int = 35,
+    min_gradient: float = 25.0
+) -> dict:
+    """
+    Ajusta inteligentemente as bordas (x, y, w, h) do retângulo para que ele se alinhe
+    com linhas divisórias visíveis do estúdio/cenário, banners gráficos (tarjas/GCs)
+    ou bordas do vídeo, prevenindo que o recorte absorva partes do vídeo que não pertencem ao enquadramento.
+    """
+    if frame_bgr is None or not isinstance(frame_bgr, np.ndarray) or frame_bgr.size == 0:
+        return dict(box)
+
+    f_h, f_w = frame_bgr.shape[:2]
+    x = int(box.get("x", 0))
+    y = int(box.get("y", 0))
+    w = int(box.get("w", f_w))
+    h = int(box.get("h", f_h))
+
+    # Converte para escala de cinza para análise de bordas / gradientes
+    gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY) if len(frame_bgr.shape) == 3 else frame_bgr
+    gray_blur = cv2.GaussianBlur(gray, (3, 3), 0)
+
+    # Gradientes Sobel
+    grad_y = cv2.Sobel(gray_blur, cv2.CV_64F, 0, 1, ksize=3)
+    grad_x = cv2.Sobel(gray_blur, cv2.CV_64F, 1, 0, ksize=3)
+
+    # 1. Snap na borda superior (y)
+    x1, x2 = max(0, x), min(f_w, x + w)
+    if x2 > x1 + 10:
+        r_min = max(2, y - search_margin)
+        r_max = min(f_h - 10, y + search_margin)
+        best_top_y = y
+        max_strength_top = min_gradient
+        for r in range(r_min, r_max):
+            strength = float(np.mean(np.abs(grad_y[r, x1:x2])))
+            if strength > max_strength_top:
+                max_strength_top = strength
+                best_top_y = r
+        y_snapped = best_top_y
+    else:
+        y_snapped = y
+
+    # 2. Snap na borda inferior (y + h)
+    curr_bottom = y + h
+    if x2 > x1 + 10:
+        r_min = max(y_snapped + 20, curr_bottom - search_margin)
+        r_max = min(f_h - 2, curr_bottom + search_margin)
+        best_bottom_y = curr_bottom
+        max_strength_bottom = min_gradient
+        for r in range(r_min, r_max):
+            strength = float(np.mean(np.abs(grad_y[r, x1:x2])))
+            if strength > max_strength_bottom:
+                max_strength_bottom = strength
+                best_bottom_y = r
+        bottom_snapped = best_bottom_y
+    else:
+        bottom_snapped = curr_bottom
+
+    # 3. Snap na borda esquerda (x)
+    y1, y2 = max(0, y_snapped), min(f_h, bottom_snapped)
+    if y2 > y1 + 10:
+        c_min = max(2, x - search_margin)
+        c_max = min(f_w - 10, x + search_margin)
+        best_left_x = x
+        max_strength_left = min_gradient
+        for c in range(c_min, c_max):
+            strength = float(np.mean(np.abs(grad_x[y1:y2, c])))
+            if strength > max_strength_left:
+                max_strength_left = strength
+                best_left_x = c
+        x_snapped = best_left_x
+    else:
+        x_snapped = x
+
+    # 4. Snap na borda direita (x + w)
+    curr_right = x + w
+    if y2 > y1 + 10:
+        c_min = max(x_snapped + 20, curr_right - search_margin)
+        c_max = min(f_w - 2, curr_right + search_margin)
+        best_right_x = curr_right
+        max_strength_right = min_gradient
+        for c in range(c_min, c_max):
+            strength = float(np.mean(np.abs(grad_x[y1:y2, c])))
+            if strength > max_strength_right:
+                max_strength_right = strength
+                best_right_x = c
+        right_snapped = best_right_x
+    else:
+        right_snapped = curr_right
+
+    w_snapped = right_snapped - x_snapped
+    h_snapped = bottom_snapped - y_snapped
+
+    # Validações de segurança
+    if w_snapped < 20 or h_snapped < 20:
+        return dict(box)
+
+    # Garantia de paridade para h264
+    if w_snapped % 2 != 0:
+        w_snapped -= 1
+    if h_snapped % 2 != 0:
+        h_snapped -= 1
+    if x_snapped % 2 != 0:
+        x_snapped += 1
+    if y_snapped % 2 != 0:
+        y_snapped += 1
+
+    res_box = dict(box)
+    res_box["x"] = int(max(0, min(f_w - 2, x_snapped)))
+    res_box["y"] = int(max(0, min(f_h - 2, y_snapped)))
+    res_box["w"] = int(max(2, min(f_w - res_box["x"], w_snapped)))
+    res_box["h"] = int(max(2, min(f_h - res_box["y"], h_snapped)))
+    return res_box
+
+
+def detect_scene_changes_in_range(
+    video_path: str,
+    start_s: float,
+    end_s: float = None,
+    sample_interval_s: float = 0.5,
+    threshold: float = 0.35,
+    max_cuts: int = 25
+) -> list:
+    """
+    Analisa o vídeo entre start_s e end_s para detectar mudanças bruscas de cenário
+    (cortes de câmera, transições de plano ou troca de apresentador).
+    Retorna lista de cortes detectados: [{'timestamp_s': float, 'time_str': str}, ...]
+    """
+    if not video_path or not os.path.exists(video_path):
+        return []
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return []
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    total_duration = total_frames / fps if fps > 0 else 0.0
+
+    s_time = max(0.0, float(start_s))
+    e_time = min(total_duration, float(end_s)) if (end_s is not None and end_s > 0) else total_duration
+    if e_time <= s_time:
+        cap.release()
+        return []
+
+    cuts = []
+    prev_hist = None
+    step_s = max(0.2, float(sample_interval_s))
+
+    # Ajusta o passo para vídeos longos para manter a execução rápida (< 2 segundos)
+    duration_span = e_time - s_time
+    if duration_span > 120:
+        step_s = max(1.0, duration_span / 120.0)
+
+    cur_t = s_time
+    while cur_t <= e_time and len(cuts) < max_cuts:
+        cap.set(cv2.CAP_PROP_POS_MSEC, cur_t * 1000.0)
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            cur_t += step_s
+            continue
+
+        # Redimensiona para miniatura para velocidade ultra-rápida
+        small_frame = cv2.resize(frame, (160, 90), interpolation=cv2.INTER_LINEAR)
+        hsv = cv2.cvtColor(small_frame, cv2.COLOR_BGR2HSV)
+        hist = cv2.calcHist([hsv], [0, 1], None, [16, 16], [0, 180, 0, 256])
+        cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
+
+        if prev_hist is not None:
+            corr = cv2.compareHist(prev_hist, hist, cv2.HISTCMP_CORREL)
+            if corr < (1.0 - threshold):
+                cuts.append({
+                    "timestamp_s": round(cur_t, 2),
+                    "time_str": format_seconds_to_time_str(cur_t),
+                    "correlation": round(corr, 3)
+                })
+
+        prev_hist = hist
+        cur_t += step_s
+
+    cap.release()
+    return cuts
+
+
 def compute_slot_heights(num_boxes: int, target_h: int = 1920) -> list:
     """
     Calcula as alturas em pixels de cada slot vertical para somar exatamente target_h (1920).
