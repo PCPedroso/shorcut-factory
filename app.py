@@ -7949,13 +7949,38 @@ if _has_media_ready:
                                     mc_scenes.pop(sel_sc_idx)
                                     st.rerun()
 
+                    def cb_mc_load_ref(scene_idx: int):
+                        nav_val = normalize_time_mask(st.session_state.get(f"mc_nav_ts_{scene_idx}", "00:00:01.00"))
+                        st.session_state[f"mc_ref_ts_{scene_idx}"] = nav_val
+                        st.toast(f"📸 Frame de Referência atualizado para {nav_val}!")
+
+                    def cb_mc_set_start(scene_idx: int):
+                        nav_val = normalize_time_mask(st.session_state.get(f"mc_nav_ts_{scene_idx}", "00:00:00.00"))
+                        st.session_state[f"mc_sc_start_{scene_idx}"] = nav_val
+                        if "multicam_scenes" in st.session_state and scene_idx < len(st.session_state["multicam_scenes"]):
+                            st.session_state["multicam_scenes"][scene_idx]["start_time"] = nav_val
+                        st.toast(f"✅ Início da Cena {scene_idx+1} atualizado para {nav_val}!")
+
+                    def cb_mc_set_end(scene_idx: int):
+                        nav_val = normalize_time_mask(st.session_state.get(f"mc_nav_ts_{scene_idx}", "00:00:00.00"))
+                        st.session_state[f"mc_sc_end_{scene_idx}"] = nav_val
+                        if "multicam_scenes" in st.session_state and scene_idx < len(st.session_state["multicam_scenes"]):
+                            st.session_state["multicam_scenes"][scene_idx]["end_time"] = nav_val
+                        st.toast(f"✅ Fim da Cena {scene_idx+1} atualizado para {nav_val}!")
+
                     cur_scene = mc_scenes[sel_sc_idx]
+
+                    if f"mc_sc_start_{sel_sc_idx}" not in st.session_state:
+                        st.session_state[f"mc_sc_start_{sel_sc_idx}"] = cur_scene.get("start_time") or start_time or "00:00:00.00"
+                    if f"mc_sc_end_{sel_sc_idx}" not in st.session_state:
+                        st.session_state[f"mc_sc_end_{sel_sc_idx}"] = cur_scene.get("end_time") or end_time or ""
+                    if f"mc_ref_ts_{sel_sc_idx}" not in st.session_state:
+                        st.session_state[f"mc_ref_ts_{sel_sc_idx}"] = cur_scene.get("start_time") or start_time or "00:00:01.00"
 
                     col_st_sc, col_et_sc, col_ref_f = st.columns([1.2, 1.2, 1.4])
                     with col_st_sc:
                         cur_scene["start_time"] = st.text_input(
                             f"Início da Cena {sel_sc_idx+1} (HH:MM:SS.ms):",
-                            value=cur_scene.get("start_time") or start_time or "00:00:00.00",
                             placeholder="00:00:00.00",
                             key=f"mc_sc_start_{sel_sc_idx}",
                             on_change=normalize_time_key_callback,
@@ -7964,7 +7989,6 @@ if _has_media_ready:
                     with col_et_sc:
                         cur_scene["end_time"] = st.text_input(
                             f"Fim da Cena {sel_sc_idx+1} (HH:MM:SS.ms):",
-                            value=cur_scene.get("end_time") or end_time or "",
                             placeholder="00:00:00.00",
                             key=f"mc_sc_end_{sel_sc_idx}",
                             on_change=normalize_time_key_callback,
@@ -7973,7 +7997,6 @@ if _has_media_ready:
                     with col_ref_f:
                         ref_ts_input = st.text_input(
                             "Frame de Referência (HH:MM:SS.ms):",
-                            value=cur_scene.get("start_time") or start_time or "00:00:01.00",
                             placeholder="00:00:00.00",
                             key=f"mc_ref_ts_{sel_sc_idx}",
                             on_change=normalize_time_key_callback,
@@ -8020,9 +8043,10 @@ if _has_media_ready:
                             st.markdown("###### ⏱️ Sincronizar Tempos com esta Cena:")
                             col_nav_t, col_nav_b = st.columns([1.5, 1])
                             with col_nav_t:
+                                if f"mc_nav_ts_{sel_sc_idx}" not in st.session_state:
+                                    st.session_state[f"mc_nav_ts_{sel_sc_idx}"] = ref_ts_input
                                 nav_ts_input = st.text_input(
                                     "Tempo Detectado (HH:MM:SS.ms):",
-                                    value=ref_ts_input,
                                     placeholder="00:00:00.00",
                                     key=f"mc_nav_ts_{sel_sc_idx}",
                                     on_change=normalize_time_key_callback,
@@ -8032,23 +8056,34 @@ if _has_media_ready:
                             with col_nav_b:
                                 st.write("")
                                 st.write("")
-                                if st.button("📸 Carregar", key=f"btn_mc_load_{sel_sc_idx}", use_container_width=True, help="Atualiza a imagem do canvas para este tempo"):
-                                    st.session_state[f"mc_ref_ts_{sel_sc_idx}"] = nav_ts_input
-                                    st.rerun()
+                                st.button(
+                                    "📸 Carregar",
+                                    key=f"btn_mc_load_{sel_sc_idx}",
+                                    on_click=cb_mc_load_ref,
+                                    args=(sel_sc_idx,),
+                                    use_container_width=True,
+                                    help="Atualiza a imagem do canvas para este tempo"
+                                )
 
                             col_btn_s, col_btn_e = st.columns(2)
                             with col_btn_s:
-                                if st.button("⏱️ Setar Início", key=f"btn_mc_set_s_{sel_sc_idx}", use_container_width=True, help="Define como Tempo Inicial desta cena"):
-                                    cur_scene["start_time"] = nav_ts_input
-                                    st.session_state[f"mc_sc_start_{sel_sc_idx}"] = nav_ts_input
-                                    st.toast(f"✅ Início da Cena {sel_sc_idx+1} atualizado para {nav_ts_input}!")
-                                    st.rerun()
+                                st.button(
+                                    "⏱️ Setar Início",
+                                    key=f"btn_mc_set_s_{sel_sc_idx}",
+                                    on_click=cb_mc_set_start,
+                                    args=(sel_sc_idx,),
+                                    use_container_width=True,
+                                    help="Define como Tempo Inicial desta cena"
+                                )
                             with col_btn_e:
-                                if st.button("⏱️ Setar Fim", key=f"btn_mc_set_e_{sel_sc_idx}", use_container_width=True, help="Define como Tempo Final desta cena"):
-                                    cur_scene["end_time"] = nav_ts_input
-                                    st.session_state[f"mc_sc_end_{sel_sc_idx}"] = nav_ts_input
-                                    st.toast(f"✅ Fim da Cena {sel_sc_idx+1} atualizado para {nav_ts_input}!")
-                                    st.rerun()
+                                st.button(
+                                    "⏱️ Setar Fim",
+                                    key=f"btn_mc_set_e_{sel_sc_idx}",
+                                    on_click=cb_mc_set_end,
+                                    args=(sel_sc_idx,),
+                                    use_container_width=True,
+                                    help="Define como Tempo Final desta cena"
+                                )
 
                         detected_boxes = []
                         if canvas_result.json_data and "objects" in canvas_result.json_data:
