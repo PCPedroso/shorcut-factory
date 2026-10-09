@@ -157,15 +157,22 @@ div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
     border-bottom: 2px solid #6366f1 !important;
 }
 
-/* 9. Estilo para Campos de Timecode */
-input[aria-label*="HH:MM:SS"], 
-input[aria-label*="tempo inicial"], 
-input[aria-label*="tempo final"],
-input[placeholder*="00:00:00"] {
-    font-family: 'JetBrains Mono', monospace !important;
+/* 9. Estilo para Campos de Timecode (Máscara HH:MM:SS.ms) */
+input[aria-label*="HH:MM:SS" i], 
+input[aria-label*="tempo inicial" i], 
+input[aria-label*="tempo final" i],
+input[aria-label*="início" i],
+input[aria-label*="fim" i],
+input[aria-label*="cena" i],
+input[aria-label*="frame" i],
+input[aria-label*="offset" i],
+input[aria-label*="tempo" i],
+input[placeholder*="00:00:00" i],
+input[placeholder*="00:00." i] {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
     font-weight: 600 !important;
     color: #38bdf8 !important;
-    letter-spacing: 0.03em !important;
+    letter-spacing: 0.04em !important;
 }
 
 /* 10. Empty States */

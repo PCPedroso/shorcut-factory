@@ -1014,6 +1014,7 @@ def cut_video(
     thumbnail_output_path: str = None,
     crop_margins: dict = None,
     social_overlay_config: dict = None,
+    multicam_scenes: list = None,
 ) -> dict:
     """
     Corta e formata o vídeo com alta precisão e esteira completa de pós-produção via FFmpeg.
@@ -1172,6 +1173,34 @@ def cut_video(
                     "-pix_fmt", "yuv420p",
                     output_path
                 ]
+
+        elif aspect_ratio_mode == "9:16_multicam":
+            # Pipeline 9:16 Multicâmera Interativo Manual (2 a N Câmeras em Pilha Vertical Proporcional)
+            from core.multicam_crop import render_multicam_cut
+            mc_scenes = multicam_scenes or [{
+                "start_time": start_time_str,
+                "end_time": end_time_str,
+                "boxes": []
+            }]
+            result = render_multicam_cut(
+                input_video_path=input_path,
+                scenes=mc_scenes,
+                output_video_path=output_path,
+                fallback_start_time=start_time_str,
+                fallback_end_time=end_time_str
+            )
+            return _apply_all_post_processing(
+                result, output_path, start_time_str, end_time_str,
+                subtitle_enabled, subtitle_transcript_path, subtitle_highlight_color, subtitle_base_color, subtitle_font_size,
+                headline_enabled, headline_text, headline_preset, headline_text_color, headline_bg_color, headline_font_size, headline_margin_top,
+                emojis_enabled, zoom_punch_enabled, bg_music_enabled, bg_music_track_path, bg_music_volume, ducking_preset,
+                progress_bar_enabled, progress_bar_color, progress_bar_height,
+                callout_enabled, callout_text, callout_duration,
+                climax_zoom_enabled, climax_zoom_factor,
+                thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
+                bg_music_start_offset, video_start_offset,
+                social_overlay_config=social_overlay_config
+            )
 
         elif aspect_ratio_mode == "9:16_crop":
             # Pipeline 9:16 Corte Central (1080x1920 preenchendo 100% da tela)

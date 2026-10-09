@@ -116,6 +116,7 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 | Formato | Prefixo da Pasta | Descrição |
 |---|---|---|
 | **Layout Dividido (Split Screen)** | `VLDSS` | Estilo Podpah/Flow. Possui **Enquadramento Proporcional Estrito** (`extract_proportional_crop`) eliminando qualquer distorção anamórfica, controle independente de Pan Horizontal e Vertical (`pan_x`/`pan_y`), **Transição Dinâmica (Auto-Switch)** (se 2+ pessoas visíveis $\to$ Split Screen; se close de 1 pessoa $\to$ 9:16 Full Screen com MediaPipe), suporte a mídia secundária (vídeo em looping ou slideshow de imagens) e margens de blur no topo/base de 0% a 20%. |
+| **Multicâmera Interativo** | `VMINT` | Enquadramento manual de 2 a N câmeras através de canvas interativo com mouse (`streamlit-drawable-canvas`). Suporte a ordenação de slots verticais (Topo, Meio, Base), linhas divisórias customizáveis, corte proporcional estrito sem deformação facial e timeline de cenas/intervalos com alternância temporal de enquadramentos. |
 | **Auto-Reframing Facial** | `VRIRA` | Rastreamento inteligente de rosto com Deadband Anchor, Target Lock e Auto-Zoom suave. |
 | **Fundo Desfocado (Blur)** | `VFDBS` | Vídeo central nítido com fundo desfocado preenchendo a tela 9:16. |
 | **Corte Central (Crop)** | `VCCFT` | Corte centralizado direto em 9:16. |
@@ -387,10 +388,25 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
     - Posições **Bottom (Inferior)** e **Top (Superior)** com calibragem vertical de segurança (evitando sobreposição com legendas nativas e botões de interface de Reels/TikTok).
     - Slider de ajuste fino milimétrico de margem vertical (`offset_y`).
   - **Modo Monocromático Minimalista**: Opção de converter todos os ícones e tipografia em branco puro com transparência preservada.
-  - **Prévia em Tempo Real no Frame do Vídeo**: Botão dedicado na interface que renderiza instantaneamente o selo sobre o frame ativo antes da renderização.
-  - **Queima Acelerada por Hardware (NVENC GPU com Fallback CPU)**: Pipeline FFmpeg rápido sem perda de áudio integrado à esteira de pós-processamento do corte.
-- **🧪 Suíte de 246 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (social media badges/overlay, preserve cut transcript on re-render, quick editor static image format adaptation, frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
+- **⏱️ Padronização e Máscara Estrita de Campos de Tempo (HH:MM:SS.ms) (`core/ui_theme.py`, `app.py`, `core/analyzer.py`)**:
+  - **Identidade Visual Imersiva (Dark Neon)**: Todos os campos de minutagem utilizam tipografia monospace (`JetBrains Mono`, `Fira Code`, `monospace`), coloração ciano neon (`#38bdf8`), peso 600 e `letter-spacing: 0.04em`, garantindo legibilidade imediata e precisão visual milimétrica.
+  - **Máscara Interativa em Tempo Real via JavaScript (`inject_time_mask_js`)**: Varredura contínua de inputs de tempo aplicando formatação automática instantânea nos eventos `input` e `blur` (completando zeros à esquerda e formatando `HH:MM:SS.ms` ao digitar apenas números ou segundos).
+  - **Normalização Server-Side Resiliente (`normalize_time_key_callback`)**: Callback instantâneo em `on_change` que executa `normalize_time_mask`, garantindo que strings arbitrárias como `12`, `1:30`, `01:30.5` ou `1h20m` sejam rigorosamente convertidas para `00:00:12.00`, `00:01:30.00`, etc.
+  - **Cobertura 100% em Todas as Seções**:
+    1. *Seção 1 (Ingestão)*: Trecho do YouTube (`input_yt_slice_start`, `input_yt_slice_end`).
+    2. *Seção 1 (Ingestão)*: Corte de Vídeo Local (`local_cut_start_time`, `local_cut_end_time`).
+    3. *Seção 1 (Player Sync)*: Momento Pausado no Player (`player_synced_time`).
+    4. *Seção 3 (Fábrica de Cortes)*: Tempo Inicial e Final do Corte (`final_start_time`, `final_end_time`).
+    5. *Seção 3 (Multicâmera)*: Início da Cena, Fim da Cena, Frame de Referência e Tempo Detectado (`mc_sc_start_X`, `mc_sc_end_X`, `mc_ref_ts_X`, `mc_nav_ts_X`).
+    6. *Seção 3 (Trilha Sonora & Ducking)*: Início na Trilha (`txt_bg_music_start_time`) e Entrada no Corte (`txt_bg_video_start_time`).
+    7. *Seção 3 (Capas & Thumbnails)*: Tempo do Frame do Corte Ativo (`snap_time_inst_X`).
+    8. *Seção 4 (Galeria de Cortes)*: Tempo do Frame para Thumbnails (`snap_time_gal_X`).
+- **🎬 Enquadramento Multicâmera Interativo com Cenas Temporais & Canvas Livre (`core/multicam_crop.py`, `app.py`, `tests/test_multicam_crop.py`)**:
+  - Ferramenta gráfica interativa com `streamlit-drawable-canvas` para desenhar de 2 a 3 câmeras retangulares livres sobre qualquer frame do vídeo.
+  - Suporte a múltiplas cenas com intervalos de tempo próprios (`start_time` e `end_time`), permitindo alternar composições dinâmicas ao longo do mesmo corte.
+  - Reordenação flexível de posições verticais (Topo, Meio, Base), divisórias customizáveis e renderização composta proporcional 1080x1920 (9:16).
+- **🧪 Suíte de 253 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (multicam crop, time mask, social media badges/overlay, preserve cut transcript on re-render, quick editor static image format adaptation, frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
 
 ---
 

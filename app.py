@@ -29,6 +29,7 @@ import core.quick_editor
 import core.overlay_manager
 import core.ui_theme
 import core.social_overlay
+import core.multicam_crop
 
 importlib.reload(core.extractor)
 importlib.reload(core.transcriber)
@@ -50,6 +51,7 @@ importlib.reload(core.quick_editor)
 importlib.reload(core.overlay_manager)
 importlib.reload(core.ui_theme)
 importlib.reload(core.social_overlay)
+importlib.reload(core.multicam_crop)
 
 from core.extractor import (
     download_audio, get_video_metadata, get_video_id,
@@ -211,7 +213,21 @@ def inject_time_mask_js():
                 inputs.forEach(inp => {
                     const label = (inp.getAttribute('aria-label') || '').toLowerCase();
                     const ph = (inp.getAttribute('placeholder') || '').toLowerCase();
-                    if (!label.includes('player') && (label.includes('(hh:mm:ss') || label.includes('tempo inicial') || label.includes('tempo final') || ph.includes('00:00:00') || ph.includes('00:10:00'))) {
+                    if (
+                        label.includes('hh:mm:ss') ||
+                        label.includes('tempo inicial') ||
+                        label.includes('tempo final') ||
+                        label.includes('início') ||
+                        label.includes('fim') ||
+                        label.includes('cena') ||
+                        label.includes('frame') ||
+                        label.includes('offset') ||
+                        label.includes('momento pausado') ||
+                        label.includes('tempo detectado') ||
+                        ph.includes('00:00') ||
+                        ph.includes('00:10') ||
+                        ph.includes('00:15')
+                    ) {
                         attachMask(inp);
                     }
                 });
@@ -237,6 +253,13 @@ def inject_time_mask_js():
     st.html(mask_script, unsafe_allow_javascript=True)
 
 inject_time_mask_js()
+
+def normalize_time_key_callback(key_name: str):
+    """Callback para on_change em text_inputs de tempo: aplica a máscara estrita HH:MM:SS.ms imediatamente."""
+    val = st.session_state.get(key_name, "")
+    if val and str(val).strip():
+        st.session_state[key_name] = normalize_time_mask(str(val).strip())
+
 
 def inject_video_time_sync_js():
     """
@@ -1131,8 +1154,8 @@ def cb_capture_frame_time(target_key: str):
     if isinstance(_cap, list):
         _cap = _cap[0]
     if _cap and _cap != "00:00:00.00":
-        st.session_state[target_key] = _cap
-        st.toast(f"⏱️ Tempo capturado: {_cap}!")
+        st.session_state[target_key] = normalize_time_mask(_cap)
+        st.toast(f"⏱️ Tempo capturado: {st.session_state[target_key]}!")
 
 def safe_display_image(img_source, caption=None, use_container_width=True, width=None):
     """
@@ -4100,17 +4123,21 @@ if show_sec1:
             col_t1, col_t2 = st.columns(2)
             with col_t1:
                 yt_start_time_str = st.text_input(
-                    "Início do Trecho (opcional):",
-                    placeholder="Ex: 00:15:00 ou 900",
+                    "Início do Trecho (HH:MM:SS.ms):",
+                    placeholder="00:00:00.00",
                     key="input_yt_slice_start",
-                    help="Formato flexível: HH:MM:SS, MM:SS, 1h30m ou segundos."
+                    on_change=normalize_time_key_callback,
+                    args=("input_yt_slice_start",),
+                    help="Formato flexível com máscara automática HH:MM:SS.ms."
                 )
             with col_t2:
                 yt_end_time_str = st.text_input(
-                    "Fim do Trecho (opcional):",
-                    placeholder="Ex: 00:20:30 ou 1230",
+                    "Fim do Trecho (HH:MM:SS.ms):",
+                    placeholder="00:00:00.00",
                     key="input_yt_slice_end",
-                    help="Formato flexível: HH:MM:SS, MM:SS, 1h30m ou segundos."
+                    on_change=normalize_time_key_callback,
+                    args=("input_yt_slice_end",),
+                    help="Formato flexível com máscara automática HH:MM:SS.ms."
                 )
     
             parsed_s = parse_time_str(yt_start_time_str)
@@ -5237,19 +5264,23 @@ if show_sec1:
             col_cut1, col_cut2, col_cut_status = st.columns([1, 1, 1.5])
             with col_cut1:
                 local_start_time = st.text_input(
-                    "⏱️ Início do Corte (Opcional):",
-                    value="00:00:00",
-                    placeholder="00:00:00 ou MM:SS",
+                    "⏱️ Início do Corte (HH:MM:SS.ms):",
+                    value="00:00:00.00",
+                    placeholder="00:00:00.00",
                     key="local_cut_start_time",
-                    help="Deixe 00:00:00 para iniciar a partir do começo do vídeo."
+                    on_change=normalize_time_key_callback,
+                    args=("local_cut_start_time",),
+                    help="Deixe 00:00:00.00 para iniciar a partir do começo do vídeo."
                 )
             with col_cut2:
                 local_end_time = st.text_input(
-                    "⏱️ Fim do Corte (Opcional):",
+                    "⏱️ Fim do Corte (HH:MM:SS.ms):",
                     value="",
-                    placeholder="00:00:00 (vazio = até o fim)",
+                    placeholder="00:00:00.00 (vazio = até o fim)",
                     key="local_cut_end_time",
-                    help="Deixe em branco ou 00:00:00 para ir até o final do vídeo."
+                    on_change=normalize_time_key_callback,
+                    args=("local_cut_end_time",),
+                    help="Deixe em branco ou 00:00:00.00 para ir até o final do vídeo."
                 )
             with col_cut_status:
                 _start_s = parse_time_to_seconds(local_start_time)
@@ -6019,7 +6050,10 @@ if _has_media_ready:
                     st.text_input(
                         "Momento Pausado no Player (HH:MM:SS.ms):",
                         value=st.session_state.get("player_synced_time", "00:00:00.00"),
+                        placeholder="00:00:00.00",
                         key="player_synced_time",
+                        on_change=normalize_time_key_callback,
+                        args=("player_synced_time",),
                         help="Atualizado instantaneamente ao pausar o vídeo ou mover a barra de tempo. Você também pode digitar manualmente."
                     )
 
@@ -7288,6 +7322,7 @@ if _has_media_ready:
         _aspect_list = [
             "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen - Estilo Podpah & Flow)",
             "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)",
+            "📱 Vertical 9:16 (🎬 Multicâmera Interativo - 2 a 3 Câmeras por Mouse)",
             "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)",
             "📱 Vertical 9:16 (Corte Central 100% Tela)",
             "💻 Horizontal 16:9 (Original 1080p Full HD)"
@@ -7312,6 +7347,7 @@ if _has_media_ready:
         aspect_map = {
             "📱 Vertical 9:16 (👥 Layout Dividido / Split Screen - Estilo Podpah & Flow)": "9:16_split",
             "📱 Vertical 9:16 (🎯 Rastreamento Inteligente de Rosto / Auto-Reframing)": "9:16_smart_face",
+            "📱 Vertical 9:16 (🎬 Multicâmera Interativo - 2 a 3 Câmeras por Mouse)": "9:16_multicam",
             "📱 Vertical 9:16 (Fundo Desfocado / Blur - Shorts/TikTok/Reels)": "9:16_blur",
             "📱 Vertical 9:16 (Corte Central 100% Tela)": "9:16_crop",
             "💻 Horizontal 16:9 (Original 1080p Full HD)": "16:9"
@@ -7340,6 +7376,7 @@ if _has_media_ready:
         split_media_position = "bottom"
         split_blur_margin_pct = 5.0
         social_overlay_config = None
+        multicam_scenes = []
 
         # ─────────────────────────────────────────────────────────────────
         # 🎛️ Área Útil & Remoção de Patrocínios / Bordas (Crop Manual)
@@ -7836,7 +7873,271 @@ if _has_media_ready:
                 cached_sp_path = st.session_state.get("cached_split_preview_path")
                 if cached_sp_path and os.path.exists(cached_sp_path):
                     st.image(cached_sp_path, caption=f"Prévia 9:16 Split Screen em {st.session_state.get('cached_split_preview_time', prev_ts)} (Proporções 100% Reais)", use_container_width=True)
-    
+
+        elif selected_aspect == "9:16_multicam":
+            from core.multicam_crop import (
+                patch_streamlit_drawable_canvas_compat,
+                normalize_box_coordinates,
+                compute_slot_heights,
+                compose_multicam_preview_image
+            )
+            patch_streamlit_drawable_canvas_compat()
+            from streamlit_drawable_canvas import st_canvas
+            from PIL import Image
+
+            with st.expander("🎬 Enquadramento Multicâmera Interativo (2 a 3 Câmeras por Mouse)", expanded=True):
+                st.markdown(
+                    "Selecione as câmeras dos personagens desenhando **retângulos amarelos** sobre o vídeo com o mouse. "
+                    "Você pode **clicar e arrastar** para reposicionar ou **esticar pelos cantos** para redimensionar. "
+                    "Os enquadramentos serão empilhados proporcionalmente de cima para baixo (Topo, Meio, Base), "
+                    "formando um corte vertical 9:16 limpo e sem distorções faciais."
+                )
+
+                _active_mc_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                _mc_vid_id = get_current_active_video_id(_active_mc_url)
+                _v_full_mc = os.path.join("data", _mc_vid_id, "video_full.mp4") if _mc_vid_id else ""
+
+                if not _v_full_mc or not os.path.exists(_v_full_mc):
+                    st.warning("⚠️ O vídeo original precisa ser baixado ou processado na Seção 1 para exibir o canvas de enquadramento interativo.")
+                else:
+                    if "multicam_scenes" not in st.session_state or not isinstance(st.session_state.get("multicam_scenes"), list) or len(st.session_state["multicam_scenes"]) == 0:
+                        st.session_state["multicam_scenes"] = [{
+                            "id": 1,
+                            "start_time": start_time or "00:00:00.00",
+                            "end_time": end_time or "",
+                            "boxes": [],
+                            "divider_color": "black",
+                            "divider_width": 4
+                        }]
+
+                    mc_scenes = st.session_state["multicam_scenes"]
+
+                    # ── Gerenciador de Cenas / Intervalos Temporais ──
+                    st.markdown("##### ⏱️ Linha do Tempo & Alternância de Enquadramentos")
+                    st.caption("Defina o tempo inicial e final em que os enquadramentos devem valer, possibilitando alternar a quantidade de câmeras ao longo do corte.")
+
+                    col_sc_list, col_sc_acts = st.columns([2.5, 1.5])
+                    with col_sc_list:
+                        scene_labels = [
+                            f"🎬 Cena {i+1}: [{s.get('start_time') or 'Início'} ➔ {s.get('end_time') or 'Fim'}] ({len(s.get('boxes', []))} câmeras)"
+                            for i, s in enumerate(mc_scenes)
+                        ]
+                        sel_sc_idx = st.selectbox(
+                            "Selecione a Cena / Intervalo para editar:",
+                            range(len(scene_labels)),
+                            format_func=lambda idx: scene_labels[idx],
+                            key="mc_sel_scene_idx"
+                        )
+                    with col_sc_acts:
+                        col_add_s, col_del_s = st.columns(2)
+                        with col_add_s:
+                            if st.button("➕ Nova Cena", key="btn_mc_add_scene", use_container_width=True, help="Adiciona um novo intervalo temporal com enquadramentos diferentes"):
+                                new_id = len(mc_scenes) + 1
+                                last_end = mc_scenes[-1].get("end_time") or ""
+                                mc_scenes.append({
+                                    "id": new_id,
+                                    "start_time": last_end if last_end else start_time,
+                                    "end_time": end_time,
+                                    "boxes": [],
+                                    "divider_color": "black",
+                                    "divider_width": 4
+                                })
+                                st.rerun()
+                        with col_del_s:
+                            if len(mc_scenes) > 1:
+                                if st.button("🗑️ Remover", key="btn_mc_del_scene", use_container_width=True, help="Exclui a cena selecionada"):
+                                    mc_scenes.pop(sel_sc_idx)
+                                    st.rerun()
+
+                    cur_scene = mc_scenes[sel_sc_idx]
+
+                    col_st_sc, col_et_sc, col_ref_f = st.columns([1.2, 1.2, 1.4])
+                    with col_st_sc:
+                        cur_scene["start_time"] = st.text_input(
+                            f"Início da Cena {sel_sc_idx+1} (HH:MM:SS.ms):",
+                            value=cur_scene.get("start_time") or start_time or "00:00:00.00",
+                            placeholder="00:00:00.00",
+                            key=f"mc_sc_start_{sel_sc_idx}",
+                            on_change=normalize_time_key_callback,
+                            args=(f"mc_sc_start_{sel_sc_idx}",),
+                        )
+                    with col_et_sc:
+                        cur_scene["end_time"] = st.text_input(
+                            f"Fim da Cena {sel_sc_idx+1} (HH:MM:SS.ms):",
+                            value=cur_scene.get("end_time") or end_time or "",
+                            placeholder="00:00:00.00",
+                            key=f"mc_sc_end_{sel_sc_idx}",
+                            on_change=normalize_time_key_callback,
+                            args=(f"mc_sc_end_{sel_sc_idx}",),
+                        )
+                    with col_ref_f:
+                        ref_ts_input = st.text_input(
+                            "Frame de Referência (HH:MM:SS.ms):",
+                            value=cur_scene.get("start_time") or start_time or "00:00:01.00",
+                            placeholder="00:00:00.00",
+                            key=f"mc_ref_ts_{sel_sc_idx}",
+                            on_change=normalize_time_key_callback,
+                            args=(f"mc_ref_ts_{sel_sc_idx}",),
+                            help="Momento do vídeo onde todos os personagens estão visíveis para desenhar as caixas"
+                        )
+
+                    ref_ts_s = parse_time_str_to_seconds(ref_ts_input)
+
+                    snap_res = extract_capture_frame(_v_full_mc, ref_ts_s)
+                    if snap_res.get("frame") is not None:
+                        frame_bgr = snap_res["frame"]
+                        f_h, f_w = frame_bgr.shape[:2]
+                        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                        pil_img = Image.fromarray(frame_rgb)
+
+                        canvas_w = 680
+                        canvas_h = int(round(canvas_w * float(f_h) / float(f_w)))
+
+                        col_cv, col_pl = st.columns([1.15, 0.85])
+
+                        with col_cv:
+                            st.markdown("##### 🖱️ Desenhe e Ajuste as Câmeras:")
+                            st.caption("Dica: Use a ferramenta retângulo para criar caixas amarelas. Clique em uma caixa para mover ou redimensionar pelos cantos.")
+
+                            canvas_result = st_canvas(
+                                fill_color="rgba(255, 215, 0, 0.20)",
+                                stroke_width=3,
+                                stroke_color="#FFD700",
+                                background_image=pil_img,
+                                update_streamlit=True,
+                                height=canvas_h,
+                                width=canvas_w,
+                                drawing_mode="rect",
+                                key=f"mc_canvas_{sel_sc_idx}_{ref_ts_s:.1f}",
+                                display_toolbar=True
+                            )
+
+                        with col_pl:
+                            st.markdown("##### 📺 Player do Vídeo Original:")
+                            st.caption("Reproduza o vídeo, localize os momentos de troca de orador/câmera e configure os tempos da cena:")
+                            safe_display_video(_v_full_mc, start_time=ref_ts_s)
+
+                            st.markdown("###### ⏱️ Sincronizar Tempos com esta Cena:")
+                            col_nav_t, col_nav_b = st.columns([1.5, 1])
+                            with col_nav_t:
+                                nav_ts_input = st.text_input(
+                                    "Tempo Detectado (HH:MM:SS.ms):",
+                                    value=ref_ts_input,
+                                    placeholder="00:00:00.00",
+                                    key=f"mc_nav_ts_{sel_sc_idx}",
+                                    on_change=normalize_time_key_callback,
+                                    args=(f"mc_nav_ts_{sel_sc_idx}",),
+                                    help="Digite o tempo visto no player acima para carregar o frame ou atribuir à cena"
+                                )
+                            with col_nav_b:
+                                st.write("")
+                                st.write("")
+                                if st.button("📸 Carregar", key=f"btn_mc_load_{sel_sc_idx}", use_container_width=True, help="Atualiza a imagem do canvas para este tempo"):
+                                    st.session_state[f"mc_ref_ts_{sel_sc_idx}"] = nav_ts_input
+                                    st.rerun()
+
+                            col_btn_s, col_btn_e = st.columns(2)
+                            with col_btn_s:
+                                if st.button("⏱️ Setar Início", key=f"btn_mc_set_s_{sel_sc_idx}", use_container_width=True, help="Define como Tempo Inicial desta cena"):
+                                    cur_scene["start_time"] = nav_ts_input
+                                    st.session_state[f"mc_sc_start_{sel_sc_idx}"] = nav_ts_input
+                                    st.toast(f"✅ Início da Cena {sel_sc_idx+1} atualizado para {nav_ts_input}!")
+                                    st.rerun()
+                            with col_btn_e:
+                                if st.button("⏱️ Setar Fim", key=f"btn_mc_set_e_{sel_sc_idx}", use_container_width=True, help="Define como Tempo Final desta cena"):
+                                    cur_scene["end_time"] = nav_ts_input
+                                    st.session_state[f"mc_sc_end_{sel_sc_idx}"] = nav_ts_input
+                                    st.toast(f"✅ Fim da Cena {sel_sc_idx+1} atualizado para {nav_ts_input}!")
+                                    st.rerun()
+
+                        detected_boxes = []
+                        if canvas_result.json_data and "objects" in canvas_result.json_data:
+                            raw_rects = [
+                                o for o in canvas_result.json_data["objects"]
+                                if o.get("type") == "rect"
+                            ]
+                            for idx_b, r_obj in enumerate(raw_rects):
+                                n_box = normalize_box_coordinates(
+                                    r_obj,
+                                    canvas_w=canvas_w,
+                                    canvas_h=canvas_h,
+                                    video_w=f_w,
+                                    video_h=f_h
+                                )
+                                n_box["order"] = idx_b
+                                n_box["label"] = f"Câmera {idx_b+1}"
+                                detected_boxes.append(n_box)
+
+                        if detected_boxes:
+                            cur_scene["boxes"] = detected_boxes
+
+                        active_boxes = cur_scene.get("boxes", [])
+                        if active_boxes:
+                            st.markdown(f"##### 📋 Câmeras Detectadas nesta Cena ({len(active_boxes)} no total):")
+                            st.caption("Defina a ordem em que as câmeras aparecerão no corte vertical (de cima para baixo):")
+
+                            slot_labels = ["Topo (Slot 1)", "Meio (Slot 2)", "Base (Slot 3)"]
+                            if len(active_boxes) > 3:
+                                slot_labels = [f"Slot {k+1} (Posição {k+1})" for k in range(len(active_boxes))]
+
+                            cols_bx = st.columns(min(len(active_boxes), 3))
+                            for b_idx, box in enumerate(active_boxes):
+                                with cols_bx[b_idx % len(cols_bx)]:
+                                    cur_ord = min(box.get("order", b_idx), len(slot_labels) - 1)
+                                    sel_pos = st.selectbox(
+                                        f"Posição da Câmera #{b_idx+1}:",
+                                        range(len(slot_labels)),
+                                        index=cur_ord,
+                                        format_func=lambda o: slot_labels[o],
+                                        key=f"mc_ord_sc{sel_sc_idx}_b{b_idx}"
+                                    )
+                                    box["order"] = sel_pos
+                                    st.caption(f"📐 `{box['w']}x{box['h']}px` em `X:{box['x']}, Y:{box['y']}`")
+
+                            col_dcol, col_dw, _ = st.columns([1.5, 1.2, 2])
+                            with col_dcol:
+                                div_color_options = ["Preto (Padrão)", "Branco", "Amarelo", "Nenhuma"]
+                                div_col_choice = st.selectbox("Linha Divisória entre Câmeras:", div_color_options, index=0, key=f"mc_div_col_{sel_sc_idx}")
+                                div_col_map = {"Preto (Padrão)": "black", "Branco": "white", "Amarelo": "yellow", "Nenhuma": "black"}
+                                cur_scene["divider_color"] = div_col_map[div_col_choice]
+                            with col_dw:
+                                if div_col_choice != "Nenhuma":
+                                    cur_scene["divider_width"] = st.slider("Espessura da Linha (px):", 1, 8, int(cur_scene.get("divider_width", 4)), key=f"mc_div_w_{sel_sc_idx}")
+                                else:
+                                    cur_scene["divider_width"] = 0
+
+                            st.markdown("##### 🖼️ Validação Visual Instantânea")
+                            if st.button("👁️ Gerar Prévia do Corte Vertical (1080x1920)", key=f"btn_prev_mc_{sel_sc_idx}", use_container_width=True):
+                                with st.spinner("Renderizando prévia composta proporcional 1080x1920..."):
+                                    prev_mc_path = os.path.join("data", _mc_vid_id, f"preview_multicam_scene{sel_sc_idx}.jpg")
+                                    prev_mc_res = compose_multicam_preview_image(
+                                        video_path=_v_full_mc,
+                                        timestamp_s=ref_ts_s,
+                                        boxes=active_boxes,
+                                        output_path=prev_mc_path,
+                                        divider_color=cur_scene.get("divider_color", "black"),
+                                        divider_width=cur_scene.get("divider_width", 4)
+                                    )
+                                    if prev_mc_res.get("status") == "success":
+                                        st.session_state["cached_multicam_preview_path"] = prev_mc_res["path"]
+                                        st.session_state["cached_multicam_preview_time"] = ref_ts_input
+                                    else:
+                                        st.error(f"Erro ao gerar prévia multicâmera: {prev_mc_res.get('error')}")
+
+                            cached_mc_prev = st.session_state.get("cached_multicam_preview_path")
+                            if cached_mc_prev and os.path.exists(cached_mc_prev):
+                                st.image(
+                                    cached_mc_prev,
+                                    caption=f"Resultado Vertical 1080x1920 (9:16) em {st.session_state.get('cached_multicam_preview_time', ref_ts_input)} — Proporção Exata e Câmeras Empilhadas",
+                                    use_container_width=True
+                                )
+                        else:
+                            st.info("ℹ️ Desenhe de 2 a 3 retângulos no vídeo acima para definir o enquadramento desta cena.")
+                    else:
+                        st.error(f"Erro ao capturar frame de referência: {snap_res.get('error')}")
+
+                    multicam_scenes = mc_scenes
+
         elif selected_aspect == "9:16_smart_face":
             with st.expander("🎯 Ajustes de Rastreamento, Foco e Margens do Personagem", expanded=True):
                 col_fz1, col_fz2 = st.columns(2)
@@ -8462,8 +8763,8 @@ if _has_media_ready:
         bg_music_track_id = _cfg.get("bg_music_track_id", "lofi_chill")
         bg_music_volume = float(_cfg.get("bg_music_volume", 0.15))
         ducking_preset = _cfg.get("ducking_preset", "medio")
-        bg_music_start_time = str(_cfg.get("bg_music_start_time", "00:00.00"))
-        bg_video_start_time = str(_cfg.get("bg_video_start_time", "00:00.00"))
+        bg_music_start_time = normalize_time_mask(str(_cfg.get("bg_music_start_time", "00:00:00.00")))
+        bg_video_start_time = normalize_time_mask(str(_cfg.get("bg_video_start_time", "00:00:00.00")))
     
         available_tracks = list_available_tracks()
         track_ids = [t["id"] for t in available_tracks]
@@ -8486,17 +8787,19 @@ if _has_media_ready:
                     bg_music_track_path = selected_track_obj["path"]
 
                     bg_music_start_time = st.text_input(
-                        "⏱️ Ponto de Início na Trilha Sonora (Offset do Áudio):",
+                        "⏱️ Ponto de Início na Trilha Sonora (Offset do Áudio) (HH:MM:SS.ms):",
                         value=bg_music_start_time,
-                        placeholder="Ex: 00:12.00 (minuto, segundo e milissegundo)",
+                        placeholder="00:00:00.00",
                         key="txt_bg_music_start_time",
-                        help="Define em qual tempo do arquivo de áudio a música deve ser inserida no corte (ex: 00:12.00 para pular a introdução e iniciar aos 12 segundos). Formato: MM:SS.ms ou segundos."
+                        on_change=normalize_time_key_callback,
+                        args=("txt_bg_music_start_time",),
+                        help="Define em qual tempo do arquivo de áudio a música deve ser inserida no corte (ex: 00:00:12.00 para pular a introdução e iniciar aos 12 segundos). Formato: HH:MM:SS.ms."
                     )
                     m_sec = parse_time_str_to_seconds(bg_music_start_time)
                     if m_sec > 0:
                         st.caption(f"🎵 A trilha sonora começará a partir dos **{m_sec:.2f}s** ({bg_music_start_time}) da música.")
                     else:
-                        st.caption("🎵 A trilha sonora começará a partir do início da música (**00:00.00**).")
+                        st.caption("🎵 A trilha sonora começará a partir do início da música (**00:00:00.00**).")
     
                     # Player de áudio para prévia da música sincronizado com o tempo de início
                     if os.path.exists(bg_music_track_path):
@@ -8512,11 +8815,13 @@ if _has_media_ready:
                     ducking_preset = duck_keys[duck_labels.index(sel_duck_label)]
 
                     bg_video_start_time = st.text_input(
-                        "⏱️ Entrada no Corte (Vídeo):",
+                        "⏱️ Entrada no Corte (Vídeo) (HH:MM:SS.ms):",
                         value=bg_video_start_time,
-                        placeholder="00:00.00",
+                        placeholder="00:00:00.00",
                         key="txt_bg_video_start_time",
-                        help="Momento do vídeo em que a música deve entrar (padrão 00:00.00 = desde o primeiro segundo do corte)."
+                        on_change=normalize_time_key_callback,
+                        args=("txt_bg_video_start_time",),
+                        help="Momento do vídeo em que a música deve entrar (padrão 00:00:00.00 = desde o primeiro segundo do corte)."
                     )
                     v_sec = parse_time_str_to_seconds(bg_video_start_time)
                     if v_sec > 0:
@@ -9228,7 +9533,10 @@ if _has_media_ready:
                 with col_cap_s1:
                     snap_time_inst_inp = st.text_input(
                         "Tempo do Frame (HH:MM:SS.ms):",
+                        placeholder="00:00:00.00",
                         key=inst_snap_key,
+                        on_change=normalize_time_key_callback,
+                        args=(inst_snap_key,),
                         help="Exemplo: 00:00:02.50 ou 2.5. Pause o vídeo acima e clique em '⏱️ Capturar Tempo' para preencher instantaneamente."
                     )
                 with col_cap_sbtn:
@@ -9589,6 +9897,7 @@ if _has_media_ready:
                                     thumbnail_enabled=False,
                                     crop_margins=current_crop_margins,
                                     social_overlay_config=social_overlay_config,
+                                    multicam_scenes=multicam_scenes,
                                 )
                                 if _cut_res_c.get("error"):
                                     _batch_errors.append(f"{_cp['filename']}: {_cut_res_c['error']}")
@@ -10207,6 +10516,7 @@ if _has_media_ready:
                             thumbnail_enabled=thumbnail_enabled,
                             crop_margins=current_crop_margins,
                             social_overlay_config=social_overlay_config,
+                            multicam_scenes=multicam_scenes,
                         )
                         if cut_res.get("error"):
                             st.error(f"Erro ao cortar: {cut_res['error']}")
@@ -10719,7 +11029,10 @@ if _has_media_ready:
                                     with col_cap_t1:
                                         snap_time_inp = st.text_input(
                                             "Tempo do Frame (HH:MM:SS.ms):",
+                                            placeholder="00:00:00.00",
                                             key=gal_snap_key,
+                                            on_change=normalize_time_key_callback,
+                                            args=(gal_snap_key,),
                                             help="Exemplo: 00:00:02.50 ou 2.5. Pause o player ao lado e clique em '⏱️ Capturar Tempo' para preencher instantaneamente."
                                         )
                                     with col_cap_tbtn:
