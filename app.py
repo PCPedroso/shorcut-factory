@@ -7920,7 +7920,9 @@ if _has_media_ready:
                             "end_time": end_time or "",
                             "boxes": [],
                             "divider_color": "black",
-                            "divider_width": 4
+                            "divider_width": 4,
+                            "blur_background": True,
+                            "blur_intensity": 25
                         }]
 
                     mc_scenes = st.session_state["multicam_scenes"]
@@ -7969,7 +7971,9 @@ if _has_media_ready:
                                     "end_time": end_time,
                                     "boxes": [],
                                     "divider_color": "black",
-                                    "divider_width": 4
+                                    "divider_width": 4,
+                                    "blur_background": True,
+                                    "blur_intensity": 25
                                 })
                                 st.session_state["multicam_scenes"] = mc_scenes
                                 g_st, g_en = compute_multicam_global_timerange(mc_scenes)
@@ -8104,7 +8108,9 @@ if _has_media_ready:
                                                 "end_time": format_seconds_to_time_str(c_t),
                                                 "boxes": [dict(b) for b in base_boxes],
                                                 "divider_color": cur_scene.get("divider_color", "black"),
-                                                "divider_width": cur_scene.get("divider_width", 4)
+                                                "divider_width": cur_scene.get("divider_width", 4),
+                                                "blur_background": cur_scene.get("blur_background", True),
+                                                "blur_intensity": cur_scene.get("blur_intensity", 25)
                                             })
                                             prev_t = c_t
                                         new_split_scenes.append({
@@ -8113,7 +8119,9 @@ if _has_media_ready:
                                             "end_time": cur_scene.get("end_time") or "",
                                             "boxes": [dict(b) for b in base_boxes],
                                             "divider_color": cur_scene.get("divider_color", "black"),
-                                            "divider_width": cur_scene.get("divider_width", 4)
+                                            "divider_width": cur_scene.get("divider_width", 4),
+                                            "blur_background": cur_scene.get("blur_background", True),
+                                            "blur_intensity": cur_scene.get("blur_intensity", 25)
                                         })
                                         mc_scenes.pop(sel_sc_idx)
                                         for scn_item in reversed(new_split_scenes):
@@ -8329,7 +8337,7 @@ if _has_media_ready:
                                     box["order"] = sel_pos
                                     st.caption(f"📐 `{box['w']}x{box['h']}px` em `X:{box['x']}, Y:{box['y']}`")
 
-                            col_dcol, col_dw, _ = st.columns([1.5, 1.2, 2])
+                            col_dcol, col_dw, col_blur_tgl, col_blur_int = st.columns([1.2, 1.0, 1.4, 1.1])
                             with col_dcol:
                                 div_color_options = ["Preto (Padrão)", "Branco", "Amarelo", "Nenhuma"]
                                 div_col_choice = st.selectbox("Linha Divisória entre Câmeras:", div_color_options, index=0, key=f"mc_div_col_{sel_sc_idx}")
@@ -8337,9 +8345,28 @@ if _has_media_ready:
                                 cur_scene["divider_color"] = div_col_map[div_col_choice]
                             with col_dw:
                                 if div_col_choice != "Nenhuma":
-                                    cur_scene["divider_width"] = st.slider("Espessura da Linha (px):", 1, 8, int(cur_scene.get("divider_width", 4)), key=f"mc_div_w_{sel_sc_idx}")
+                                    cur_scene["divider_width"] = st.slider("Espessura (px):", 1, 8, int(cur_scene.get("divider_width", 4)), key=f"mc_div_w_{sel_sc_idx}")
                                 else:
                                     cur_scene["divider_width"] = 0
+                            with col_blur_tgl:
+                                cur_scene["blur_background"] = st.checkbox(
+                                    "🌫️ Fundo Blur (1 ou 2 Câmeras)",
+                                    value=bool(cur_scene.get("blur_background", True)),
+                                    key=f"mc_blur_bg_{sel_sc_idx}",
+                                    help="Quando 1 ou 2 câmeras forem configuradas, preserva o enquadramento original sem cortes laterais e preenche o espaço superior e inferior com fundo desfocado do próprio vídeo."
+                                )
+                            with col_blur_int:
+                                if cur_scene.get("blur_background", True):
+                                    cur_scene["blur_intensity"] = st.slider(
+                                        "Intensidade:",
+                                        min_value=5,
+                                        max_value=50,
+                                        value=int(cur_scene.get("blur_intensity", 25)),
+                                        step=5,
+                                        key=f"mc_blur_int_{sel_sc_idx}"
+                                    )
+                                else:
+                                    cur_scene["blur_intensity"] = 25
 
                             st.markdown("##### 🖼️ Validação Visual Instantânea")
                             if st.button("👁️ Gerar Prévia do Corte Vertical (1080x1920)", key=f"btn_prev_mc_{sel_sc_idx}", use_container_width=True):
@@ -8351,7 +8378,9 @@ if _has_media_ready:
                                         boxes=active_boxes,
                                         output_path=prev_mc_path,
                                         divider_color=cur_scene.get("divider_color", "black"),
-                                        divider_width=cur_scene.get("divider_width", 4)
+                                        divider_width=cur_scene.get("divider_width", 4),
+                                        blur_background=cur_scene.get("blur_background", True),
+                                        blur_intensity=int(cur_scene.get("blur_intensity", 25))
                                     )
                                     if prev_mc_res.get("status") == "success":
                                         st.session_state["cached_multicam_preview_path"] = prev_mc_res["path"]

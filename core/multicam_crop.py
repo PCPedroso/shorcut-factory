@@ -433,11 +433,15 @@ def compose_multicam_preview_image(
     boxes: list,
     output_path: str = None,
     divider_color: str = "black",
-    divider_width: int = 4
+    divider_width: int = 4,
+    blur_background: bool = True,
+    blur_intensity: int = 25
 ) -> dict:
     """
     Gera uma imagem de prévia instantânea 1080x1920 (9:16) no ponto timestamp_s
     com as caixas empilhadas verticalmente de cima para baixo na ordem configurada.
+    Se 1 ou 2 caixas forem configuradas e blur_background for True, preserva a proporção
+    natural de aspecto sem corte lateral e preenche o topo e rodapé com fundo desfocado (blur).
     """
     res_snap = extract_frame_at_timestamp(video_path, timestamp_s)
     if not res_snap.get("frame") is not None:
@@ -457,40 +461,97 @@ def compose_multicam_preview_image(
     else:
         # Ordena caixas pelo atributo order (0 = Topo, 1 = Meio, 2 = Base)
         sorted_boxes = sorted(boxes, key=lambda b: b.get("order", 0))
-        slot_heights = compute_slot_heights(len(sorted_boxes), target_h=total_h)
+        n = len(sorted_boxes)
 
-        rendered_slots = []
-        for i, box in enumerate(sorted_boxes):
-            slot_h = slot_heights[i]
-            slot_img = crop_and_fit_image_slot(frame_bgr, box, target_w=total_w, target_h=slot_h)
-            rendered_slots.append(slot_img)
+        use_blur = bool(blur_background and (n in [1, 2]))
+        if use_blur:
+            natural_heights = []
+            for b in sorted_boxes:
+                bw = max(2, int(b.get("w", total_w)))
+                bh = max(2, int(b.get("h", total_h)))
+                nh = int(round(total_w * (bh / float(bw))))
+                if nh % 2 != 0:
+                    nh += 1
+                natural_heights.append(max(60, nh))
 
-        # Empilhamento vertical
-        preview_bgr = np.vstack(rendered_slots)
+            total_content_h = sum(natural_heights)
+            if total_content_h < total_h:
+                slot_heights = natural_heights
+                margin_total = total_h - total_content_h
+                top_margin = margin_total // 2
+                if top_margin % 2 != 0:
+                    top_margin += 1
+            else:
+                use_blur = False
+                slot_heights = compute_slot_heights(n, target_h=total_h)
+                top_margin = 0
+        else:
+            slot_heights = compute_slot_heights(n, target_h=total_h)
+            top_margin = 0
 
-        # Desenho de linhas divisórias opcionais
-        if divider_width > 0 and len(rendered_slots) > 1:
-            color_bgr = (0, 0, 0)
-            if divider_color.lower() in ["white", "branco", "#ffffff"]:
-                color_bgr = (255, 255, 255)
-            elif divider_color.lower() in ["yellow", "amarelo", "#ffd700", "#ffff00"]:
-                color_bgr = (0, 215, 255)
-            elif divider_color.startswith("#") and len(divider_color) == 7:
-                try:
-                    c_hex = divider_color.lstrip("#")
-                    r = int(c_hex[0:2], 16)
-                    g = int(c_hex[2:4], 16)
-                    b = int(c_hex[4:6], 16)
-                    color_bgr = (b, g, r)
-                except Exception:
-                    color_bgr = (0, 0, 0)
+        # Resolução da cor divisória
+        color_bgr = (0, 0, 0)
+        if divider_color.lower() in ["white", "branco", "#ffffff"]:
+            color_bgr = (255, 255, 255)
+        elif divider_color.lower() in ["yellow", "amarelo", "#ffd700", "#ffff00"]:
+            color_bgr = (0, 215, 255)
+        elif divider_color.startswith("#") and len(divider_color) == 7:
+            try:
+                c_hex = divider_color.lstrip("#")
+                r = int(c_hex[0:2], 16)
+                g = int(c_hex[2:4], 16)
+                b = int(c_hex[4:6], 16)
+                color_bgr = (b, g, r)
+            except Exception:
+                color_bgr = (0, 0, 0)
 
-            cur_y = 0
-            for h in slot_heights[:-1]:
-                cur_y += h
-                y_top = max(0, cur_y - (divider_width // 2))
-                y_bottom = min(total_h, cur_y + ((divider_width + 1) // 2))
+        if use_blur:
+            f_h, f_w = frame_bgr.shape[:2]
+            bg_scale = max(float(total_w) / float(f_w), float(total_h) / float(f_h))
+            bg_w = int(round(f_w * bg_scale))
+            bg_h = int(round(f_h * bg_scale))
+            bg_resized = cv2.resize(frame_bgr, (bg_w, bg_h), interpolation=cv2.INTER_LINEAR)
+            bg_x = max(0, (bg_w - total_w) // 2)
+            bg_y = max(0, (bg_h - total_h) // 2)
+            bg_cropped = bg_resized[bg_y : bg_y + total_h, bg_x : bg_x + total_w]
+
+            k_size = max(5, int(blur_intensity))
+            if k_size % 2 == 0:
+                k_size += 1
+            bg_small = cv2.resize(bg_cropped, (total_w // 10, total_h // 10), interpolation=cv2.INTER_LINEAR)
+            bg_blur_small = cv2.GaussianBlur(bg_small, (k_size, k_size), 0)
+            bg_blur = cv2.resize(bg_blur_small, (total_w, total_h), interpolation=cv2.INTER_LINEAR)
+            bg_blur = cv2.convertScaleAbs(bg_blur, alpha=0.88, beta=-10)
+
+            preview_bgr = bg_blur
+            cur_y = top_margin
+            for i, box in enumerate(sorted_boxes):
+                sh = slot_heights[i]
+                slot_img = crop_and_fit_image_slot(frame_bgr, box, target_w=total_w, target_h=sh)
+                preview_bgr[cur_y : cur_y + sh, 0:total_w] = slot_img
+                cur_y += sh
+
+            if divider_width > 0 and len(sorted_boxes) > 1:
+                div_y = top_margin + slot_heights[0]
+                y_top = max(0, div_y - (divider_width // 2))
+                y_bottom = min(total_h, div_y + ((divider_width + 1) // 2))
                 cv2.rectangle(preview_bgr, (0, y_top), (total_w, y_bottom), color_bgr, -1)
+        else:
+            rendered_slots = []
+            for i, box in enumerate(sorted_boxes):
+                slot_h = slot_heights[i]
+                slot_img = crop_and_fit_image_slot(frame_bgr, box, target_w=total_w, target_h=slot_h)
+                rendered_slots.append(slot_img)
+
+            preview_bgr = np.vstack(rendered_slots)
+
+            if divider_width > 0 and len(rendered_slots) > 1:
+                cur_y = 0
+                for h in slot_heights[:-1]:
+                    cur_y += h
+                    y_top = max(0, cur_y - (divider_width // 2))
+                    y_bottom = min(total_h, cur_y + ((divider_width + 1) // 2))
+                    cv2.rectangle(preview_bgr, (0, y_top), (total_w, y_bottom), color_bgr, -1)
 
     if not output_path:
         out_dir = os.path.dirname(video_path) if video_path else tempfile.gettempdir()
@@ -515,11 +576,14 @@ def build_multicam_filtergraph(
     target_w: int = 1080,
     target_h: int = 1920,
     divider_color: str = "black",
-    divider_width: int = 4
+    divider_width: int = 4,
+    blur_background: bool = True,
+    blur_intensity: int = 25
 ) -> str:
     """
     Gera a cláusula filter_complex do FFmpeg para recortar e empilhar verticalmente N câmeras.
-    Garante aspecto 9:16 proporcional sem distorção facial usando scale proporcional + center crop.
+    Se 1 ou 2 caixas forem configuradas e blur_background for True, preserva a proporção natural
+    das câmeras sem cortes laterais e preenche o espaço de sobra no topo e rodapé com fundo desfocado.
     """
     if not boxes:
         # Fallback: crop central 9:16
@@ -528,6 +592,84 @@ def build_multicam_filtergraph(
     sorted_boxes = sorted(boxes, key=lambda b: b.get("order", 0))
     n = len(sorted_boxes)
 
+    use_blur = bool(blur_background and (n in [1, 2]))
+    if use_blur:
+        natural_heights = []
+        for b in sorted_boxes:
+            bw = max(2, int(b.get("w", target_w)))
+            bh = max(2, int(b.get("h", target_h)))
+            nh = int(round(target_w * (bh / float(bw))))
+            if nh % 2 != 0:
+                nh += 1
+            natural_heights.append(max(60, nh))
+
+        total_content_h = sum(natural_heights)
+        if total_content_h < target_h:
+            slot_heights = natural_heights
+            margin_total = target_h - total_content_h
+            top_margin = margin_total // 2
+            if top_margin % 2 != 0:
+                top_margin += 1
+        else:
+            use_blur = False
+
+    # Configuração de cor para drawbox se houver divisória
+    c_name = divider_color.lower()
+    if c_name in ["white", "branco"]:
+        draw_col = "white"
+    elif c_name in ["yellow", "amarelo"]:
+        draw_col = "yellow"
+    elif c_name.startswith("#"):
+        draw_col = f"0x{c_name.lstrip('#')}"
+    else:
+        draw_col = "black"
+
+    if use_blur:
+        # 1. Fundo Desfocado (Blur)
+        bg_clause = (
+            f"[{input_tag}]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
+            f"crop={target_w}:{target_h}:(iw-ow)/2:(ih-oh)/2,"
+            f"boxblur={blur_intensity}:5,eq=brightness=-0.08[mc_bg]"
+        )
+        clauses = [bg_clause]
+
+        if n == 1:
+            box = sorted_boxes[0]
+            x, y, w, h = box["x"], box["y"], box["w"], box["h"]
+            slot_h = slot_heights[0]
+            clauses.append(
+                f"[{input_tag}]crop={w}:{h}:{x}:{y},"
+                f"scale={target_w}:{slot_h}:force_original_aspect_ratio=increase,"
+                f"crop={target_w}:{slot_h}:(iw-ow)/2:(ih-oh)/2,setsar=1[cam_0]"
+            )
+            clauses.append(f"[mc_bg][cam_0]overlay=0:{top_margin}[{out_tag}]")
+            return ";".join(clauses)
+
+        elif n == 2:
+            for i, box in enumerate(sorted_boxes):
+                slot_h = slot_heights[i]
+                x, y, w, h = box["x"], box["y"], box["w"], box["h"]
+                cam_tag = f"cam_{i}"
+                clauses.append(
+                    f"[{input_tag}]crop={w}:{h}:{x}:{y},"
+                    f"scale={target_w}:{slot_h}:force_original_aspect_ratio=increase,"
+                    f"crop={target_w}:{slot_h}:(iw-ow)/2:(ih-oh)/2,setsar=1[{cam_tag}]"
+                )
+            vstack_tag = "[cam_stack]"
+            clauses.append(f"[cam_0][cam_1]vstack=inputs=2{vstack_tag}")
+
+            if divider_width > 0:
+                y_box = max(0, slot_heights[0] - (divider_width // 2))
+                div_filter = f"drawbox=x=0:y={y_box}:w={target_w}:h={divider_width}:color={draw_col}:t=fill"
+                clauses.append(f"{vstack_tag}{div_filter}[cam_content]")
+                cam_final_tag = "[cam_content]"
+            else:
+                cam_final_tag = vstack_tag
+
+            clauses.append(f"[mc_bg]{cam_final_tag}overlay=0:{top_margin}[{out_tag}]")
+            return ";".join(clauses)
+
+    # Modo sem blur (ou 3+ câmeras): empilhamento preenchendo os 1920px
     if n == 1:
         box = sorted_boxes[0]
         x, y, w, h = box["x"], box["y"], box["w"], box["h"]
@@ -557,16 +699,6 @@ def build_multicam_filtergraph(
     
     # Divisórias horizontais entre os slots com drawbox se divider_width > 0
     if divider_width > 0:
-        c_name = divider_color.lower()
-        if c_name in ["white", "branco"]:
-            draw_col = "white"
-        elif c_name in ["yellow", "amarelo"]:
-            draw_col = "yellow"
-        elif c_name.startswith("#"):
-            draw_col = f"0x{c_name.lstrip('#')}"
-        else:
-            draw_col = "black"
-
         cur_y = 0
         drawbox_chain = []
         for sh in slot_heights[:-1]:
@@ -589,7 +721,9 @@ def render_multicam_scene_clip(
     boxes: list,
     output_scene_path: str,
     divider_color: str = "black",
-    divider_width: int = 4
+    divider_width: int = 4,
+    blur_background: bool = True,
+    blur_intensity: int = 25
 ) -> dict:
     """
     Renderiza um trecho/cena individual com a configuração multicâmera especificada.
@@ -605,7 +739,9 @@ def render_multicam_scene_clip(
         input_tag="0:v",
         out_tag="v_out",
         divider_color=divider_color,
-        divider_width=divider_width
+        divider_width=divider_width,
+        blur_background=blur_background,
+        blur_intensity=blur_intensity
     )
 
     cmd = [
@@ -659,12 +795,16 @@ def render_multicam_cut(
         boxes = s.get("boxes", [])
         div_col = s.get("divider_color", "black")
         div_w = int(s.get("divider_width", 4))
+        blur_bg = s.get("blur_background", True)
+        blur_int = int(s.get("blur_intensity", 25))
         valid_scenes.append({
             "start_time": s_start,
             "end_time": s_end,
             "boxes": boxes,
             "divider_color": div_col,
             "divider_width": div_w,
+            "blur_background": blur_bg,
+            "blur_intensity": blur_int,
             "start_sec": parse_time_str_to_seconds(s_start),
             "end_sec": parse_time_str_to_seconds(s_end) if s_end else 999999.0
         })
@@ -681,7 +821,9 @@ def render_multicam_cut(
             boxes=single["boxes"],
             output_scene_path=output_video_path,
             divider_color=single["divider_color"],
-            divider_width=single["divider_width"]
+            divider_width=single["divider_width"],
+            blur_background=single.get("blur_background", True),
+            blur_intensity=single.get("blur_intensity", 25)
         )
 
     # Caso 2: Múltiplas cenas temporais alternadas
@@ -698,7 +840,9 @@ def render_multicam_cut(
                 boxes=scn["boxes"],
                 output_scene_path=seg_out,
                 divider_color=scn["divider_color"],
-                divider_width=scn["divider_width"]
+                divider_width=scn["divider_width"],
+                blur_background=scn.get("blur_background", True),
+                blur_intensity=scn.get("blur_intensity", 25)
             )
             if seg_res.get("status") != "success":
                 return seg_res

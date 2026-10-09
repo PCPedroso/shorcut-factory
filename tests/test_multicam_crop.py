@@ -5,6 +5,7 @@ tests/test_multicam_crop.py — Testes Unitários para o Motor de Enquadramento 
 import os
 import pytest
 import numpy as np
+import cv2
 from core.multicam_crop import (
     normalize_box_coordinates,
     compute_slot_heights,
@@ -74,13 +75,40 @@ def test_crop_and_fit_image_slot():
 
 
 def test_build_multicam_filtergraph_single_box():
-    """Valida o filtergraph gerado para 1 câmera (foco único)."""
+    """Valida o filtergraph gerado para 1 câmera com e sem blur."""
     boxes = [{"x": 100, "y": 50, "w": 400, "h": 600, "order": 0}]
-    fg = build_multicam_filtergraph(boxes, target_w=1080, target_h=1920)
 
-    assert "crop=400:600:100:50" in fg
-    assert "scale=1080:1920:force_original_aspect_ratio=increase" in fg
-    assert "setsar=1[v_multicam]" in fg
+    # Modo padrão com blur: adiciona boxblur e overlay centralizado
+    fg_blur = build_multicam_filtergraph(boxes, target_w=1080, target_h=1920, blur_background=True)
+    assert "boxblur=25:5" in fg_blur
+    assert "overlay=0:" in fg_blur
+    assert "crop=400:600:100:50" in fg_blur
+
+    # Modo sem blur: preenche os 1920px diretamente
+    fg_no_blur = build_multicam_filtergraph(boxes, target_w=1080, target_h=1920, blur_background=False)
+    assert "crop=400:600:100:50" in fg_no_blur
+    assert "scale=1080:1920:force_original_aspect_ratio=increase" in fg_no_blur
+    assert "setsar=1[v_multicam]" in fg_no_blur
+
+
+def test_build_multicam_filtergraph_two_boxes_with_blur():
+    """Valida o filtergraph gerado para 2 câmeras empilhadas com fundo blur no topo e rodapé."""
+    boxes = [
+        {"x": 100, "y": 100, "w": 1280, "h": 720, "order": 0},
+        {"x": 200, "y": 200, "w": 1280, "h": 720, "order": 1}
+    ]
+    fg = build_multicam_filtergraph(
+        boxes,
+        target_w=1080,
+        target_h=1920,
+        divider_color="black",
+        divider_width=4,
+        blur_background=True
+    )
+    assert "boxblur=25:5" in fg
+    assert "vstack=inputs=2[cam_stack]" in fg
+    assert "drawbox=" in fg
+    assert "overlay=0:" in fg
 
 
 def test_build_multicam_filtergraph_three_boxes():
@@ -227,4 +255,38 @@ def test_detect_scene_changes_in_range(tmp_path):
     assert len(cuts) >= 1
     # O corte deve ter sido detectado próximo a 1.5 segundos
     assert any(abs(c["timestamp_s"] - 1.5) <= 0.6 for c in cuts)
+
+
+def test_compose_multicam_preview_image_with_blur(monkeypatch, tmp_path):
+    """Valida que a prévia 1080x1920 com 1 ou 2 caixas e blur_background preenche o topo e rodapé."""
+    from core.multicam_crop import compose_multicam_preview_image
+
+    # Mock de extract_frame_at_timestamp retornando frame sintético 1920x1080
+    synthetic_frame = np.full((1080, 1920, 3), 120, dtype=np.uint8)
+    # Adiciona gradiente para diferenciar o blur do foreground
+    synthetic_frame[300:700, 400:1500] = [200, 100, 50]
+    monkeypatch.setattr(
+        "core.multicam_crop.extract_frame_at_timestamp",
+        lambda vid, ts: {"frame": synthetic_frame, "error": None}
+    )
+
+    out_p = str(tmp_path / "test_prev_blur.jpg")
+    boxes = [{"x": 400, "y": 300, "w": 1100, "h": 400, "order": 0}]
+
+    res = compose_multicam_preview_image(
+        video_path="mock.mp4",
+        timestamp_s=1.0,
+        boxes=boxes,
+        output_path=out_p,
+        blur_background=True,
+        blur_intensity=25
+    )
+
+    assert res.get("status") == "success"
+    assert os.path.exists(out_p)
+
+    # Lê imagem gerada e verifica formato 1080x1920
+    loaded = cv2.imread(out_p)
+    assert loaded.shape == (1920, 1080, 3)
+
 
