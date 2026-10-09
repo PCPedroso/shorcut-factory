@@ -190,6 +190,28 @@ class TestSocialOverlay(unittest.TestCase):
         self.assertEqual(frame.shape, (1920, 1080, 3))
 
 
+    def test_render_social_overlay_extended_margin_range(self):
+        # Garante que margens extremas entre -300 e 300 px renderizam sem erro
+        for off in [-300, 300]:
+            for pos in ["bottom", "top"]:
+                cfg = {
+                    "enabled": True,
+                    "position": pos,
+                    "offset_y": off,
+                    "font_size": 32,
+                    "style": "pill_glass",
+                    "icon_style": "official",
+                    "text_color": "#FFFFFF",
+                    "networks": {
+                        "youtube": {"enabled": True, "handle": "@canal"}
+                    }
+                }
+                img = render_social_overlay_image(1080, 1920, cfg)
+                self.assertIsInstance(img, Image.Image)
+                arr = np.array(img)
+                self.assertGreater(np.sum(arr[:, :, 3] > 0), 0)
+
+
 if __name__ == '__main__':
     unittest.main()
 

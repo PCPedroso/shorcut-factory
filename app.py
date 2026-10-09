@@ -9101,7 +9101,7 @@ if _has_media_ready:
         # ─────────────────────────────────────────────────────────────────
         social_overlay_enabled = _cfg.get("social_overlay_enabled", False)
         saved_social_pos = _cfg.get("social_overlay_position", "Inferior (Bottom)")
-        saved_social_offset_y = int(_cfg.get("social_overlay_offset_y", 0))
+        saved_social_offset_y = max(-300, min(300, int(_cfg.get("social_overlay_offset_y", 0))))
         saved_social_font_size = int(_cfg.get("social_overlay_font_size", 32))
         saved_social_style = _cfg.get("social_overlay_style", "Pílula Glassmorphism (Recomendado)")
         saved_social_icon_style = _cfg.get("social_overlay_icon_style", "Cores Oficiais da Marca")
@@ -9135,8 +9135,8 @@ if _has_media_ready:
             with col_sc_pos2:
                 social_overlay_offset_y = st.slider(
                     "↕️ Ajuste Fino de Margem (px):",
-                    min_value=-150,
-                    max_value=150,
+                    min_value=-300,
+                    max_value=300,
                     value=saved_social_offset_y,
                     step=5,
                     key="social_offset_slider",
