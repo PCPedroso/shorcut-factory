@@ -191,8 +191,8 @@ class TestSocialOverlay(unittest.TestCase):
 
 
     def test_render_social_overlay_extended_margin_range(self):
-        # Garante que margens extremas entre -300 e 300 px renderizam sem erro
-        for off in [-300, 300]:
+        # Garante que margens extremas entre -450 e 450 px renderizam sem erro
+        for off in [-450, -300, 300, 450]:
             for pos in ["bottom", "top"]:
                 cfg = {
                     "enabled": True,
