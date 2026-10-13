@@ -468,7 +468,8 @@ def inject_video_hotkeys_js():
     - 'l' / 'L': Avança 10s (com Ctrl: 5s, metade do tempo original)
     - 'j' / 'J': Volta 10s (com Ctrl: 5s, metade do tempo original)
     - 'k' / 'K': Pausa / Alterna Play/Pause
-    Inclui OSD flutuante de feedback visual e desativação automática durante digitação em formulários.
+    Inclui OSD flutuante de feedback visual, ativação automática ao passar mouse sobre o player
+    e desativação inteligente durante digitação ativa em formulários.
     """
     hotkeys_script = """
     <script>
@@ -487,29 +488,29 @@ def inject_video_hotkeys_js():
                     top: 50%;
                     left: 50%;
                     transform: translate(-50%, -50%) scale(0.85);
-                    background: rgba(14, 16, 22, 0.92);
-                    backdrop-filter: blur(8px);
-                    -webkit-backdrop-filter: blur(8px);
-                    border: 1px solid rgba(255, 107, 0, 0.7);
+                    background: rgba(14, 16, 22, 0.94);
+                    backdrop-filter: blur(10px);
+                    -webkit-backdrop-filter: blur(10px);
+                    border: 1.5px solid rgba(255, 107, 0, 0.8);
                     color: #ffffff;
                     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                    font-size: 16px;
+                    font-size: 17px;
                     font-weight: 700;
-                    padding: 8px 18px;
+                    padding: 9px 20px;
                     border-radius: 30px;
-                    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8), 0 0 18px rgba(255, 107, 0, 0.4);
+                    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.85), 0 0 20px rgba(255, 107, 0, 0.45);
                     pointer-events: none;
-                    z-index: 99999;
+                    z-index: 999999;
                     opacity: 0;
                     transition: opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1), transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
                     display: flex;
                     align-items: center;
-                    gap: 8px;
+                    gap: 10px;
                     user-select: none;
                 }
                 .viralcut-player-osd.show {
                     opacity: 1;
-                    transform: translate(-50%, -50%) scale(1.05);
+                    transform: translate(-50%, -50%) scale(1.06);
                 }
             `;
             pDoc.head.appendChild(style);
@@ -519,7 +520,7 @@ def inject_video_hotkeys_js():
             try {
                 if (!video) return;
                 const doc = video.ownerDocument || pDoc;
-                let container = video.parentElement;
+                let container = video.closest('[data-testid="stVideo"]') || video.parentElement;
                 if (!container) return;
 
                 const computedPos = (rootWin.getComputedStyle && rootWin.getComputedStyle(container).position) || container.style.position;
@@ -534,7 +535,7 @@ def inject_video_hotkeys_js():
                     container.appendChild(osd);
                 }
 
-                osd.innerHTML = `<span style="font-size:18px;line-height:1;">${icon}</span> <span>${text}</span>`;
+                osd.innerHTML = `<span style="font-size:20px;line-height:1;">${icon}</span> <span>${text}</span>`;
                 osd.classList.add('show');
 
                 if (video.__viralcutOsdTimeout) {
@@ -542,7 +543,7 @@ def inject_video_hotkeys_js():
                 }
                 video.__viralcutOsdTimeout = setTimeout(() => {
                     osd.classList.remove('show');
-                }, 650);
+                }, 750);
             } catch(e) {}
         }
 
@@ -550,16 +551,39 @@ def inject_video_hotkeys_js():
             try {
                 const videos = pDoc.querySelectorAll('video');
                 videos.forEach(v => {
+                    // Torna o elemento de vídeo e seu wrapper focáveis para teclado
+                    if (!v.hasAttribute('tabindex')) {
+                        v.setAttribute('tabindex', '-1');
+                        v.style.outline = 'none';
+                    }
+
+                    const wrapper = v.closest('[data-testid="stVideo"]') || v.parentElement;
+                    if (wrapper && !wrapper.hasAttribute('tabindex')) {
+                        wrapper.setAttribute('tabindex', '-1');
+                        wrapper.style.outline = 'none';
+                    }
+
                     if (v.dataset.hotkeysTracked) return;
                     v.dataset.hotkeysTracked = "true";
 
                     const setAsActive = () => {
                         rootWin.__viralcutActiveVideo = v;
+                        rootWin.__viralcutActiveVideoTime = Date.now();
+                        // Se houver input de texto com foco residual, remove o foco para liberar os atalhos
+                        const active = pDoc.activeElement || document.activeElement;
+                        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+                            active.blur();
+                        }
                     };
 
                     ['play', 'pause', 'click', 'pointerdown', 'mouseenter'].forEach(evt => {
                         v.addEventListener(evt, setAsActive);
+                        if (wrapper) wrapper.addEventListener(evt, setAsActive);
                     });
+
+                    // Escuta direta nos nós do player
+                    v.addEventListener('keydown', handleVideoHotkey, true);
+                    if (wrapper) wrapper.addEventListener('keydown', handleVideoHotkey, true);
                 });
             } catch(e) {}
         }
@@ -572,17 +596,24 @@ def inject_video_hotkeys_js():
                 });
                 if (allVids.length === 0) return null;
 
-                // 1. Vídeo atualmente em reprodução tem prioridade máxima
+                // 1. Prioridade máxima: Vídeo sobre o qual o mouse está passando (:hover)
+                const hoveredVid = allVids.find(v => {
+                    const wrap = v.closest('[data-testid="stVideo"]') || v.parentElement;
+                    return (wrap && wrap.matches(':hover')) || v.matches(':hover');
+                });
+                if (hoveredVid) return hoveredVid;
+
+                // 2. Vídeo atualmente em reprodução
                 const playingVid = allVids.find(v => !v.paused && !v.ended);
                 if (playingVid) return playingVid;
 
-                // 2. Vídeo com interação recente (hover, click, pause) se ainda estiver no DOM
+                // 3. Vídeo com interação recente do usuário (se ainda estiver no DOM)
                 if (rootWin.__viralcutActiveVideo && pDoc.contains(rootWin.__viralcutActiveVideo)) {
                     return rootWin.__viralcutActiveVideo;
                 }
 
-                // 3. Fallback: vídeo mais centralizado na tela visível
-                const vh = rootWin.innerHeight || 800;
+                // 4. Fallback: vídeo mais centralizado ou primeiro visível na tela
+                const vh = rootWin.innerHeight || window.innerHeight || 800;
                 let bestVid = allVids[0];
                 let minDistance = Infinity;
                 allVids.forEach(v => {
@@ -601,27 +632,42 @@ def inject_video_hotkeys_js():
 
         function handleVideoHotkey(e) {
             try {
-                // Verifica se o usuário está digitando em campos de texto
-                const activeEl = pDoc.activeElement || document.activeElement;
-                if (activeEl) {
-                    const tag = (activeEl.tagName || '').toLowerCase();
-                    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-                    if (activeEl.isContentEditable) return;
-                    if (activeEl.getAttribute('role') === 'textbox') return;
-                }
+                const rawKey = e.key;
+                if (!rawKey) return;
+                const key = rawKey.toLowerCase();
+                if (key !== 'j' && key !== 'k' && key !== 'l') return;
+                if (e.altKey) return;
 
                 // Verifica se o modal de snapshot está aberto
                 const snapModal = pDoc.getElementById('viralcut-snapshot-modal-overlay');
                 if (snapModal && snapModal.classList.contains('active')) return;
 
-                // Teclas válidas: j, k, l (maiúsculas e minúsculas)
-                const rawKey = e.key;
-                if (!rawKey) return;
-                const key = rawKey.toLowerCase();
-                if (key !== 'j' && key !== 'k' && key !== 'l') return;
+                const activeEl = pDoc.activeElement || document.activeElement;
+                const targetEl = e.target;
+                const tag = (activeEl && activeEl.tagName ? activeEl.tagName : '').toLowerCase();
+                const targetTag = (targetEl && targetEl.tagName ? targetEl.tagName : '').toLowerCase();
 
-                // Ignora se Alt estiver pressionado
-                if (e.altKey) return;
+                // Verifica se o cursor do mouse está sobre algum player de vídeo
+                const allVids = Array.from(pDoc.querySelectorAll('video')).filter(v => {
+                    const r = v.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                });
+                const hoveredVid = allVids.find(v => {
+                    const wrap = v.closest('[data-testid="stVideo"]') || v.parentElement;
+                    return (wrap && wrap.matches(':hover')) || v.matches(':hover');
+                });
+
+                // Se o foco está em input MAS o usuário está com o mouse sobre o vídeo:
+                // Trata-se de foco residual; remove o foco do input para acionar o player
+                if (hoveredVid && (tag === 'input' || tag === 'textarea')) {
+                    if (activeEl && activeEl.blur) activeEl.blur();
+                    rootWin.__viralcutActiveVideo = hoveredVid;
+                } else if (tag === 'input' || tag === 'textarea' || tag === 'select' || targetTag === 'input' || targetTag === 'textarea') {
+                    // Usuário está de fato digitando em um formulário
+                    return;
+                } else if (activeEl && (activeEl.isContentEditable || activeEl.getAttribute('role') === 'textbox')) {
+                    return;
+                }
 
                 const targetVid = getTargetVideo();
                 if (!targetVid) return;
@@ -631,14 +677,14 @@ def inject_video_hotkeys_js():
                 const step = isCtrl ? 5 : 10;
 
                 if (key === 'l') {
-                    // Avança
+                    // Avança 10s (ou 5s com Ctrl)
                     const maxTime = (targetVid.duration && !isNaN(targetVid.duration) && targetVid.duration > 0) ? targetVid.duration : 999999;
                     targetVid.currentTime = Math.min(maxTime, (targetVid.currentTime || 0) + step);
                     showVideoOsd(targetVid, '⏩', `+${step}s`);
                     e.preventDefault();
                     e.stopPropagation();
                 } else if (key === 'j') {
-                    // Volta
+                    // Volta 10s (ou 5s com Ctrl)
                     targetVid.currentTime = Math.max(0, (targetVid.currentTime || 0) - step);
                     showVideoOsd(targetVid, '⏪', `-${step}s`);
                     e.preventDefault();
@@ -646,7 +692,8 @@ def inject_video_hotkeys_js():
                 } else if (key === 'k') {
                     // Pausa / Alterna Play-Pause
                     if (targetVid.paused) {
-                        targetVid.play().catch(() => {});
+                        const playPromise = targetVid.play();
+                        if (playPromise !== undefined) playPromise.catch(() => {});
                         showVideoOsd(targetVid, '▶', 'Reproduzindo');
                     } else {
                         targetVid.pause();
@@ -662,9 +709,14 @@ def inject_video_hotkeys_js():
 
         if (!rootWin.__viralcutHotkeysAttached) {
             rootWin.__viralcutHotkeysAttached = true;
-            pDoc.addEventListener('keydown', handleVideoHotkey, true);
-            rootWin.addEventListener('keydown', handleVideoHotkey, true);
-            setInterval(scanAndTrackVideos, 800);
+            [pDoc, rootWin, document, window].forEach(target => {
+                try {
+                    if (target && target.addEventListener) {
+                        target.addEventListener('keydown', handleVideoHotkey, true);
+                    }
+                } catch(e) {}
+            });
+            setInterval(scanAndTrackVideos, 600);
         }
     })();
     </script>
