@@ -2992,7 +2992,13 @@ def render_quick_editor_component(video_path: str, unique_key: str):
 
             preset_sel_key = f"sel_custom_hl_preset_{unique_key}"
             last_loaded_key = f"last_loaded_custom_hl_preset_{unique_key}"
-            
+            pending_sel_key = f"_pending_hl_preset_{unique_key}"
+            pending_clear_input_key = f"_pending_clear_new_preset_{unique_key}"
+
+            # Aplica preset pendente ANTES de instanciar o selectbox
+            if pending_sel_key in st.session_state:
+                st.session_state[preset_sel_key] = st.session_state.pop(pending_sel_key)
+
             cur_saved_p = st.session_state.get(preset_sel_key, "-- Nenhuma (Personalizado) --")
             if cur_saved_p != "-- Nenhuma (Personalizado) --" and cur_saved_p not in user_hl_names:
                 cur_saved_p = "-- Nenhuma (Personalizado) --"
@@ -3041,7 +3047,7 @@ def render_quick_editor_component(video_path: str, unique_key: str):
             with col_p_del:
                 if st.button("🗑️", key=f"btn_del_hl_preset_{unique_key}", help=f"Excluir permanentemente '{sel_p_choice}'", disabled=not is_preset_active, use_container_width=True):
                     delete_user_headline_preset(sel_p_choice)
-                    st.session_state[preset_sel_key] = "-- Nenhuma (Personalizado) --"
+                    st.session_state[pending_sel_key] = "-- Nenhuma (Personalizado) --"
                     st.session_state.pop(last_loaded_key, None)
                     st.toast(f"🗑️ Pré-configuração '{sel_p_choice}' excluída com sucesso!")
                     st.rerun()
@@ -3051,6 +3057,10 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 with st.expander("➕ Salvar Configuração Atual como Novo Preset", expanded=(len(user_hl_names) == 0)):
                     col_np1, col_np2 = st.columns([2.5, 1.2])
                     with col_np1:
+                        if st.session_state.get(pending_clear_input_key):
+                            st.session_state[f"input_new_preset_name_{unique_key}"] = ""
+                            st.session_state.pop(pending_clear_input_key, None)
+
                         new_p_name = st.text_input(
                             "Nome do Novo Preset:",
                             placeholder="Ex: Amarelo Impacto 320px",
@@ -3065,9 +3075,9 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                                 clean_name = new_p_name.strip()
                                 new_cfg = _collect_current_hl_settings(unique_key)
                                 save_user_headline_preset(clean_name, new_cfg)
-                                st.session_state[preset_sel_key] = clean_name
+                                st.session_state[pending_sel_key] = clean_name
                                 st.session_state[last_loaded_key] = clean_name
-                                st.session_state[f"input_new_preset_name_{unique_key}"] = ""
+                                st.session_state[pending_clear_input_key] = True
                                 st.toast(f"✅ Pré-configuração '{clean_name}' salva com sucesso!")
                                 st.rerun()
 
@@ -3087,7 +3097,7 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                                 if ren_input_val and ren_input_val.strip() and ren_input_val.strip() != sel_p_choice:
                                     ren_clean = ren_input_val.strip()
                                     rename_user_headline_preset(sel_p_choice, ren_clean)
-                                    st.session_state[preset_sel_key] = ren_clean
+                                    st.session_state[pending_sel_key] = ren_clean
                                     st.session_state[last_loaded_key] = ren_clean
                                     st.toast(f"✏️ Pré-configuração renomeada para '{ren_clean}'!")
                                     st.rerun()
