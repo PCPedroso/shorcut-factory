@@ -3900,7 +3900,7 @@ def clear_current_project():
         "active_video_id", "video_url", "input_yt_url", "transcription_done",
         "video_ready", "full_text", "segments", "transcript_source",
         "pautas", "bundles", "shorts", "saved_steps", "ai_results",
-        "input_yt_slice_start", "input_yt_slice_end", "player_synced_time",
+        "input_yt_slice_start", "input_yt_slice_end", "input_yt_slice_label", "player_synced_time",
         "final_start_time", "final_end_time", "custom_slice_active",
         "youtube_heatmap_data", "heatmap_cuts"
     ]
@@ -4149,8 +4149,22 @@ if show_sec1:
         )
         if video_url and video_url != st.session_state.get("video_url"):
             st.session_state["video_url"] = video_url
-    
-        with st.expander("⏱️ Baixar Apenas um Trecho Específico (Lives / Podcasts Longos)", expanded=False):
+
+        # Aplica requisições pendentes de reset ou definição de trecho ANTES da instanciação dos widgets
+        if st.session_state.get("_pending_slice_reset"):
+            st.session_state["input_yt_slice_start"] = ""
+            st.session_state["input_yt_slice_end"] = ""
+            st.session_state["input_yt_slice_label"] = ""
+            st.session_state.pop("_pending_slice_reset", None)
+
+        if "_pending_slice_set" in st.session_state:
+            _ps = st.session_state.pop("_pending_slice_set", {})
+            st.session_state["input_yt_slice_start"] = _ps.get("start", "")
+            st.session_state["input_yt_slice_end"] = _ps.get("end", "")
+            st.session_state["input_yt_slice_label"] = _ps.get("label", "")
+
+        _has_slice_active = bool(st.session_state.get("input_yt_slice_start") or st.session_state.get("input_yt_slice_end") or st.session_state.get("input_yt_slice_label"))
+        with st.expander("⏱️ Baixar Apenas um Trecho Específico (Lives / Podcasts Longos)", expanded=_has_slice_active):
             st.caption("💡 **Time-Range Slicing**: Em vez de baixar gigabytes de um vídeo ou live de 2 a 4 horas, baixe apenas o trecho desejado. É até **50x mais rápido** e consome muito menos disco!")
             col_t1, col_t2 = st.columns(2)
             with col_t1:
@@ -4249,10 +4263,13 @@ if show_sec1:
                                     st.session_state["active_video_id"] = _sl_id
                                     st.session_state["video_url"] = video_url
                                     st.session_state["input_yt_url"] = video_url
-                                    if _sl["start_sec"] is not None:
-                                        st.session_state["input_yt_slice_start"] = format_time_sec(_sl["start_sec"])
-                                    if _sl["end_sec"] is not None:
-                                        st.session_state["input_yt_slice_end"] = format_time_sec(_sl["end_sec"])
+                                    _p_start = format_time_sec(_sl["start_sec"]) if _sl.get("start_sec") is not None else ""
+                                    _p_end = format_time_sec(_sl["end_sec"]) if _sl.get("end_sec") is not None else ""
+                                    st.session_state["_pending_slice_set"] = {
+                                        "start": _p_start,
+                                        "end": _p_end,
+                                        "label": ""
+                                    }
                                     save_setting("last_active_video_id", _sl_id)
                                     load_video_saved_artifacts(_sl_id)
                                     st.rerun()
@@ -4267,9 +4284,7 @@ if show_sec1:
 
                     st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
                     if st.button("➕ Baixar Outro Trecho deste Vídeo (Limpar Campos de Tempo)", key="btn_prep_new_slice", use_container_width=True):
-                        st.session_state["input_yt_slice_start"] = ""
-                        st.session_state["input_yt_slice_end"] = ""
-                        st.session_state["input_yt_slice_label"] = ""
+                        st.session_state["_pending_slice_reset"] = True
                         st.toast("⏱️ Campos de tempo liberados! Digite o novo início e fim para baixar o próximo trecho.")
                         st.rerun()
 
