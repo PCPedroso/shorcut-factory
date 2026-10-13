@@ -12,13 +12,13 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 |---|---|---|
 | **Linguagem** | Python 3.10+ | Núcleo de processamento e automação |
 | **Interface** | Streamlit | Web UI interativa local, modular e minimalista |
-| **Extração & Download** | `yt-dlp` (Multi-thread 16x) | Download ultra-rápido de YouTube, Instagram Reels, TikTok, Twitter/X e Web com metadados e cookies |
+| **Extração & Download** | `yt-dlp` (Multi-thread 16x) + `Kick HLS Engine` | Download ultra-rápido de YouTube, Kick.com (VODs e transmissões com Time-Range Slicing nativo HLS sem DRM), Instagram Reels, TikTok, Twitter/X e Web com metadados e cookies |
 | **Transcrição** | `faster-whisper` + ASR YouTube | Transcrição com timestamps por palavra acelerada por GPU CUDA |
 | **Visão Computacional** | `MediaPipe` + `OpenCV` | Face tracking, Target Lock e transição dinâmica Split/Full Screen |
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
 | **Processamento de Vídeo** | `FFmpeg` (com `libass` e NVENC) | Recorte, filtros complexos, sidechain compress, equalização e queima de legendas/overlays |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
-| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (246 testes) |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (282 testes) |
 
 ---
 
@@ -33,7 +33,7 @@ shorcut-factory/
 │   ├── fonts/                 # Tipografias bundled (Montserrat-ExtraBold)
 │   └── icons/                 # Ícones oficiais de alta resolução
 │       └── social/            # Ícones de redes sociais (youtube.png, instagram.png, x.png)
-├── tests/                     # Suíte de Testes Unitários Automatizados (246 testes)
+├── tests/                     # Suíte de Testes Unitários Automatizados (282 testes)
 │   ├── test_clear_project_and_startup.py # Testes de inicialização limpa e reset de projetos
 │   ├── test_roi_crop.py          # Testes de remoção de patrocínios em L, tarjas e máscaras de ROI
 │   ├── test_youtube_subtitles_selection.py # Testes de mapeamento e download de legendas multilinguagem do YouTube
@@ -53,10 +53,14 @@ shorcut-factory/
 │   ├── test_integrations.py      # Testes de webhooks e payloads
 │   ├── test_analyzer_utils.py    # Testes de conversão de tempo e textos
 │   ├── test_ui_theme.py          # Testes de tokens de design system, badges e stepper
-│   ├── test_social_overlay.py    # Testes de badges e assinaturas de redes sociais (@YouTube, @Instagram, @X)
+│   ├── test_social_overlay.py    # Testes de badges e assinaturas de redes sociais (@YouTube, @Instagram, @TikTok, @X)
 │   ├── test_translator.py        # Testes de tradução de segmentos, cortes e vídeo completo com IA local
-│   └── test_web_downloads.py     # Testes de resiliência em downloads de portais de notícias e web
+│   ├── test_web_downloads.py     # Testes de resiliência em downloads de portais de notícias e web
+│   ├── test_youtube_heatmap.py   # Testes de extração do Most Replayed, detecção de hotspots, alinhamento Whisper e cache
+│   ├── test_kick_support.py      # Testes de extração de metadados, streaming HLS e Time-Range Slicing da Kick.com
+│   └── test_multi_slice.py       # Testes de múltiplos trechos independentes (multi-slicing), limpeza de base ID e catálogo de trechos
 ├── core/
+│   ├── youtube_heatmap.py     # Motor de Mapa de Calor ("Mais Reproduzidos" / Most Replayed) do YouTube, detecção de picos de retenção, alinhamento inteligente com frases Whisper e geração de cortes
 │   ├── translator.py          # Motor de tradução de transcrições completas e cortes sob demanda via IA local (Ollama/Llama 3/Qwen), com sincronia temporal e reversibilidade
 │   ├── frame_capturer.py      # Motor de captura de frames pausados em alta resolução e gestão de capas/thumbnails
 │   ├── ui_theme.py            # Design System Studio: tokens CSS, Glassmorphism, stepper, badges e componentes
@@ -69,7 +73,7 @@ shorcut-factory/
 │   ├── analyzer.py            # Análise Q&A/Temática, Séries Sugeridas flexíveis e Kit Viral com IA
 │   ├── video_processor.py     # Pipeline FFmpeg para os 5 formatos de enquadramento + download multi-thread
 │   ├── face_tracker.py        # Detecção facial MediaPipe, Deadband Anchor, Split Screen Proporcional & Auto-Switch
-│   ├── social_overlay.py      # Motor de badges e assinaturas de redes sociais (@YouTube, @Instagram, @X) com ícones oficiais e Glassmorphism
+│   ├── social_overlay.py      # Motor de badges e assinaturas de redes sociais (@YouTube, @Instagram, @TikTok, @X) com ícones oficiais e Glassmorphism
 │   ├── subtitle_burner.py     # Geração de legendas dinâmicas em ASS + Headlines + Emojis + Callout + Reuso e parser de transcrição preservada (resolve_preserved_cut_transcript, parse_srt_to_transcript_dict)
 │   ├── thumbnail_generator.py # Extração de melhor frame (MediaPipe/sharpness) e capas 9:16 multicamadas
 │   ├── audio_mixer.py         # Mixagem de áudio com Ducking dinâmico via sidechaincompress FFmpeg
@@ -78,7 +82,7 @@ shorcut-factory/
 │   ├── export_kit.py          # Nomenclatura estrita (VLDSS, VRIRA...), pastas de publicação com thumbnail e persistência de transcricao_corte.json
 │   ├── cuts_catalog.py        # Catálogo e cache inteligente multi-instância (cuts_catalog.json)
 │   ├── batch_processor.py     # Processamento sequencial em lote com Smart Skip e Phase 4
-│   ├── library_manager.py     # Catálogo global de vídeos processados (library.json)
+│   ├── library_manager.py     # Catálogo global de vídeos processados (library.json) e descoberta de múltiplos trechos fatiados (find_video_slices)
 │   └── config_manager.py      # Persistência contínua de preferências (app_settings.json)
 ├── data/
 │   ├── library.json           # Biblioteca geral de vídeos processados
@@ -88,6 +92,8 @@ shorcut-factory/
 │       ├── audio.mp3          # Cache do áudio extraído
 │       ├── transcript.json    # Transcrição com timestamps por palavra
 │       ├── video_full.mp4     # Vídeo original Full HD 1080p
+│       ├── heatmap.json       # Cache dos 100 marcadores de retenção da audiência do YouTube
+│       ├── heatmap_cuts.json  # Relação de cortes quentes gerados a partir do mapa de calor
 │       ├── cuts_catalog.json  # Catálogo de cortes e formatos gerados para este vídeo
 │       └── <PREFIXO>_<NOME>/  # Pasta final do corte (Vídeo + Thumbnail + Kit de Publicação)
 └── requirements.txt
@@ -247,9 +253,15 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Arquivos Locais (1 ou 2 Vídeos)**: Extração ultra-rápida via FFmpeg do áudio individual ou unificado da composição dupla com ambientação musical personalizada.
   - **Renderização Segmentada & Concatenação Lossless da Composição Dupla**: Renderiza a Parte 1 (Split Top + Base Congelada + Trilha 1 + Ducking) e a Parte 2 (Tela Cheia + Trilha 2 + Ducking) de forma isolada, concatenando-as via *FFmpeg Concat Demuxer* com fluxo de áudio e vídeo 100% sincronizado, eliminando desvios ou repetições de áudio.
   - **Upload Direto de Arquivos Locais para Trilhas Sonoras**: Permite carregar diretamente arquivos de som do computador nas Partes 1 e 2 da Composição Dupla e na Seção 3 da Fábrica de Cortes, com registro instantâneo no catálogo permanente.
-  - **⏱️ Download Parcial por Intervalo de Tempo Otimizado (Time-Range Slicing & Fast Stream Copy)** (`core/extractor.py`, `core/video_processor.py`, `app.py`, `tests/test_partial_download.py`):
-    - Permite definir início e fim específicos (`HH:MM:SS`, `MM:SS`, `1h30m` ou segundos) ao baixar vídeos e lives longas (YouTube, Twitch, podcasts).
+  - **⏱️ Download Parcial por Intervalo de Tempo Otimizado & Múltiplos Trechos Independentes (Time-Range Multi-Slicing & Fast Stream Copy)** (`core/extractor.py`, `core/video_processor.py`, `core/library_manager.py`, `app.py`, `tests/test_partial_download.py`, `tests/test_multi_slice.py`):
+    - Permite definir início e fim específicos (`HH:MM:SS`, `MM:SS`, `1h30m` ou segundos) ao baixar vídeos e lives longas (YouTube, Twitch, Kick.com, podcasts).
     - Utiliza o recurso nativo `download_ranges` do `yt-dlp` e FFmpeg com cópia direta de pacotes (`-c copy` / `force_keyframes_at_cuts: False`), evitando o download de gigabytes desnecessários e acelerando o processo em até **50x**.
+    - **Múltiplos Trechos Distintos do Mesmo Vídeo/Live sem Sobrescrita**:
+      - Permite baixar sucessivos trechos independentes da mesma URL ou transmissão ao vivo sem sobrescrever ou perder momentos baixados anteriormente.
+      - Cada trecho é salvo em sua própria pasta isolada (`data/<base_id>_t_<start>_<end>[_<label>]`), contendo seu próprio `video_full.mp4`, `audio.mp3`, `transcript.json` e catálogo de cortes.
+      - **Galeria Visual de Trechos Salvos na Seção 1 (`📚 Trechos Salvos deste Vídeo`)**: Exibe todos os trechos já baixados para a URL atual com minutagem, duração, tamanho em disco, status de componentes e botão de 1 clique `📥 Ativar Trecho` para alternar instantaneamente o projeto ativo sem re-download.
+      - **Ação Rápida `➕ Baixar Outro Trecho deste Vídeo`**: Limpa os campos de tempo da interface permitindo definir um novo intervalo imediatamente sem travas de "conteúdo existente".
+      - Rotas isoladas para downloads parciais de lives (`_run_live_download_action`) com sufixos dedicados de timestamp para prevenir colisões.
     - Identificador Unificado de Vídeo Ativo (`get_current_active_video_id`): Detecta automaticamente diretórios de vídeos fatiados (`<video_id>_t_<start>_<end>`), integrando de forma transparente a Seção 3 (Fábrica de Cortes), prévias de enquadramento (Smart Face, Blur, 16:9), legendas e catálogo.
     - Sincronização inteligente de transcrição: fatia e re-baseia legendas oficiais do YouTube a partir de `00:00` ou transcreve cirurgicamente o áudio fatiado com Whisper GPU.
     - Registro preciso na biblioteca (`library.json`) com a duração exata do trecho fatiado.
@@ -280,11 +292,13 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 - **🔴 Motor HLS Snapshot & Freeze Live Edge para Transmissões ao Vivo em Andamento (`core/video_processor.py`, `core/extractor.py`, `app.py`, `tests/test_live_stream_snapshot_engine.py`)**:
   - **Congelamento de Ponto Presente (*Freeze Live Edge*)**: Elimina 100% dos travamentos e loops infinitos de busca de fragmentos futuros (DASH/HLS contínuos), congelando o instante da transmissão no segundo exato da solicitação com `#EXT-X-MEDIA-SEQUENCE` alinhado e tag terminal `#EXT-X-ENDLIST`.
   - **Alta Velocidade com Stream Copy Multiplexado (15x a 40x)**: Baixa os fluxos HLS nativos de vídeo Full HD (`270` - 1080p / `232` - 720p) e áudio (`234`) sem re-encoding (`-c copy`) via FFmpeg, concluindo fatias de 15 a 30 minutos em menos de 30 segundos.
-  - **Controles em 1 Clique na Seção 1 (Ingestão Web)**: Card dedicado para transmissões ao vivo com botões de alta produtividade:
+  - **Controles em 1 Clique na Seção 1 (Ingestão Web & Top-Level Panel)**: Painel dedicado e desacoplado do ciclo de submissão do Streamlit (`🔴 Transmissão Ao Vivo (LIVE) Detectada`), renderizado no topo da seção e preservado no estado da sessão (`live_stream_detected_id`), garantindo que o clique em qualquer botão execute imediatamente sem ser descartado por reruns de botões pai:
     - `⚡ Últimos 15 min`: Captura os últimos 15 minutos transmitidos até o instante atual.
     - `⚡ Últimos 30 min`: Captura a última meia hora da transmissão com corte preciso.
+    - `⚡ Últimos 60 min (1h)`: Captura a última hora transmitida com corte preciso.
     - `⏱️ Intervalo Selecionado`: Baixa exatamente o intervalo configurado em `Início` e `Fim`.
     - `🔴 Buffer Completo`: Puxa todo o histórico disponível no buffer DVR da transmissão até o momento.
+  - **Extração Atômica de Áudio e Thumbnail**: Logo após a captura do trecho de vídeo MP4 com HLS, a rotina extrai automaticamente a faixa `audio.mp3` e gera `thumbnail.jpg`, registrando a live na biblioteca local com duração real e liberando o player da Seção 1 e as ferramentas de corte da Seção 3 e 4 sem etapas manuais adicionais.
   - **Recorte Cirúrgico Sob Demanda na Seção 3 (Fábrica de Cortes)**: Se o usuário navegar diretamente para a Seção 3 sem ter baixado o vídeo da live, o downloader calcula cirurgicamente a fatia dos timestamps `Tempo Inicial` e `Tempo Final` do corte, baixando apenas aquele intervalo específico em segundos.
   - **Eliminação do Erro `No video formats found!`**: Sanitização automática de clientes yt-dlp em transmissões ao vivo (remoção do cliente `android` incompatível com HLS ao vivo).
 - **🎬 Acesso Imediato ao Vídeo Processado na Primeira Fase (Seção 1) (`app.py`, `tests/test_section1_video_access.py`)**:
@@ -319,6 +333,26 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Exclusão atômica de carrossel completo (`🗑️ Excluir Carrossel Completo`) com limpeza de arquivos físicos e catálogo.
   - Otimização de performance de memória no carregamento de partes do carrossel na Seção 3 e Seção 4 via miniaturas de imagem estática com badges informativos de duração (original e acelerada).
   - Sincronização automática e bidirecional das partes geradas no carrossel com o catálogo de cortes da Seção 4.
+- **🔥 Mapa de Calor da Audiência do YouTube ("Mais Reproduzidos" / Most Replayed) (`core/youtube_heatmap.py`, `app.py`, `tests/test_youtube_heatmap.py`)**:
+  - **Extração da Curva de Retenção Humana do YouTube**:
+    - O algoritmo do YouTube monitora exatamente em quais segundos a audiência mais retrocede o player, reassiste ou compartilha, dividindo o vídeo em 100 blocos temporais com intensidade normalizada (`intensityScoreNormalized` de `0.0` a `1.0`).
+    - Como essa informação não existe na YouTube Data API v3 nem é populada pelo yt-dlp, o módulo `core/youtube_heatmap.py` extrai e normaliza os marcadores diretamente a partir da árvore `ytInitialData` (suportando a entidade moderna `macroMarkersListEntity` e o legado `heatMarkerRenderer`), com cache em disco (`heatmap.json`, TTL de 6h).
+  - **Detecção de Hotspots para Shorts & Reels (`find_heatmap_hotspots`)**:
+    - Algoritmo de crescimento guloso a partir dos picos de intensidade, descartando o primeiro bloco (artefato comum de 100% de início do player) e expandindo janelas temporais de **35s a 90s** (ou configurável de 15s a 180s) enquanto os blocos vizinhos retêm alta atenção da audiência.
+    - Preenchimento simétrico e garantia de limites do vídeo sem sobreposição.
+  - **Alinhamento Inteligente com a Transcrição Whisper (`snap_hotspot_to_segments`)**:
+    - Ajusta início e fim de cada janela para coincidir com o começo de uma frase completa e encerramento de raciocínio, sem deslocar além de `max_shift_s` (8s).
+  - **Modo 1 — Na Seção 2 ("Mineração & IA - Llama 3")**:
+    - Nova aba dedicada: **`📊 Mais Reassistidos (Heatmap YouTube)`**.
+    - Métricas em destaque: Quantidade de Cortes Quentes, Pico Máximo de Atenção, Origem dos Dados (Cache / YouTube) e Blocos Analisados.
+    - Gráfico interativo de linha da retenção da audiência (`st.line_chart`).
+    - Cards dos cortes gerados com selo de calor (`🔥 Pico Máximo`, `🔥🔥 Muito Quente`, etc.), minutagem `[MM:SS → MM:SS]`, duração e snippet da fala.
+    - Seleção individual ou em massa (`☑️ Marcar Tudo`, `⬜ Desmarcar Tudo`, `🔄 Inverter Seleção`) com integração direta à **Fila de Produção em Lote** (`batch_processor`).
+    - Botão `✂️ Enquadrar na Seção 3` para aplicar instantaneamente na Fábrica 9:16.
+  - **Modo 2 — Na Seção 3 ("Fábrica de Enquadramento 9:16")**:
+    - Painel integrado no topo dos campos de tempo: **`🔥 Picos de Audiência do YouTube (Mais Reassistidos / Heatmap)`**.
+    - Relação compacta dos trechos mais quentes com rank, intensidade, minutagem e snippet.
+    - Botão **`⚡ Aplicar`**: injeta a minutagem inicial e final com 1 clique antes da instanciação dos widgets (`_pending_start_time` / `_pending_end_time`), permitindo ao usuário decidir quais cortes fazer e ajustar enquadramento, zoom e multicâmera com precisão total.
 - **📁 Ingestão de Vídeo Local com Cópia Direta ou Corte de Trecho Otimizado (`core/video_processor.py`, `app.py`, `tests/test_local_video.py`)**:
   - **Cópia Integral Direta sem Recodificação**: Ao carregar um arquivo de vídeo do computador sem corte definido, a aplicação simplesmente copia o arquivo diretamente para a pasta padrão do projeto (`data/<video_id>/video_full.mp4`) via stream chunked sem re-encoding, economizando CPU/GPU e preservando 100% da taxa de bits e fidelidade originais.
   - **Definição Opcional de Corte (Início e Fim) na Ingestão Local**:
@@ -377,8 +411,8 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - Inclusão do botão explícito **`⏱️ Capturar Tempo`** posicionado diretamente ao lado do campo *Tempo do Frame (HH:MM:SS.ms)* e do botão *👁️ Prévia do Frame* na Seção 3 (Fábrica de Enquadramento) e Seção 4 (Galeria de Cortes / Cards de Thumbnail).
   - **Fluxo Ágil & Confiável**: O usuário pausa o player de vídeo no momento exato desejado e clica em `⏱️ Capturar Tempo`. O timestamp milimétrico (`HH:MM:SS.ms`) do vídeo pausado é imediatamente capturado e injetado no campo, permitindo em seguida gerar a prévia do frame, remover fundo com Rembg, criar capas neon com IA ou definir como capa oficial sem digitação manual.
   - **Dupla Camada de Sincronização (Client-Side & Server-Side)**: O listener Javascript captura o evento no `pointerdown`/`mousedown`, atualizando o componente React, os parâmetros de URL (`captured_frame_time` e `last_frame_snap_time`) e a `session_state` do Streamlit de forma atômica e resiliente.
-- **🏷️ Assinatura e Badges de Redes Sociais nos Cortes (@YouTube, @Instagram, @X) (`core/social_overlay.py`, `app.py`, `tests/test_social_overlay.py`)**:
-  - **Identificadores Flexíveis por Canal**: Suporte a YouTube, Instagram e X (Twitter) com seleção por checkbox e texto livre para o `@` ou descrição em cada canal.
+- **🏷️ Assinatura e Badges de Redes Sociais nos Cortes (@YouTube, @Instagram, @TikTok, @X) (`core/social_overlay.py`, `app.py`, `tests/test_social_overlay.py`)**:
+  - **Identificadores Flexíveis por Canal**: Suporte a YouTube, Instagram, TikTok e X (Twitter) com seleção por checkbox e texto livre para o `@` ou descrição em cada canal.
   - **Ícones Oficiais Proporcionais à Tipografia**: Redimensionamento proporcional automático preservando a taxa de proporção (1.08x do tamanho da fonte) e compatibilidade com ícones personalizados adicionados na pasta `assets/icons/social/`.
   - **Estilos Visuais de Alta Conversão**:
     - *Pílula Glassmorphism*: Container unificado translúcido dark com bordas suaves de vidro.
@@ -386,8 +420,10 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
     - *Flutuante (Sem Fundo)*: Ícones e tipografia diretamente sobrepostos ao vídeo com sombra projetada suave.
   - **Posicionamento & Safe Zones para Shorts/Reels/TikTok**:
     - Posições **Bottom (Inferior)** e **Top (Superior)** com calibragem vertical de segurança (evitando sobreposição com legendas nativas e botões de interface de Reels/TikTok).
-    - Slider de ajuste fino milimétrico de margem vertical (`offset_y`).
   - **Modo Monocromático Minimalista**: Opção de converter todos os ícones e tipografia em branco puro com transparência preservada.
+  - **Controle de Escala da Prévia Visual (`social_preview_scale`)**:
+    - **Redução Padrão Pela Metade (50%)**: A imagem de prévia renderizada no Streamlit agora inicia em 50% da largura máxima (~360px de largura e ~640px de altura para frames 9:16), encaixando ergonomicamente em qualquer monitor sem rolagem forçada.
+    - **Slider Interativo em Tempo Real (`🔍 Tamanho da Prévia (%):`)**: Permite ajustar a escala visual de 20% a 100% (com passos de 5%), com persistência automática no `app_settings.json` e redimensionamento síncrono no Streamlit.
 - **⏱️ Padronização e Máscara Estrita de Campos de Tempo (HH:MM:SS.ms) (`core/ui_theme.py`, `app.py`, `core/analyzer.py`)**:
   - **Identidade Visual Imersiva (Dark Neon)**: Todos os campos de minutagem utilizam tipografia monospace (`JetBrains Mono`, `Fira Code`, `monospace`), coloração ciano neon (`#38bdf8`), peso 600 e `letter-spacing: 0.04em`, garantindo legibilidade imediata e precisão visual milimétrica.
   - **Máscara Interativa em Tempo Real via JavaScript (`inject_time_mask_js`)**: Varredura contínua de inputs de tempo aplicando formatação automática instantânea nos eventos `input` e `blur` (completando zeros à esquerda e formatando `HH:MM:SS.ms` ao digitar apenas números ou segundos).
@@ -410,8 +446,8 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Auto-Snap Inteligente às Bordas do Cenário (`snap_box_to_scene_borders`)**: Algoritmo de visão computacional baseado em gradientes Sobel que detecta linhas divisórias do estúdio, tarjas de GC/noticiários ou bordas do vídeo, ajustando automaticamente os retângulos desenhados para que não absorvam partes indesejadas do enquadramento.
   - **Detecção de Mudança de Cenário / Cortes de Câmera (`detect_scene_changes_in_range`)**: Varredura ultra-rápida por histogramas HSV ao longo da cena que detecta trocas bruscas de plano ou orador, com botão de 1 clique `✂️ Fatiar Cena nos Cortes Detectados` para criar cenas consecutivas instantâneas.
   - **Preenchimento Padrão com Fundo Desfocado (Blur) no Topo e Rodapé (`blur_background`, `blur_intensity`)**: Quando configurado com 1 ou 2 enquadramentos, preserva as proporções naturais dos recortes sem cortes laterais forçados e preenche automaticamente o espaço excedente superior e inferior com o fundo do vídeo ampliado e desfocado (com intensidade configurável), tanto na prévia interativa quanto no renderizador FFmpeg.
-- **🧪 Suíte de 260 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (multicam background blur, multicam crop timerange sync, border snap, scene cuts detector, extended social margin, time mask, social media badges/overlay, preserve cut transcript on re-render, quick editor static image format adaptation, frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
+- **🧪 Suíte de 282 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (multi-slicing de trechos independentes, kick.com HLS streaming, multicam background blur, multicam crop timerange sync, border snap, scene cuts detector, extended social margin, time mask, social media badges/overlay, preserve cut transcript on re-render, quick editor static image format adaptation, frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
 
 ---
 

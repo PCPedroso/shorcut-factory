@@ -852,6 +852,39 @@ def download_full_video(
         if os.path.exists(output_path):
             os.remove(output_path)
 
+        # 🟢 Suporte nativo a VODs e transmissões da Kick.com via HLS direto com Time-Range Slicing
+        if 'kick.com' in url.lower() or url.startswith('https://stream.kick.com'):
+            from core.extractor import extract_kick_metadata, parse_time_str
+            stream_url = url if (url.startswith('https://stream.kick.com') or '.m3u8' in url) else None
+            if not stream_url:
+                k_meta = extract_kick_metadata(url)
+                stream_url = k_meta.get('recording_url')
+            
+            if stream_url:
+                s_parsed = parse_time_str(start_sec)
+                e_parsed = parse_time_str(end_sec)
+                cmd = [FFMPEG_EXE, '-y']
+                if s_parsed is not None and s_parsed > 0:
+                    cmd.extend(['-ss', str(s_parsed)])
+                cmd.extend(['-i', stream_url])
+                if e_parsed is not None and e_parsed > (s_parsed or 0):
+                    cmd.extend(['-t', str(e_parsed - (s_parsed or 0))])
+                cmd.extend(['-c', 'copy', '-movflags', '+faststart', output_path])
+                subprocess.run(cmd, capture_output=True, text=True)
+                if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
+                    return {"path": output_path, "error": None}
+                # Fallback se stream copy falhar: re-encode ultra-rápido
+                cmd_re = [FFMPEG_EXE, '-y']
+                if s_parsed is not None and s_parsed > 0:
+                    cmd_re.extend(['-ss', str(s_parsed)])
+                cmd_re.extend(['-i', stream_url])
+                if e_parsed is not None and e_parsed > (s_parsed or 0):
+                    cmd_re.extend(['-t', str(e_parsed - (s_parsed or 0))])
+                cmd_re.extend(['-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', output_path])
+                subprocess.run(cmd_re, capture_output=True, text=True)
+                if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
+                    return {"path": output_path, "error": None}
+
         deno_exe = os.path.join(DENO_DIR, "deno.exe")
         js_runtimes_cfg = {}
         if os.path.exists(deno_exe):

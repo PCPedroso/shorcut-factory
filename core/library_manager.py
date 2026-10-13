@@ -6,10 +6,116 @@ Registra título, data de lançamento, thumbnail, duração e histórico de víd
 import os
 import json
 import shutil
+import re
 from datetime import datetime
 
 DATA_DIR = "data"
 LIBRARY_FILE = os.path.join(DATA_DIR, "library.json")
+
+
+def find_video_slices(base_vid: str) -> list:
+    """
+    Encontra todos os trechos/fatias e o vídeo base cadastrados ou existentes em data/ para um dado base_vid.
+    Retorna uma lista ordenada com informações de cada fatia (video_id, título, start_sec, end_sec, arquivos existentes, etc.).
+    """
+    if not base_vid:
+        return []
+
+    # Se o ID passado já for um slice (ex: kick_..._t_120_240), recupera o base_vid limpo
+    clean_base = re.sub(r'_t_\d+_(?:end|\d+)(?:_[a-zA-Z0-9_-]+)?$', '', base_vid)
+    clean_base = re.sub(r'_(?:last\d+m|live_snapshot_[a-zA-Z0-9_-]+)$', '', clean_base)
+
+    lib = get_library()
+    slices = []
+    seen_ids = set()
+
+    # 1. Verifica itens cadastrados na biblioteca
+    for item in lib:
+        v_id = item.get("video_id") or ""
+        if v_id == clean_base or v_id.startswith(f"{clean_base}_t_") or v_id.startswith(f"{clean_base}_"):
+            seen_ids.add(v_id)
+            v_dir = os.path.join(DATA_DIR, v_id)
+            has_v = os.path.exists(os.path.join(v_dir, "video_full.mp4"))
+            has_a = os.path.exists(os.path.join(v_dir, "audio.mp3"))
+            has_tr = os.path.exists(os.path.join(v_dir, "transcript.json"))
+
+            m = re.search(r'_t_(\d+)_([0-9a-zA-Z]+)', v_id)
+            s_sec = int(m.group(1)) if m else None
+            e_sec = int(m.group(2)) if (m and m.group(2).isdigit()) else None
+
+            v_sz = 0.0
+            if has_v:
+                try:
+                    v_sz = round(os.path.getsize(os.path.join(v_dir, "video_full.mp4")) / (1024 * 1024), 1)
+                except Exception:
+                    pass
+
+            slices.append({
+                "video_id": v_id,
+                "title": item.get("title") or f"Trecho {v_id}",
+                "is_base": (v_id == clean_base),
+                "start_sec": s_sec,
+                "end_sec": e_sec,
+                "duration_sec": item.get("duration_sec"),
+                "thumbnail": item.get("thumbnail"),
+                "has_video": has_v,
+                "has_audio": has_a,
+                "has_transcript": has_tr,
+                "video_size_mb": v_sz,
+                "url": item.get("url"),
+                "added_at": item.get("added_at")
+            })
+
+    # 2. Varre pastas em data/ caso não estejam cadastradas na biblioteca
+    if os.path.exists(DATA_DIR):
+        for entry in os.listdir(DATA_DIR):
+            if entry in seen_ids:
+                continue
+            v_dir = os.path.join(DATA_DIR, entry)
+            if not os.path.isdir(v_dir):
+                continue
+            if entry == clean_base or entry.startswith(f"{clean_base}_t_") or entry.startswith(f"{clean_base}_"):
+                seen_ids.add(entry)
+                has_v = os.path.exists(os.path.join(v_dir, "video_full.mp4"))
+                has_a = os.path.exists(os.path.join(v_dir, "audio.mp3"))
+                has_tr = os.path.exists(os.path.join(v_dir, "transcript.json"))
+                meta_path = os.path.join(v_dir, "metadata.json")
+                meta = {}
+                if os.path.exists(meta_path):
+                    try:
+                        with open(meta_path, "r", encoding="utf-8") as mf:
+                            meta = json.load(mf)
+                    except Exception:
+                        pass
+                m = re.search(r'_t_(\d+)_([0-9a-zA-Z]+)', entry)
+                s_sec = int(m.group(1)) if m else None
+                e_sec = int(m.group(2)) if (m and m.group(2).isdigit()) else None
+
+                v_sz = 0.0
+                if has_v:
+                    try:
+                        v_sz = round(os.path.getsize(os.path.join(v_dir, "video_full.mp4")) / (1024 * 1024), 1)
+                    except Exception:
+                        pass
+
+                slices.append({
+                    "video_id": entry,
+                    "title": meta.get("title") or f"Trecho {entry}",
+                    "is_base": (entry == clean_base),
+                    "start_sec": s_sec,
+                    "end_sec": e_sec,
+                    "duration_sec": meta.get("duration_sec") or meta.get("duration"),
+                    "thumbnail": meta.get("thumbnail"),
+                    "has_video": has_v,
+                    "has_audio": has_a,
+                    "has_transcript": has_tr,
+                    "video_size_mb": v_sz,
+                    "url": meta.get("url"),
+                    "added_at": meta.get("added_at")
+                })
+
+    slices.sort(key=lambda s: (0 if s["is_base"] else 1, s["start_sec"] or 0))
+    return slices
 
 
 def format_upload_date(raw_date: str) -> str:

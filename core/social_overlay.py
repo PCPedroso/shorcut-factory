@@ -1,6 +1,6 @@
 """
 core/social_overlay.py — Motor de Assinatura e Badges de Redes Sociais nos Cortes
-Permite exibir identificadores de YouTube, Instagram e X (Twitter) com ícones oficiais
+Permite exibir identificadores de YouTube, Instagram, TikTok e X (Twitter) com ícones oficiais
 proporcionais à tipografia, estilos em pílula (Glassmorphism / Minimalista) e safe zones.
 """
 
@@ -22,7 +22,7 @@ _FONT_PATH = os.path.join(_FONTS_DIR, "Montserrat-ExtraBold.ttf")
 DEFAULT_SOCIAL_CONFIG = {
     "enabled": False,
     "position": "bottom",       # 'bottom' ou 'top'
-    "offset_y": 0,              # Ajuste fino em pixels (+/- 250px)
+    "offset_y": 0,              # Ajuste fino em pixels (+/- 450px)
     "font_size": 32,            # Tamanho da fonte (20 a 54px)
     "style": "pill_glass",      # 'pill_glass', 'pill_individual', 'floating'
     "icon_style": "official",   # 'official' ou 'monochrome'
@@ -30,6 +30,7 @@ DEFAULT_SOCIAL_CONFIG = {
     "networks": {
         "youtube": {"enabled": True, "handle": "@meucanal"},
         "instagram": {"enabled": True, "handle": "@meuperfil"},
+        "tiktok": {"enabled": False, "handle": "@meuperfil"},
         "x": {"enabled": False, "handle": "@meuperfil"}
     }
 }
@@ -53,6 +54,7 @@ def _find_icon_file(network_key: str) -> str:
     aliases = {
         "youtube": ["youtube.png", "yt.png", "youtube.webp"],
         "instagram": ["instagram.png", "insta.png", "ig.png", "instagram.webp"],
+        "tiktok": ["tiktok.png", "tt.png", "tiktok.webp", "tik_tok.png"],
         "x": ["x.png", "twitter.png", "x_logo.png", "x.webp"]
     }
     candidates = aliases.get(network_key.lower(), [f"{network_key}.png"])
@@ -89,6 +91,22 @@ def _draw_fallback_icon(network_key: str, size: int) -> Image.Image:
         f_y = int(size * 0.32)
         fr = max(1, int(size * 0.04))
         d.ellipse([f_x - fr, f_y - fr, f_x + fr, f_y + fr], fill=(255, 255, 255, 255))
+
+    elif k == "tiktok":
+        pad = int(size * 0.1)
+        d.rounded_rectangle([pad, pad, size - pad, size - pad], radius=int(size * 0.22), fill=(18, 18, 18, 255))
+        stem_x = int(size * 0.58)
+        bar_y = int(size * 0.26)
+        stem_w = max(2, int(size * 0.08))
+        head_x = int(size * 0.32)
+        head_y = int(size * 0.54)
+        head_w = int(size * 0.26)
+        head_h = int(size * 0.20)
+        d.ellipse([head_x, head_y, head_x + head_w, head_y + head_h], fill=(37, 244, 238, 255))
+        d.ellipse([head_x + 2, head_y + 2, head_x + head_w, head_y + head_h], fill=(254, 44, 85, 255))
+        d.ellipse([head_x + 1, head_y + 1, head_x + head_w - 1, head_y + head_h - 1], fill=(255, 255, 255, 255))
+        d.rectangle([stem_x - stem_w // 2, bar_y, stem_x + stem_w // 2, int(size * 0.65)], fill=(255, 255, 255, 255))
+        d.arc([stem_x - int(size * 0.05), bar_y - int(size * 0.08), stem_x + int(size * 0.26), bar_y + int(size * 0.24)], start=180, end=360, fill=(254, 44, 85, 255), width=stem_w)
 
     elif k == "x":
         pad = int(size * 0.1)
@@ -144,7 +162,13 @@ def get_active_social_items(config: dict) -> list:
         return []
 
     networks = config.get("networks", {})
-    order = ["youtube", "instagram", "x"]
+    order = ["youtube", "instagram", "tiktok", "x"]
+    name_map = {
+        "youtube": "YouTube",
+        "instagram": "Instagram",
+        "tiktok": "TikTok",
+        "x": "X"
+    }
     items = []
 
     for net_key in order:
@@ -154,7 +178,7 @@ def get_active_social_items(config: dict) -> list:
             if raw_handle:
                 items.append({
                     "key": net_key,
-                    "name": net_key.capitalize(),
+                    "name": name_map.get(net_key, net_key.capitalize()),
                     "handle": raw_handle
                 })
 
@@ -171,13 +195,13 @@ def render_social_overlay_image(video_width: int, video_height: int, config: dic
     if not items:
         return img
 
-    font_size = max(16, min(72, int(config.get("font_size", 32))))
+    font_size = max(12, min(72, int(config.get("font_size", 32))))
     monochrome = (config.get("icon_style", "official") == "monochrome")
     style_mode = config.get("style", "pill_glass")  # pill_glass, pill_individual, floating
     text_color = config.get("text_color", "#FFFFFF")
 
     # Ajuste automático de escala caso a largura total exceda o frame disponível
-    while font_size >= 16:
+    while font_size >= 12:
         font = _get_font(font_size)
         icon_h = max(16, int(round(font_size * 1.08)))
         gap_icon_text = max(6, int(font_size * 0.28))

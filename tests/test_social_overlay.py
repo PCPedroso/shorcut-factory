@@ -27,6 +27,11 @@ class TestSocialOverlay(unittest.TestCase):
         icon_ig = load_social_icon("instagram", target_height=42, monochrome=False)
         self.assertEqual(icon_ig.height, 42)
 
+        # Ícone do TikTok
+        icon_tk = load_social_icon("tiktok", target_height=38, monochrome=False)
+        self.assertEqual(icon_tk.height, 38)
+        self.assertGreater(icon_tk.width, 10)
+
         # Ícone do X
         icon_x = load_social_icon("x", target_height=30, monochrome=False)
         self.assertEqual(icon_x.height, 30)
@@ -48,21 +53,31 @@ class TestSocialOverlay(unittest.TestCase):
         self.assertIsInstance(fallback, Image.Image)
         self.assertEqual(fallback.height, 28)
 
+    def test_tiktok_fallback_drawing(self):
+        from core.social_overlay import _draw_fallback_icon
+        fb = _draw_fallback_icon("tiktok", 40)
+        self.assertIsInstance(fb, Image.Image)
+        self.assertEqual(fb.size, (40, 40))
+        self.assertEqual(fb.mode, "RGBA")
+
     def test_get_active_social_items(self):
         cfg = {
             "enabled": True,
             "networks": {
                 "youtube": {"enabled": True, "handle": "@CanalOficial"},
                 "instagram": {"enabled": False, "handle": "@Insta"},
+                "tiktok": {"enabled": True, "handle": "@TikTokCortes"},
                 "x": {"enabled": True, "handle": "@TwitterHandle"}
             }
         }
         items = get_active_social_items(cfg)
-        self.assertEqual(len(items), 2)
+        self.assertEqual(len(items), 3)
         self.assertEqual(items[0]["key"], "youtube")
         self.assertEqual(items[0]["handle"], "@CanalOficial")
-        self.assertEqual(items[1]["key"], "x")
-        self.assertEqual(items[1]["handle"], "@TwitterHandle")
+        self.assertEqual(items[1]["key"], "tiktok")
+        self.assertEqual(items[1]["handle"], "@TikTokCortes")
+        self.assertEqual(items[2]["key"], "x")
+        self.assertEqual(items[2]["handle"], "@TwitterHandle")
 
         # Se master enabled for False, lista deve ser vazia
         cfg_disabled = dict(cfg)
@@ -210,6 +225,31 @@ class TestSocialOverlay(unittest.TestCase):
                 self.assertIsInstance(img, Image.Image)
                 arr = np.array(img)
                 self.assertGreater(np.sum(arr[:, :, 3] > 0), 0)
+
+
+    def test_social_preview_scale_config(self):
+        from core.config_manager import DEFAULT_SETTINGS
+        self.assertIn("social_preview_scale", DEFAULT_SETTINGS)
+        self.assertEqual(DEFAULT_SETTINGS["social_preview_scale"], 50)
+
+    def test_render_social_overlay_small_font(self):
+        cfg = {
+            "enabled": True,
+            "position": "bottom",
+            "offset_y": 0,
+            "font_size": 14,
+            "style": "pill_glass",
+            "icon_style": "official",
+            "text_color": "#FFFFFF",
+            "networks": {
+                "youtube": {"enabled": True, "handle": "@mini_yt"},
+                "tiktok": {"enabled": True, "handle": "@mini_tk"}
+            }
+        }
+        img = render_social_overlay_image(1080, 1920, cfg)
+        self.assertIsInstance(img, Image.Image)
+        arr = np.array(img)
+        self.assertGreater(np.sum(arr[:, :, 3] > 0), 100)
 
 
 if __name__ == '__main__':

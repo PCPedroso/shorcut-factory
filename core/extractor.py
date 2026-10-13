@@ -3,6 +3,7 @@ import os
 import re
 import io
 import requests
+import subprocess
 from PIL import Image
 import imageio_ffmpeg
 
@@ -38,7 +39,7 @@ def get_video_id(url: str) -> str:
         return url_str.replace('local://', '')
     if url_str.startswith('local_'):
         return url_str
-    if url_str.startswith(('ig_', 'tt_', 'tw_', 'fb_', 'web_')):
+    if url_str.startswith(('ig_', 'tt_', 'tw_', 'fb_', 'web_', 'kick_')):
         return url_str
 
     from urllib.parse import urlparse, parse_qs
@@ -84,6 +85,14 @@ def get_video_id(url: str) -> str:
             return f"tw_{m.group(1)}"
         return f"tw_{hashlib.md5(url_str.encode()).hexdigest()[:10]}"
 
+    # Kick.com (VOD / Clip / Livestream)
+    if 'kick.com' in host:
+        m = re.search(r'/(?:videos|video)/([A-Za-z0-9_-]+)', query.path)
+        if m:
+            return f"kick_{m.group(1)}"
+        clean_path = query.path.strip('/').replace('/', '_')
+        return f"kick_{clean_path}" if clean_path else f"kick_{hashlib.md5(url_str.encode()).hexdigest()[:10]}"
+
     # Pasta local existente em data/
     if os.path.exists(os.path.join("data", url_str)):
         return url_str
@@ -95,10 +104,129 @@ def get_video_id(url: str) -> str:
     return None
 
 
+def extract_kick_metadata(url: str) -> dict:
+    """
+    Extrai metadados completos de VODs e transmissões da Kick.com analisando o payload
+    de hidratação Next.js / React Query embutido no HTML, obtendo o link HLS master.m3u8 direto.
+    """
+    import json
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7',
+    }
+    try:
+        r = requests.get(url, headers=headers, timeout=15)
+        r.raise_for_status()
+        text = r.text
+
+        idx = text.find('recording_url')
+        vod_data = {}
+        if idx != -1:
+            sub = text[max(0, idx - 600):min(len(text), idx + 1500)]
+            cat_idx = sub.find('{\\"category\\"')
+            if cat_idx == -1:
+                cat_idx = sub.find('{"category"')
+            if cat_idx == -1:
+                rel_idx = idx - max(0, idx - 600)
+                cat_idx = sub.rfind('{', 0, rel_idx)
+
+            if cat_idx != -1:
+                candidate = sub[cat_idx:].replace('\\"', '"').replace('\\\\', '\\')
+                for i in range(len(candidate), 0, -1):
+                    try:
+                        parsed = json.loads(candidate[:i])
+                        if isinstance(parsed, dict) and parsed.get('recording_url'):
+                            vod_data = parsed
+                            break
+                    except Exception:
+                        continue
+
+        recording_url = vod_data.get('recording_url')
+        if not recording_url:
+            rec_m = re.search(r'\\*"recording_url\\*":\s*\\*"(https?:[^\s\\"]+\.m3u8[^\s\\"]*)\\*"', text)
+            recording_url = rec_m.group(1).replace(r'\/', '/') if rec_m else None
+
+        title = vod_data.get('title')
+        if not title:
+            t_m = re.search(r'\\*"title\\*":\s*\\*"([^\\"]+)\\*"', text)
+            if t_m:
+                try:
+                    title = t_m.group(1).encode('utf-8').decode('unicode_escape', errors='ignore')
+                except Exception:
+                    title = t_m.group(1)
+        if not title:
+            og_title = re.search(r'<meta property="og:title" content="([^"]+)"', text)
+            title = og_title.group(1) if og_title else "Kick Video"
+
+        channel_obj = vod_data.get('channel') or {}
+        channel = channel_obj.get('username') if isinstance(channel_obj, dict) else None
+        if not channel:
+            url_match = re.search(r'kick\.com/([^/?#]+)', url)
+            channel = url_match.group(1) if url_match else "Kick Creator"
+
+        duration = vod_data.get('duration')
+        thumbnail_obj = vod_data.get('thumbnail')
+        thumbnail = thumbnail_obj.get('src') if isinstance(thumbnail_obj, dict) else None
+
+        start_time = vod_data.get('start_time')
+        upload_date = start_time[:10].replace('-', '') if start_time else None
+        is_live = bool(vod_data.get('is_live', False))
+
+        return {
+            "title": title,
+            "clean_music_title": title,
+            "artist": None,
+            "track": None,
+            "album": None,
+            "genre": None,
+            "suggested_category_label": "🎮 Gameplay / Live Stream",
+            "suggested_category_key": "gameplay",
+            "heatmap": None,
+            "duration": duration,
+            "upload_date": upload_date,
+            "thumbnail": thumbnail,
+            "channel": channel,
+            "url": url,
+            "recording_url": recording_url,
+            "is_live": is_live,
+            "was_live": not is_live,
+            "live_status": "is_live" if is_live else "was_live",
+            "error": None if recording_url else "Não foi possível encontrar a URL de gravação do VOD da Kick."
+        }
+    except Exception as e:
+        return {
+            "title": None,
+            "clean_music_title": None,
+            "artist": None,
+            "track": None,
+            "album": None,
+            "genre": None,
+            "suggested_category_label": "🎮 Gameplay / Live Stream",
+            "suggested_category_key": "gameplay",
+            "heatmap": None,
+            "duration": None,
+            "upload_date": None,
+            "thumbnail": None,
+            "channel": None,
+            "url": url,
+            "recording_url": None,
+            "is_live": False,
+            "was_live": False,
+            "live_status": "not_live",
+            "error": f"Erro ao acessar Kick: {str(e)}"
+        }
+
+
 def get_video_metadata(url: str):
     """
-    Extrai metadados, heatmaps e status de transmissão ao vivo de vídeos do YouTube, Instagram, TikTok e web.
+    Extrai metadados, heatmaps e status de transmissão ao vivo de vídeos do YouTube, Instagram, TikTok, Kick e web.
     """
+    if 'kick.com' in url.lower():
+        k_meta = extract_kick_metadata(url)
+        if not k_meta.get('error'):
+            return k_meta
+
     cookie_file = get_cookie_file()
     
     common_flags = {
@@ -518,6 +646,28 @@ def download_audio(
             end_sec=end_sec,
             recent_minutes=recent_minutes
         )
+
+    # 🟢 Suporte nativo a VODs e transmissões da Kick.com via HLS direto com Time-Range Slicing
+    if 'kick.com' in url.lower() or url.startswith('https://stream.kick.com'):
+        stream_url = url if (url.startswith('https://stream.kick.com') or '.m3u8' in url) else None
+        if not stream_url:
+            k_meta = extract_kick_metadata(url)
+            stream_url = k_meta.get('recording_url')
+        if stream_url:
+            import subprocess
+            ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+            s_parsed = parse_time_str(start_sec)
+            e_parsed = parse_time_str(end_sec)
+            cmd = [ffmpeg_path, '-y']
+            if s_parsed is not None and s_parsed > 0:
+                cmd.extend(['-ss', str(s_parsed)])
+            cmd.extend(['-i', stream_url])
+            if e_parsed is not None and e_parsed > (s_parsed or 0):
+                cmd.extend(['-t', str(e_parsed - (s_parsed or 0))])
+            cmd.extend(['-vn', '-c:a', 'libmp3lame', '-b:a', '192k', output_path])
+            subprocess.run(cmd, capture_output=True, text=True)
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 1024:
+                return {"path": output_path, "error": None}
 
     ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
     cookie_file = get_cookie_file()

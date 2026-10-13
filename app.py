@@ -69,10 +69,16 @@ from core.video_processor import (
     extract_audio_from_local_video, extract_thumbnail_from_video, generate_local_video_id,
     generate_local_dual_video_id, generate_dual_split_preview, compose_dual_video_split_sequence,
     split_video_smart, slice_or_copy_local_video, parse_time_to_seconds,
-    replace_video_with_static_image, restore_original_video_from_backup, has_original_video_backup
+    replace_video_with_static_image, restore_original_video_from_backup, has_original_video_backup,
+    FFMPEG_EXE
 )
-from core.library_manager import get_library, add_or_update_video_in_library, remove_video_from_library, create_project_from_cut_video
-from core.config_manager import load_settings, save_all_settings, save_setting
+from core.library_manager import (
+    get_library, add_or_update_video_in_library, remove_video_from_library,
+    create_project_from_cut_video, find_video_slices
+)
+from core.config_manager import (
+    load_settings, save_setting, save_all_settings, DEFAULT_SETTINGS
+)
 from core.export_kit import build_cut_folder_name, create_viral_package
 from core.cuts_catalog import (
     get_cut_entry, get_format_instance, register_cut_instance, update_cut_texts_only,
@@ -121,6 +127,10 @@ from core.translator import (
 from core.ui_theme import (
     inject_viralcut_theme, render_workflow_stepper, render_section_header,
     render_status_badge, render_empty_state_html, navigate_to_step, WORKFLOW_STEPS
+)
+from core.youtube_heatmap import (
+    extract_youtube_video_id, fetch_youtube_heatmap, find_heatmap_hotspots,
+    snap_hotspot_to_segments, build_heatmap_cut_items, intensity_label
 )
 
 # Carrega todas as configurações persistentes salvas
@@ -3844,6 +3854,27 @@ def load_video_saved_artifacts(video_id: str):
     if os.path.exists(v_full_file) and os.path.getsize(v_full_file) > 10240:
         st.session_state.video_ready = True
 
+    # 7. Mapa de Calor / Most Replayed do YouTube
+    hm_file = os.path.join(v_dir, "heatmap.json")
+    if os.path.exists(hm_file):
+        try:
+            with open(hm_file, "r", encoding="utf-8") as f_hm:
+                st.session_state.youtube_heatmap_data = json.load(f_hm)
+        except Exception:
+            st.session_state.youtube_heatmap_data = None
+    else:
+        st.session_state.youtube_heatmap_data = None
+
+    hm_cuts_file = os.path.join(v_dir, "heatmap_cuts.json")
+    if os.path.exists(hm_cuts_file):
+        try:
+            with open(hm_cuts_file, "r", encoding="utf-8") as f_hmc:
+                st.session_state.heatmap_cuts = json.load(f_hmc)
+        except Exception:
+            st.session_state.heatmap_cuts = []
+    else:
+        st.session_state.heatmap_cuts = []
+
     meta_file = os.path.join(v_dir, "metadata.json")
     if os.path.exists(meta_file):
         try:
@@ -3870,7 +3901,8 @@ def clear_current_project():
         "video_ready", "full_text", "segments", "transcript_source",
         "pautas", "bundles", "shorts", "saved_steps", "ai_results",
         "input_yt_slice_start", "input_yt_slice_end", "player_synced_time",
-        "final_start_time", "final_end_time", "custom_slice_active"
+        "final_start_time", "final_end_time", "custom_slice_active",
+        "youtube_heatmap_data", "heatmap_cuts"
     ]
     for k in keys_to_clear:
         if k in st.session_state:
@@ -4139,6 +4171,13 @@ if show_sec1:
                     args=("input_yt_slice_end",),
                     help="Formato flexível com máscara automática HH:MM:SS.ms."
                 )
+
+            yt_slice_label = st.text_input(
+                "🏷️ Nome / Rótulo do Trecho (Opcional):",
+                placeholder="Ex: Momento do Gol, História de Infância, Discussão Épica...",
+                key="input_yt_slice_label",
+                help="Identificador opcional para diferenciar múltiplos momentos baixados deste mesmo vídeo."
+            )
     
             parsed_s = parse_time_str(yt_start_time_str)
             parsed_e = parse_time_str(yt_end_time_str)
@@ -4160,20 +4199,193 @@ if show_sec1:
         # Identificação de corte de tempo ativo
         active_slice_start = parse_time_str(st.session_state.get("input_yt_slice_start", ""))
         active_slice_end = parse_time_str(st.session_state.get("input_yt_slice_end", ""))
+        slice_label = (st.session_state.get("input_yt_slice_label") or "").strip()
+        safe_slug = re.sub(r'[^a-zA-Z0-9_-]+', '_', slice_label)[:25].strip('_') if slice_label else ""
 
         # 🔍 Verificação Imediata de Conteúdo Existente no Projeto
         check_vid = get_video_id(video_url) if video_url else None
+        check_vid_sliced = None
         target_check_id = None
+        clean_check_base = None
         if check_vid:
-            if active_slice_start is not None or active_slice_end is not None:
+            clean_check_base = re.sub(r'_t_\d+_(?:end|\d+)(?:_[a-zA-Z0-9_-]+)?$', '', check_vid)
+            clean_check_base = re.sub(r'_(?:last\d+m|live_snapshot_[a-zA-Z0-9_-]+)$', '', clean_check_base)
+
+            if active_slice_start is not None or active_slice_end is not None or safe_slug:
                 s_tag = f"{int(active_slice_start)}" if active_slice_start is not None else "0"
                 e_tag = f"{int(active_slice_end)}" if active_slice_end is not None else "end"
-                check_vid_sliced = f"{check_vid}_t_{s_tag}_{e_tag}"
+                tag_part = f"_t_{s_tag}_{e_tag}"
+                if safe_slug:
+                    tag_part += f"_{safe_slug}"
+                check_vid_sliced = f"{clean_check_base}{tag_part}"
+                target_check_id = check_vid_sliced
             else:
-                check_vid_sliced = check_vid
-            target_check_id = check_vid_sliced if (check_vid_sliced and os.path.exists(os.path.join("data", check_vid_sliced))) else check_vid
+                check_vid_sliced = clean_check_base
+                target_check_id = clean_check_base
+
+        # 📚 Galeria & Gerenciador de Trechos Salvos Deste Vídeo / Live
+        if clean_check_base:
+            existing_slices = find_video_slices(clean_check_base)
+            if existing_slices:
+                with st.expander(f"📚 Trechos Salvos deste Vídeo ({len(existing_slices)} momento(s) gravados)", expanded=True):
+                    st.caption("💡 Você pode baixar quantos trechos quiser desta live/vídeo sem perder os anteriores. Alterne entre os momentos já baixados ou baixe um novo trecho:")
+
+                    for _sl_idx, _sl in enumerate(existing_slices):
+                        _sl_id = _sl["video_id"]
+                        _is_active = (st.session_state.get("active_video_id") == _sl_id)
+
+                        _s_str = format_time_sec(_sl["start_sec"] or 0.0) if _sl["start_sec"] is not None else ("Início" if not _sl["is_base"] else "Completo")
+                        _e_str = format_time_sec(_sl["end_sec"]) if _sl["end_sec"] is not None else ("Fim" if not _sl["is_base"] else "Completo")
+                        _dur_tag = f"⏱️ {_s_str} - {_e_str}" if not _sl["is_base"] else "🎬 Vídeo Completo"
+
+                        col_sl_info, col_sl_act1, col_sl_act2 = st.columns([3, 1.3, 0.7])
+                        with col_sl_info:
+                            _prefix_badge = "🟢 **[ATIVO NO STUDIO]** " if _is_active else ""
+                            st.markdown(f"{_prefix_badge}**{_sl.get('title', _sl_id)}**")
+                            st.caption(f"{_dur_tag} • 💾 `{_sl['video_size_mb']} MB` • 📁 `{_sl_id}`")
+                        with col_sl_act1:
+                            if not _is_active:
+                                if st.button("📥 Ativar Trecho", key=f"btn_activate_sl_{_sl_id}", use_container_width=True):
+                                    st.session_state["active_video_id"] = _sl_id
+                                    st.session_state["video_url"] = video_url
+                                    st.session_state["input_yt_url"] = video_url
+                                    if _sl["start_sec"] is not None:
+                                        st.session_state["input_yt_slice_start"] = format_time_sec(_sl["start_sec"])
+                                    if _sl["end_sec"] is not None:
+                                        st.session_state["input_yt_slice_end"] = format_time_sec(_sl["end_sec"])
+                                    save_setting("last_active_video_id", _sl_id)
+                                    load_video_saved_artifacts(_sl_id)
+                                    st.rerun()
+                            else:
+                                st.button("✓ Ativo", disabled=True, key=f"btn_active_tag_{_sl_id}", use_container_width=True)
+                        with col_sl_act2:
+                            if st.button("🗑️", key=f"btn_del_sl_{_sl_id}", help="Excluir somente este trecho da biblioteca"):
+                                remove_video_from_library(_sl_id, delete_folder=True)
+                                if st.session_state.get("active_video_id") == _sl_id:
+                                    st.session_state["active_video_id"] = clean_check_base
+                                st.rerun()
+
+                    st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+                    if st.button("➕ Baixar Outro Trecho deste Vídeo (Limpar Campos de Tempo)", key="btn_prep_new_slice", use_container_width=True):
+                        st.session_state["input_yt_slice_start"] = ""
+                        st.session_state["input_yt_slice_end"] = ""
+                        st.session_state["input_yt_slice_label"] = ""
+                        st.toast("⏱️ Campos de tempo liberados! Digite o novo início e fim para baixar o próximo trecho.")
+                        st.rerun()
+
+        def _run_live_download_action(dl_url, vid_id, vfull_path, recent_min=None, start_s=None, end_s=None):
+            if not dl_url or not str(dl_url).startswith("http"):
+                if vid_id:
+                    dl_url = f"https://www.youtube.com/watch?v={vid_id}"
+            with st.spinner("🔴 Capturando trecho da live com Freeze Live Edge..."):
+                _vres = download_full_video(
+                    dl_url,
+                    vfull_path,
+                    is_live=True,
+                    start_sec=start_s,
+                    end_sec=end_s,
+                    recent_minutes=recent_min
+                )
+            if os.path.exists(vfull_path) and os.path.getsize(vfull_path) > 10240:
+                _live_dir = os.path.dirname(vfull_path)
+                _audio_target = os.path.join(_live_dir, "audio.mp3")
+                if not os.path.exists(_audio_target) or os.path.getsize(_audio_target) == 0:
+                    extract_audio_from_local_video(vfull_path, _audio_target)
+                _thumb_target = os.path.join(_live_dir, "thumbnail.jpg")
+                if not os.path.exists(_thumb_target) or os.path.getsize(_thumb_target) == 0:
+                    extract_thumbnail_from_video(vfull_path, _thumb_target)
+                _captured_dur = get_video_duration(vfull_path)
+                _meta_item = {}
+                _mf_loc = os.path.join(_live_dir, "metadata.json")
+                if os.path.exists(_mf_loc):
+                    try:
+                        with open(_mf_loc, "r", encoding="utf-8") as _mf_r:
+                            _meta_item = json.load(_mf_r)
+                    except Exception:
+                        pass
+                add_or_update_video_in_library(
+                    video_id=vid_id,
+                    title=_meta_item.get("title") or f"Live {vid_id}",
+                    upload_date_raw=_meta_item.get("upload_date") or _meta_item.get("raw_upload_date"),
+                    url=dl_url,
+                    thumbnail_url=_meta_item.get("thumbnail"),
+                    duration_sec=_captured_dur,
+                    channel=_meta_item.get("channel"),
+                    is_live=True
+                )
+                st.session_state.video_ready = True
+                st.session_state.active_video_id = vid_id
+                st.session_state.video_url = dl_url
+                st.session_state.pop("live_stream_detected_id", None)
+                save_setting("last_active_video_id", vid_id)
+                load_video_saved_artifacts(vid_id)
+                _sz_mb = os.path.getsize(vfull_path) / (1024 * 1024)
+                _res = get_video_resolution(vfull_path)
+                st.success(f"🎥 Trecho da live capturado com sucesso ({_sz_mb:.1f} MB, {_res})!")
+                st.rerun()
+            else:
+                st.error(f"Erro ao capturar live: {_vres.get('error', 'Falha no download')}")
 
         comp_status = get_video_components_status(target_check_id, data_dir="data") if target_check_id else None
+
+        _eff_live_id = target_check_id or st.session_state.get("live_stream_detected_id") or st.session_state.get("active_video_id")
+        _eff_live_dir = os.path.join("data", _eff_live_id) if _eff_live_id else ""
+        _eff_live_vfull = os.path.join(_eff_live_dir, "video_full.mp4") if _eff_live_dir else ""
+        _eff_live_has_v = bool(_eff_live_vfull and os.path.exists(_eff_live_vfull) and os.path.getsize(_eff_live_vfull) > 10240)
+
+        _is_live_detected = False
+        if _eff_live_id and not _eff_live_has_v:
+            if comp_status and comp_status.get("is_live"):
+                _is_live_detected = True
+            elif os.path.exists(os.path.join(_eff_live_dir, "metadata.json")):
+                try:
+                    with open(os.path.join(_eff_live_dir, "metadata.json"), "r", encoding="utf-8") as _mf_test:
+                        _is_live_detected = bool(json.load(_mf_test).get("is_live"))
+                except Exception:
+                    pass
+            elif st.session_state.get("live_stream_detected_id") == _eff_live_id:
+                _is_live_detected = True
+
+        if _is_live_detected:
+            st.markdown("### 🔴 Transmissão Ao Vivo (LIVE) Detectada")
+            st.caption("O ViralCut utiliza o motor **HLS Snapshot com Freeze Live Edge**, capturando trechos estáticos em segundos com multiplexação de stream sem loops infinitos.")
+            
+            _target_dl_url = video_url or st.session_state.get("video_url") or st.session_state.get("live_stream_detected_url") or ""
+            if not _target_dl_url and _eff_live_dir and os.path.exists(os.path.join(_eff_live_dir, "metadata.json")):
+                try:
+                    with open(os.path.join(_eff_live_dir, "metadata.json"), "r", encoding="utf-8") as _mf_test:
+                        _target_dl_url = json.load(_mf_test).get("url") or ""
+                except Exception:
+                    pass
+            if not _target_dl_url and _eff_live_id:
+                _target_dl_url = f"https://www.youtube.com/watch?v={_eff_live_id}"
+            live_col1, live_col2, live_col3, live_col4, live_col5 = st.columns(5)
+            with live_col1:
+                if st.button("⚡ Últimos 15 min", key="btn_live_15m_top", use_container_width=True, help="Baixa em alta velocidade os últimos 15 minutos transmitidos na live até o momento atual."):
+                    _lid = f"{clean_check_base}_last15m"
+                    _lvf = os.path.join("data", _lid, "video_full.mp4")
+                    _run_live_download_action(_target_dl_url, _lid, _lvf, recent_min=15.0)
+            with live_col2:
+                if st.button("⚡ Últimos 30 min", key="btn_live_30m_top", use_container_width=True, help="Baixa em alta velocidade os últimos 30 minutos transmitidos na live até o momento atual."):
+                    _lid = f"{clean_check_base}_last30m"
+                    _lvf = os.path.join("data", _lid, "video_full.mp4")
+                    _run_live_download_action(_target_dl_url, _lid, _lvf, recent_min=30.0)
+            with live_col3:
+                if st.button("⚡ Últimos 60 min (1h)", key="btn_live_60m_top", use_container_width=True, help="Baixa em alta velocidade a última 1 hora transmitida na live até o momento atual."):
+                    _lid = f"{clean_check_base}_last60m"
+                    _lvf = os.path.join("data", _lid, "video_full.mp4")
+                    _run_live_download_action(_target_dl_url, _lid, _lvf, recent_min=60.0)
+            with live_col4:
+                if st.button("⏱️ Intervalo Selecionado", key="btn_live_interval_top", use_container_width=True, help="Baixa o intervalo configurado nos campos de início e fim da ingestão."):
+                    _lid = target_check_id
+                    _lvf = os.path.join("data", _lid, "video_full.mp4")
+                    _run_live_download_action(_target_dl_url, _lid, _lvf, start_s=active_slice_start, end_s=active_slice_end)
+            with live_col5:
+                if st.button("🔴 Buffer Completo", key="btn_live_full_top", use_container_width=True, help="Captura todo o histórico disponível no buffer da live até este instante exato."):
+                    _lid = clean_check_base
+                    _lvf = os.path.join("data", _lid, "video_full.mp4")
+                    _run_live_download_action(_target_dl_url, _lid, _lvf)
+            st.divider()
 
         if comp_status and (comp_status["has_transcript"] or comp_status["has_audio"] or comp_status["has_video"]):
             # Sincroniza estado da sessão se ainda não carregado
@@ -4235,33 +4447,15 @@ if show_sec1:
                             with st.popover("🔴 Baixar Vídeo da Live", use_container_width=True):
                                 st.caption("⏱️ **Captura com Freeze Live Edge (sem loops):**")
                                 if st.button("⚡ Últimos 15 min", key="btn_top_live_15m", use_container_width=True):
-                                    with st.spinner("🔴 Capturando últimos 15 min da live..."):
-                                        _vres = download_full_video(video_url, target_vfull, is_live=True, recent_minutes=15.0)
-                                    if os.path.exists(target_vfull):
-                                        st.rerun()
-                                    else:
-                                        st.error(f"Erro: {_vres.get('error')}")
+                                    _run_live_download_action(video_url, target_check_id, target_vfull, recent_min=15.0)
                                 if st.button("⚡ Últimos 30 min", key="btn_top_live_30m", use_container_width=True):
-                                    with st.spinner("🔴 Capturando últimos 30 min da live..."):
-                                        _vres = download_full_video(video_url, target_vfull, is_live=True, recent_minutes=30.0)
-                                    if os.path.exists(target_vfull):
-                                        st.rerun()
-                                    else:
-                                        st.error(f"Erro: {_vres.get('error')}")
+                                    _run_live_download_action(video_url, target_check_id, target_vfull, recent_min=30.0)
                                 if st.button("⚡ Últimos 60 min (1h)", key="btn_top_live_60m", use_container_width=True):
-                                    with st.spinner("🔴 Capturando última 1 hora da live..."):
-                                        _vres = download_full_video(video_url, target_vfull, is_live=True, recent_minutes=60.0)
-                                    if os.path.exists(target_vfull):
-                                        st.rerun()
-                                    else:
-                                        st.error(f"Erro: {_vres.get('error')}")
+                                    _run_live_download_action(video_url, target_check_id, target_vfull, recent_min=60.0)
+                                if st.button("⏱️ Intervalo Selecionado", key="btn_top_live_interval", use_container_width=True):
+                                    _run_live_download_action(video_url, target_check_id, target_vfull, start_s=active_slice_start, end_s=active_slice_end)
                                 if st.button("🔴 Buffer Completo até Agora", key="btn_top_live_full", use_container_width=True):
-                                    with st.spinner("🔴 Capturando buffer completo da live até o momento..."):
-                                        _vres = download_full_video(video_url, target_vfull, is_live=True)
-                                    if os.path.exists(target_vfull):
-                                        st.rerun()
-                                    else:
-                                        st.error(f"Erro: {_vres.get('error')}")
+                                    _run_live_download_action(video_url, target_check_id, target_vfull)
                         else:
                             if st.button("🎥 Baixar Apenas Vídeo", key="btn_inc_top_video", type="primary", use_container_width=True, help="Baixa somente o arquivo de vídeo MP4 Full HD sem reprocessar áudio nem transcrição."):
                                 with st.spinner("⏬ Baixando vídeo Full HD na pasta local..."):
@@ -4587,11 +4781,17 @@ if show_sec1:
                         else:
                             st.error(f"Erro ao baixar legenda: {sub_res.get('error')}")
 
+        _s_lbl_btn = format_time_sec(active_slice_start or 0.0) if active_slice_start is not None else "Início"
+        _e_lbl_btn = format_time_sec(active_slice_end) if active_slice_end is not None else "Fim"
+        _is_sl_active = (active_slice_start is not None or active_slice_end is not None or safe_slug)
+        _b_label = f"🚀 Processar Trecho ({_s_lbl_btn} - {_e_lbl_btn})" if _is_sl_active else "🚀 Processar Vídeo Online (Completo)"
+        _b_aud_label = f"🎵 Extrair Áudio ({_s_lbl_btn} - {_e_lbl_btn})" if _is_sl_active else "🎵 Extrair Apenas Áudio (MP3)"
+
         col_yt_b1, col_yt_b2 = st.columns([1.5, 1])
         with col_yt_b1:
-            btn_process_yt = st.button("🚀 Processar Vídeo Online (Completo)", type="primary", key="btn_process_yt", use_container_width=True)
+            btn_process_yt = st.button(_b_label, type="primary", key="btn_process_yt", use_container_width=True)
         with col_yt_b2:
-            btn_audio_yt = st.button("🎵 Extrair Apenas Áudio (MP3)", key="btn_extract_audio_yt", use_container_width=True)
+            btn_audio_yt = st.button(_b_aud_label, key="btn_extract_audio_yt", use_container_width=True)
     
         if btn_audio_yt:
             if not video_url:
@@ -4601,12 +4801,17 @@ if show_sec1:
                 if not base_vid:
                     st.error("URL inválida ou formato de link não reconhecido.")
                 else:
-                    if active_slice_start is not None or active_slice_end is not None:
+                    clean_b = re.sub(r'_t_\d+_(?:end|\d+)(?:_[a-zA-Z0-9_-]+)?$', '', base_vid)
+                    clean_b = re.sub(r'_(?:last\d+m|live_snapshot_[a-zA-Z0-9_-]+)$', '', clean_b)
+                    if active_slice_start is not None or active_slice_end is not None or safe_slug:
                         s_tag = f"{int(active_slice_start)}" if active_slice_start is not None else "0"
                         e_tag = f"{int(active_slice_end)}" if active_slice_end is not None else "end"
-                        video_id = f"{base_vid}_t_{s_tag}_{e_tag}"
+                        tag_part = f"_t_{s_tag}_{e_tag}"
+                        if safe_slug:
+                            tag_part += f"_{safe_slug}"
+                        video_id = f"{clean_b}{tag_part}"
                     else:
-                        video_id = base_vid
+                        video_id = clean_b
     
                     data_dir = os.path.join("data", video_id)
                     os.makedirs(data_dir, exist_ok=True)
@@ -4615,10 +4820,11 @@ if show_sec1:
                     with st.spinner("🎵 Extraindo áudio de alta qualidade (192kbps MP3) e identificando a música exata..."):
                         meta = get_video_metadata(video_url)
                         v_title = meta.get("title") or f"Áudio {video_id}"
-                        if active_slice_start is not None or active_slice_end is not None:
+                        extra_lbl = f" - {slice_label}" if slice_label else ""
+                        if active_slice_start is not None or active_slice_end is not None or slice_label:
                             s_lbl = format_time_sec(active_slice_start or 0.0)
                             e_lbl = format_time_sec(active_slice_end) if active_slice_end else "fim"
-                            v_title = f"{v_title} ({s_lbl} - {e_lbl})"
+                            v_title = f"{v_title}{extra_lbl} ({s_lbl} - {e_lbl})"
     
                         v_date = meta.get("upload_date")
                         v_thumb = meta.get("thumbnail")
@@ -4749,12 +4955,17 @@ if show_sec1:
                 if not base_vid:
                     st.error("URL inválida ou formato de link não reconhecido.")
                 else:
-                    if active_slice_start is not None or active_slice_end is not None:
+                    clean_b = re.sub(r'_t_\d+_(?:end|\d+)(?:_[a-zA-Z0-9_-]+)?$', '', base_vid)
+                    clean_b = re.sub(r'_(?:last\d+m|live_snapshot_[a-zA-Z0-9_-]+)$', '', clean_b)
+                    if active_slice_start is not None or active_slice_end is not None or safe_slug:
                         s_tag = f"{int(active_slice_start)}" if active_slice_start is not None else "0"
                         e_tag = f"{int(active_slice_end)}" if active_slice_end is not None else "end"
-                        video_id = f"{base_vid}_t_{s_tag}_{e_tag}"
+                        tag_part = f"_t_{s_tag}_{e_tag}"
+                        if safe_slug:
+                            tag_part += f"_{safe_slug}"
+                        video_id = f"{clean_b}{tag_part}"
                     else:
-                        video_id = base_vid
+                        video_id = clean_b
     
                     st.session_state["active_video_id"] = video_id
     
@@ -4767,10 +4978,11 @@ if show_sec1:
                     with st.spinner("Buscando informações e metadados oficiais do vídeo..."):
                         meta = get_video_metadata(video_url)
                         v_title = meta.get("title") or f"Vídeo {video_id}"
-                        if active_slice_start is not None or active_slice_end is not None:
+                        extra_lbl = f" - {slice_label}" if slice_label else ""
+                        if active_slice_start is not None or active_slice_end is not None or slice_label:
                             s_lbl = format_time_sec(active_slice_start or 0.0)
                             e_lbl = format_time_sec(active_slice_end) if active_slice_end else "fim"
-                            v_title = f"{v_title} ({s_lbl} - {e_lbl})"
+                            v_title = f"{v_title}{extra_lbl} ({s_lbl} - {e_lbl})"
     
                         v_date = meta.get("upload_date")
                         v_thumb = meta.get("thumbnail")
@@ -4807,11 +5019,16 @@ if show_sec1:
                         except Exception:
                             pass
     
-                    if is_live_flag:
-                        st.info("🔴 **Transmissão Ao Vivo (LIVE) Detectada!** O ViralCut capturará um **Live Snapshot acelerado** com o conteúdo transmitido até o momento atual.")
-    
                     # CACHE & COMPONENTES: Diagnóstico inteligente de partes existentes e faltantes
                     _vfull_cache_path = os.path.join(data_dir, "video_full.mp4")
+                    if is_live_flag and not os.path.exists(_vfull_cache_path):
+                        st.session_state["live_stream_detected_id"] = video_id
+                        st.session_state["live_stream_detected_url"] = video_url
+                        st.session_state["active_video_id"] = video_id
+                        st.session_state["video_url"] = video_url
+                        save_setting("last_active_video_id", video_id)
+                        st.rerun()
+
                     comp_status = get_video_components_status(video_id, data_dir="data", remote_duration=v_dur)
 
                     if comp_status["has_transcript"] or comp_status["has_audio"] or comp_status["has_video"]:
@@ -5144,90 +5361,12 @@ if show_sec1:
                         save_setting("last_active_video_id", video_id)
 
                         if is_live_flag and not os.path.exists(_vfull_path):
-                            st.markdown("### 🔴 Transmissão Ao Vivo (LIVE) Detectada")
-                            st.caption("O ViralCut utiliza o motor **HLS Snapshot com Freeze Live Edge**, capturando trechos estáticos em segundos com multiplexação de stream sem loops infinitos.")
-                            
-                            live_col1, live_col2, live_col3, live_col4, live_col5 = st.columns(5)
-                            with live_col1:
-                                if st.button("⚡ Últimos 15 min", key="btn_live_15m_fresh", use_container_width=True, help="Baixa em alta velocidade os últimos 15 minutos transmitidos na live até o momento atual."):
-                                    with st.spinner("🔴 Capturando últimos 15 minutos da live com Freeze Live Edge..."):
-                                        _vres = download_full_video(
-                                            video_url,
-                                            _vfull_path,
-                                            is_live=True,
-                                            recent_minutes=15.0
-                                        )
-                                    if os.path.exists(_vfull_path):
-                                        _sz_mb = os.path.getsize(_vfull_path) / (1024 * 1024)
-                                        _res = get_video_resolution(_vfull_path)
-                                        st.success(f"🎥 Últimos 15 minutos capturados com sucesso ({_sz_mb:.1f} MB, {_res})!")
-                                        st.rerun()
-                                    else:
-                                        st.error(f"Erro: {_vres.get('error', 'Falha ao baixar')}")
-                            with live_col2:
-                                if st.button("⚡ Últimos 30 min", key="btn_live_30m_fresh", use_container_width=True, help="Baixa em alta velocidade os últimos 30 minutos transmitidos na live até o momento atual."):
-                                    with st.spinner("🔴 Capturando últimos 30 minutos da live com Freeze Live Edge..."):
-                                        _vres = download_full_video(
-                                            video_url,
-                                            _vfull_path,
-                                            is_live=True,
-                                            recent_minutes=30.0
-                                        )
-                                    if os.path.exists(_vfull_path):
-                                        _sz_mb = os.path.getsize(_vfull_path) / (1024 * 1024)
-                                        _res = get_video_resolution(_vfull_path)
-                                        st.success(f"🎥 Últimos 30 minutos capturados com sucesso ({_sz_mb:.1f} MB, {_res})!")
-                                        st.rerun()
-                                    else:
-                                        st.error(f"Erro: {_vres.get('error', 'Falha ao baixar')}")
-                            with live_col3:
-                                if st.button("⚡ Últimos 60 min (1h)", key="btn_live_60m_fresh", use_container_width=True, help="Baixa em alta velocidade a última 1 hora transmitida na live até o momento atual."):
-                                    with st.spinner("🔴 Capturando última 1 hora da live com Freeze Live Edge..."):
-                                        _vres = download_full_video(
-                                            video_url,
-                                            _vfull_path,
-                                            is_live=True,
-                                            recent_minutes=60.0
-                                        )
-                                    if os.path.exists(_vfull_path):
-                                        _sz_mb = os.path.getsize(_vfull_path) / (1024 * 1024)
-                                        _res = get_video_resolution(_vfull_path)
-                                        st.success(f"🎥 Última 1 hora capturada com sucesso ({_sz_mb:.1f} MB, {_res})!")
-                                        st.rerun()
-                                    else:
-                                        st.error(f"Erro: {_vres.get('error', 'Falha ao baixar')}")
-                            with live_col4:
-                                if st.button("⏱️ Intervalo Selecionado", key="btn_live_interval_fresh", use_container_width=True, help="Baixa o intervalo configurado nos campos de início e fim da ingestão."):
-                                    with st.spinner("🔴 Capturando intervalo da live..."):
-                                        _vres = download_full_video(
-                                            video_url,
-                                            _vfull_path,
-                                            is_live=True,
-                                            start_sec=active_slice_start,
-                                            end_sec=active_slice_end
-                                        )
-                                    if os.path.exists(_vfull_path):
-                                        _sz_mb = os.path.getsize(_vfull_path) / (1024 * 1024)
-                                        _res = get_video_resolution(_vfull_path)
-                                        st.success(f"🎥 Intervalo da live capturado com sucesso ({_sz_mb:.1f} MB, {_res})!")
-                                        st.rerun()
-                                    else:
-                                        st.error(f"Erro: {_vres.get('error', 'Falha ao baixar')}")
-                            with live_col5:
-                                if st.button("🔴 Buffer Completo", key="btn_live_full_fresh", use_container_width=True, help="Captura todo o histórico disponível no buffer da live até este instante exato."):
-                                    with st.spinner("🔴 Capturando buffer completo da live até o momento..."):
-                                        _vres = download_full_video(
-                                            video_url,
-                                            _vfull_path,
-                                            is_live=True
-                                        )
-                                    if os.path.exists(_vfull_path):
-                                        _sz_mb = os.path.getsize(_vfull_path) / (1024 * 1024)
-                                        _res = get_video_resolution(_vfull_path)
-                                        st.success(f"🎥 Buffer completo da live capturado ({_sz_mb:.1f} MB, {_res})!")
-                                        st.rerun()
-                                    else:
-                                        st.error(f"Erro: {_vres.get('error', 'Falha ao baixar')}")
+                            st.session_state["live_stream_detected_id"] = video_id
+                            st.session_state["live_stream_detected_url"] = video_url
+                            st.session_state["active_video_id"] = video_id
+                            st.session_state["video_url"] = video_url
+                            save_setting("last_active_video_id", video_id)
+                            st.rerun()
     
     else:
         # 💻 Modo Arquivo de Vídeo Local do Computador (Suporte a 1 ou 2 vídeos)
@@ -6105,60 +6244,25 @@ if _has_media_ready:
                     _s1_col1, _s1_col2, _s1_col3, _s1_col4, _s1_col5 = st.columns(5)
                     with _s1_col1:
                         if st.button("⚡ Últimos 15 min", key="btn_s1_live_15m", type="primary", use_container_width=True):
-                            with st.spinner("🔴 Capturando últimos 15 min da live em alta velocidade..."):
-                                os.makedirs(main_dir, exist_ok=True)
-                                _vres = download_full_video(active_u_main, main_video_path, is_live=True, recent_minutes=15.0)
-                            if os.path.exists(main_video_path) and os.path.getsize(main_video_path) > 10240:
-                                st.success("🎥 Últimos 15 min capturados com sucesso!")
-                                st.rerun()
-                            else:
-                                st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
+                            _run_live_download_action(active_u_main, v_id_main, main_video_path, recent_min=15.0)
                     with _s1_col2:
                         if st.button("⚡ Últimos 30 min", key="btn_s1_live_30m", use_container_width=True):
-                            with st.spinner("🔴 Capturando últimos 30 min da live em alta velocidade..."):
-                                os.makedirs(main_dir, exist_ok=True)
-                                _vres = download_full_video(active_u_main, main_video_path, is_live=True, recent_minutes=30.0)
-                            if os.path.exists(main_video_path) and os.path.getsize(main_video_path) > 10240:
-                                st.success("🎥 Últimos 30 min capturados com sucesso!")
-                                st.rerun()
-                            else:
-                                st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
+                            _run_live_download_action(active_u_main, v_id_main, main_video_path, recent_min=30.0)
                     with _s1_col3:
                         if st.button("⚡ Últimos 60 min (1h)", key="btn_s1_live_60m", use_container_width=True):
-                            with st.spinner("🔴 Capturando última 1 hora da live em alta velocidade..."):
-                                os.makedirs(main_dir, exist_ok=True)
-                                _vres = download_full_video(active_u_main, main_video_path, is_live=True, recent_minutes=60.0)
-                            if os.path.exists(main_video_path) and os.path.getsize(main_video_path) > 10240:
-                                st.success("🎥 Última 1 hora capturada com sucesso!")
-                                st.rerun()
-                            else:
-                                st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
+                            _run_live_download_action(active_u_main, v_id_main, main_video_path, recent_min=60.0)
                     with _s1_col4:
                         if st.button("⏱️ Intervalo Configurado", key="btn_s1_live_interval", use_container_width=True):
-                            with st.spinner("🔴 Capturando intervalo configurado da live..."):
-                                os.makedirs(main_dir, exist_ok=True)
-                                _vres = download_full_video(
-                                    active_u_main,
-                                    main_video_path,
-                                    is_live=True,
-                                    start_sec=parse_time_str(st.session_state.get("input_yt_slice_start", "")),
-                                    end_sec=parse_time_str(st.session_state.get("input_yt_slice_end", ""))
-                                )
-                            if os.path.exists(main_video_path) and os.path.getsize(main_video_path) > 10240:
-                                st.success("🎥 Intervalo capturado com sucesso!")
-                                st.rerun()
-                            else:
-                                st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
+                            _run_live_download_action(
+                                active_u_main,
+                                v_id_main,
+                                main_video_path,
+                                start_s=parse_time_str(st.session_state.get("input_yt_slice_start", "")),
+                                end_s=parse_time_str(st.session_state.get("input_yt_slice_end", ""))
+                            )
                     with _s1_col5:
                         if st.button("🔴 Buffer Completo", key="btn_s1_live_full", use_container_width=True):
-                            with st.spinner("🔴 Capturando buffer completo da live até o momento..."):
-                                os.makedirs(main_dir, exist_ok=True)
-                                _vres = download_full_video(active_u_main, main_video_path, is_live=True)
-                            if os.path.exists(main_video_path) and os.path.getsize(main_video_path) > 10240:
-                                st.success("🎥 Buffer completo capturado com sucesso!")
-                                st.rerun()
-                            else:
-                                st.error(f"Erro ao baixar vídeo: {_vres.get('error', 'Falha desconhecida')}")
+                            _run_live_download_action(active_u_main, v_id_main, main_video_path)
                 else:
                     st.warning("⚠️ **Arquivo de vídeo MP4 ainda não baixado para esta pasta.** O áudio e a transcrição estão prontos.")
                     col_down_v1, col_down_v2 = st.columns([1.5, 1])
@@ -6431,10 +6535,11 @@ if _has_media_ready:
             # --- Seção 2: Seleção de Cortes e Compositor ---
             st.header("2. Seleção e Composição de Cortes")
         
-            tab_composer, tab_series, tab_shorts, tab_manual = st.tabs([
+            tab_composer, tab_series, tab_shorts, tab_heatmap, tab_manual = st.tabs([
                 "🧩 Compositor de Pautas (Micro-Assuntos)",
                 "💡 Séries Sugeridas",
                 "🔥 Ganchos Virais (Shorts)",
+                "📊 Mais Reassistidos (Heatmap YouTube)",
                 "🖱️ Seleção Manual (Chunks)"
             ])
         
@@ -7097,7 +7202,233 @@ if _has_media_ready:
                                         }
                                     st.rerun()
     
-            # ── TAB 4: SELEÇÃO MANUAL ────────────────────────────────────────────────
+            # ── TAB 4: MAIS REASSISTIDOS (HEATMAP YOUTUBE) ──────────────────────────
+            with tab_heatmap:
+                st.markdown(
+                    "Identifique os momentos de maior retenção e pico de interesse da audiência do YouTube "
+                    "(**Mais Reproduzidos** / *Most Replayed*) para criar cortes certeiros e virais."
+                )
+
+                _u_hm = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+                _vid_hm = extract_youtube_video_id(_u_hm) or st.session_state.get("active_video_id") or ""
+                _is_yt_video = bool(extract_youtube_video_id(_u_hm) or (_vid_hm and not str(_u_hm).startswith("local://") and not str(_u_hm).startswith("local_")))
+
+                if not _is_yt_video:
+                    st.info(
+                        "ℹ️ **Recurso Exclusivo para Vídeos do YouTube**: O gráfico de *Mais Reproduzidos* (Heatmap) "
+                        "é alimentado pelo algoritmo de retenção do YouTube. Para arquivos de vídeo locais, utilize "
+                        "as abas **Ganchos Virais (Shorts)** ou **Compositor de Pautas** com IA (Llama 3)."
+                    )
+                else:
+                    _vdir_hm = os.path.join("data", _vid_hm) if _vid_hm else None
+
+                    col_hm_d1, col_hm_d2, col_hm_top, col_hm_snap = st.columns([1.2, 1.2, 1.2, 1.6])
+                    with col_hm_d1:
+                        hm_min_dur = st.number_input(
+                            "⏱️ Duração Mínima (s):",
+                            min_value=15.0,
+                            max_value=90.0,
+                            value=float(_cfg.get("heatmap_min_duration", 35.0)),
+                            step=5.0,
+                            key="heatmap_min_dur_input",
+                            on_change=lambda: save_setting("heatmap_min_duration", st.session_state.heatmap_min_dur_input)
+                        )
+                    with col_hm_d2:
+                        hm_max_dur = st.number_input(
+                            "⏱️ Duração Máxima (s):",
+                            min_value=30.0,
+                            max_value=180.0,
+                            value=float(_cfg.get("heatmap_max_duration", 90.0)),
+                            step=5.0,
+                            key="heatmap_max_dur_input",
+                            on_change=lambda: save_setting("heatmap_max_duration", st.session_state.heatmap_max_dur_input)
+                        )
+                    with col_hm_top:
+                        hm_top_n = st.number_input(
+                            "🔥 Quantidade de Picos:",
+                            min_value=1,
+                            max_value=15,
+                            value=int(_cfg.get("heatmap_top_n", 8)),
+                            step=1,
+                            key="heatmap_top_n_input",
+                            on_change=lambda: save_setting("heatmap_top_n", st.session_state.heatmap_top_n_input)
+                        )
+                    with col_hm_snap:
+                        st.markdown("<div style='height: 24px;'></div>", unsafe_allow_html=True)
+                        hm_snap_whisper = st.toggle(
+                            "🎯 Alinhar com Whisper",
+                            value=bool(_cfg.get("heatmap_snap_whisper", True)),
+                            key="heatmap_snap_toggle",
+                            help="Ajusta o início e fim da janela para coincidir com o começo e encerramento de frases da transcrição.",
+                            on_change=lambda: save_setting("heatmap_snap_whisper", st.session_state.heatmap_snap_toggle)
+                        )
+
+                    col_btn_hm1, col_btn_hm2 = st.columns([2.5, 1.5])
+                    with col_btn_hm1:
+                        btn_fetch_hm = st.button(
+                            "🔥 Buscar / Analisar Melhores Momentos (Most Replayed YouTube)",
+                            type="primary",
+                            use_container_width=True,
+                            key="btn_fetch_youtube_heatmap"
+                        )
+                    with col_btn_hm2:
+                        btn_force_hm = st.button(
+                            "🔄 Forçar Recarga Online",
+                            use_container_width=True,
+                            key="btn_force_refresh_heatmap"
+                        )
+
+                    if btn_fetch_hm or btn_force_hm:
+                        with st.spinner("Conectando ao YouTube para extrair marcadores do Most Replayed..."):
+                            hm_data = fetch_youtube_heatmap(
+                                _u_hm or _vid_hm,
+                                cache_dir=_vdir_hm,
+                                force_refresh=bool(btn_force_hm)
+                            )
+                            st.session_state["youtube_heatmap_data"] = hm_data
+                            if hm_data.get("has_heatmap"):
+                                hotspots = find_heatmap_hotspots(
+                                    hm_data["markers"],
+                                    min_duration=hm_min_dur,
+                                    max_duration=hm_max_dur,
+                                    top_n=hm_top_n
+                                )
+                                if hm_snap_whisper and st.session_state.get("segments"):
+                                    hotspots = [
+                                        snap_hotspot_to_segments(h, st.session_state.segments, max_duration=hm_max_dur)
+                                        for h in hotspots
+                                    ]
+                                hm_cuts = build_heatmap_cut_items(hotspots, st.session_state.get("segments"))
+                                st.session_state["heatmap_cuts"] = hm_cuts
+                                if _vdir_hm:
+                                    try:
+                                        with open(os.path.join(_vdir_hm, "heatmap_cuts.json"), "w", encoding="utf-8") as f_hc:
+                                            json.dump(hm_cuts, f_hc, ensure_ascii=False, indent=2)
+                                    except Exception:
+                                        pass
+                                st.success(f"🎉 Encontrados {len(hm_cuts)} momentos de alto engajamento no vídeo!")
+                            st.rerun()
+
+                    # Se já temos dados no cache ou sessão
+                    hm_data = st.session_state.get("youtube_heatmap_data")
+                    if not hm_data and _vdir_hm and os.path.exists(os.path.join(_vdir_hm, "heatmap.json")):
+                        try:
+                            with open(os.path.join(_vdir_hm, "heatmap.json"), "r", encoding="utf-8") as f_hm_disk:
+                                hm_data = json.load(f_hm_disk)
+                                st.session_state["youtube_heatmap_data"] = hm_data
+                        except Exception:
+                            pass
+
+                    if hm_data:
+                        if not hm_data.get("has_heatmap"):
+                            reason_msg = hm_data.get("reason") or hm_data.get("error") or "O YouTube ainda não consolidou o gráfico 'Mais reproduzidos' para este vídeo."
+                            st.warning(f"⚠️ {reason_msg}")
+                            st.caption("💡 Vídeos muito recentes ou transmissões ao vivo levam de algumas horas a dias para que a audiência consolide a curva.")
+                        else:
+                            markers = hm_data.get("markers", [])
+                            hm_cuts = st.session_state.get("heatmap_cuts", [])
+                            if not hm_cuts and markers:
+                                hotspots = find_heatmap_hotspots(
+                                    markers,
+                                    min_duration=hm_min_dur,
+                                    max_duration=hm_max_dur,
+                                    top_n=hm_top_n
+                                )
+                                if hm_snap_whisper and st.session_state.get("segments"):
+                                    hotspots = [
+                                        snap_hotspot_to_segments(h, st.session_state.segments, max_duration=hm_max_dur)
+                                        for h in hotspots
+                                    ]
+                                hm_cuts = build_heatmap_cut_items(hotspots, st.session_state.get("segments"))
+                                st.session_state["heatmap_cuts"] = hm_cuts
+
+                            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+                            with col_m1:
+                                st.metric("🔥 Cortes Mais Reassistidos", f"{len(hm_cuts)}")
+                            with col_m2:
+                                top_peak = max([m.get("intensity", 0) for m in markers], default=1.0)
+                                st.metric("📈 Pico Máximo de Atenção", f"{top_peak:.0%}")
+                            with col_m3:
+                                src_label = "⚡ Cache em Disco" if hm_data.get("source") == "cache" else "🌐 YouTube Direto"
+                                st.metric("📡 Fonte dos Marcadores", src_label)
+                            with col_m4:
+                                st.metric("📊 Blocos Analisados", f"{len(markers)}")
+
+                            if markers:
+                                st.markdown("##### 📈 Curva de Audiência Real do YouTube (Most Replayed)")
+                                try:
+                                    import pandas as pd
+                                    chart_df = pd.DataFrame({
+                                        "Minutagem": [format_seconds_to_time_str(m["start_sec"])[:5] for m in markers],
+                                        "Intensidade (%)": [round(m["intensity"] * 100, 1) for m in markers]
+                                    }).set_index("Minutagem")
+                                    st.line_chart(chart_df, height=180)
+                                except Exception:
+                                    pass
+
+                            if hm_cuts:
+                                st.markdown(f"### 🎬 Trechos Recomendados por Retenção Humana ({len(hm_cuts)}):")
+
+                                col_hm_sel1, col_hm_sel2, col_hm_sel3, _ = st.columns([1.4, 1.4, 1.4, 1.8])
+                                with col_hm_sel1:
+                                    if st.button("☑️ Marcar Tudo", key="btn_sel_all_hm_cuts", use_container_width=True):
+                                        if "batch_short_selected" not in st.session_state:
+                                            st.session_state["batch_short_selected"] = {}
+                                        for hc_i, hc_item in enumerate(hm_cuts):
+                                            st.session_state[f"chk_hm_{hc_i}"] = True
+                                            st.session_state["batch_short_selected"][f"hm_{hc_i}"] = hc_item
+                                        st.rerun()
+                                with col_hm_sel2:
+                                    if st.button("⬜ Desmarcar Tudo", key="btn_clear_hm_batch", use_container_width=True):
+                                        if "batch_short_selected" in st.session_state:
+                                            for hc_i in range(len(hm_cuts)):
+                                                st.session_state[f"chk_hm_{hc_i}"] = False
+                                                st.session_state["batch_short_selected"].pop(f"hm_{hc_i}", None)
+                                        st.rerun()
+                                with col_hm_sel3:
+                                    if st.button("🔄 Inverter Seleção", key="btn_invert_hm_batch", use_container_width=True):
+                                        if "batch_short_selected" not in st.session_state:
+                                            st.session_state["batch_short_selected"] = {}
+                                        for hc_i, hc_item in enumerate(hm_cuts):
+                                            cur_v = st.session_state.get(f"chk_hm_{hc_i}", False)
+                                            new_v = not cur_v
+                                            st.session_state[f"chk_hm_{hc_i}"] = new_v
+                                            if new_v:
+                                                st.session_state["batch_short_selected"][f"hm_{hc_i}"] = hc_item
+                                            else:
+                                                st.session_state["batch_short_selected"].pop(f"hm_{hc_i}", None)
+                                        st.rerun()
+
+                                for hc_idx, hc in enumerate(hm_cuts):
+                                    with st.container():
+                                        col_hc_chk, col_hc_info, col_hc_act = st.columns([0.3, 3.5, 1.6])
+                                        with col_hc_chk:
+                                            is_chk = st.checkbox("Fila", key=f"chk_hm_{hc_idx}", label_visibility="collapsed")
+                                            if "batch_short_selected" not in st.session_state:
+                                                st.session_state["batch_short_selected"] = {}
+                                            if is_chk:
+                                                st.session_state["batch_short_selected"][f"hm_{hc_idx}"] = hc
+                                            else:
+                                                st.session_state["batch_short_selected"].pop(f"hm_{hc_idx}", None)
+                                        with col_hc_info:
+                                            st.markdown(
+                                                f"**{hc.get('type', 'Corte')}** | `[{hc['start']} → {hc['end']}]` **{hc['title']}**"
+                                            )
+                                            st.caption(f"⏱️ Duração: **{hc.get('duration_label', '')}** • {intensity_label(hc.get('peak_intensity', 0))}")
+                                            if hc.get("snippet"):
+                                                st.markdown(f"💬 *\"{hc['snippet']}\"*")
+                                        with col_hc_act:
+                                            st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
+                                            if st.button("✂️ Enquadrar na Seção 3", key=f"btn_apply_hm_sec3_{hc_idx}", use_container_width=True):
+                                                st.session_state["_pending_start_time"] = hc["start"]
+                                                st.session_state["_pending_end_time"] = hc["end"]
+                                                st.session_state["final_corte_title"] = hc["title"]
+                                                st.session_state["cut_ready_banner"] = f"✅ Minutagem do Heatmap aplicada: [{hc['start']} → {hc['end']}]"
+                                                navigate_to_step("3")
+                                                st.rerun()
+                                        st.divider()
+
+            # ── TAB 5: SELEÇÃO MANUAL ────────────────────────────────────────────────
             with tab_manual:
             
                 mode_manual = st.radio("Modo de Seleção:", ["📜 Blocos de Legenda (Estilo YouTube)", "⏱️ Intervalos de 1 Minuto"], horizontal=True)
@@ -7264,6 +7595,88 @@ if _has_media_ready:
                 return "23:59:59.00"
             h, m, sec = int(s // 3600), int((s % 3600) // 60), s % 60
             return f"{h:02d}:{m:02d}:{sec:05.2f}"
+
+        # ── MINUTAGENS MAIS QUENTES (HEATMAP YOUTUBE) NA SEÇÃO 3 ────────────
+        _u_sec3 = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+        _vid_sec3 = extract_youtube_video_id(_u_sec3) or st.session_state.get("active_video_id") or ""
+        _is_yt_sec3 = bool(extract_youtube_video_id(_u_sec3) or (_vid_sec3 and not str(_u_sec3).startswith("local://") and not str(_u_sec3).startswith("local_")))
+
+        if _is_yt_sec3:
+            _vdir_sec3 = os.path.join("data", _vid_sec3) if _vid_sec3 else None
+            _hm_data_sec3 = st.session_state.get("youtube_heatmap_data")
+            if not _hm_data_sec3 and _vdir_sec3 and os.path.exists(os.path.join(_vdir_sec3, "heatmap.json")):
+                try:
+                    with open(os.path.join(_vdir_sec3, "heatmap.json"), "r", encoding="utf-8") as _f_hm3:
+                        _hm_data_sec3 = json.load(_f_hm3)
+                        st.session_state["youtube_heatmap_data"] = _hm_data_sec3
+                except Exception:
+                    pass
+
+            _hm_cuts_sec3 = st.session_state.get("heatmap_cuts")
+            if not _hm_cuts_sec3 and _vdir_sec3 and os.path.exists(os.path.join(_vdir_sec3, "heatmap_cuts.json")):
+                try:
+                    with open(os.path.join(_vdir_sec3, "heatmap_cuts.json"), "r", encoding="utf-8") as _f_hmc3:
+                        _hm_cuts_sec3 = json.load(_f_hmc3)
+                        st.session_state["heatmap_cuts"] = _hm_cuts_sec3
+                except Exception:
+                    pass
+
+            _has_cuts_or_hm = bool(_hm_cuts_sec3 or (_hm_data_sec3 and _hm_data_sec3.get("has_heatmap")))
+            with st.expander("🔥 Picos de Audiência do YouTube (Mais Reassistidos / Heatmap)", expanded=bool(_has_cuts_or_hm)):
+                if not _hm_data_sec3 or not _hm_data_sec3.get("has_heatmap"):
+                    st.markdown("Consulte os trechos que a audiência mais reassistiu e aplique a minutagem exata neste enquadramento:")
+                    col_hfetch, _ = st.columns([2.5, 2.5])
+                    with col_hfetch:
+                        if st.button("🔍 Carregar Minutagens Mais Quentes do YouTube", key="btn_sec3_fetch_hm", use_container_width=True):
+                            with st.spinner("Buscando mapa de calor do YouTube..."):
+                                _hm_res = fetch_youtube_heatmap(_u_sec3 or _vid_sec3, cache_dir=_vdir_sec3)
+                                st.session_state["youtube_heatmap_data"] = _hm_res
+                                if _hm_res.get("has_heatmap"):
+                                    _hs = find_heatmap_hotspots(_hm_res["markers"], min_duration=35.0, max_duration=90.0, top_n=8)
+                                    if st.session_state.get("segments"):
+                                        _hs = [snap_hotspot_to_segments(h, st.session_state.segments, max_duration=90.0) for h in _hs]
+                                    _h_cuts = build_heatmap_cut_items(_hs, st.session_state.get("segments"))
+                                    st.session_state["heatmap_cuts"] = _h_cuts
+                                    if _vdir_sec3:
+                                        try:
+                                            with open(os.path.join(_vdir_sec3, "heatmap_cuts.json"), "w", encoding="utf-8") as _f_w_hc:
+                                                json.dump(_h_cuts, _f_w_hc, ensure_ascii=False, indent=2)
+                                        except Exception:
+                                            pass
+                                st.rerun()
+                    if _hm_data_sec3 and not _hm_data_sec3.get("has_heatmap"):
+                        st.caption(f"ℹ️ {_hm_data_sec3.get('reason') or 'Heatmap ainda não disponível para este vídeo no YouTube.'}")
+                else:
+                    markers = _hm_data_sec3.get("markers", [])
+                    if not _hm_cuts_sec3 and markers:
+                        _hs = find_heatmap_hotspots(markers, min_duration=35.0, max_duration=90.0, top_n=8)
+                        if st.session_state.get("segments"):
+                            _hs = [snap_hotspot_to_segments(h, st.session_state.segments, max_duration=90.0) for h in _hs]
+                        _hm_cuts_sec3 = build_heatmap_cut_items(_hs, st.session_state.get("segments"))
+                        st.session_state["heatmap_cuts"] = _hm_cuts_sec3
+
+                    st.markdown(
+                        "Abaixo estão os trechos mais quentes da audiência. Clique em **'⚡ Aplicar'** para carregar os tempos inicial e final e personalizar o enquadramento:"
+                    )
+                    for h_i, h_item in enumerate(_hm_cuts_sec3 or []):
+                        col_h_rank, col_h_info, col_h_act = st.columns([1.6, 2.6, 1.2])
+                        with col_h_rank:
+                            st.markdown(f"**Top #{h_item.get('rank', h_i+1)}** • `{h_item['start']} → {h_item['end']}`")
+                            st.caption(f"⏱️ {h_item.get('duration_label', '')} • {intensity_label(h_item.get('peak_intensity', 0))}")
+                        with col_h_info:
+                            if h_item.get("snippet"):
+                                st.markdown(f"💬 *\"{h_item['snippet']}\"*")
+                            else:
+                                st.caption(h_item.get("title", ""))
+                        with col_h_act:
+                            st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
+                            if st.button("⚡ Aplicar", key=f"btn_sec3_apply_hcut_{h_i}", use_container_width=True, help="Aplica este intervalo nos campos de tempo abaixo"):
+                                st.session_state["_pending_start_time"] = h_item["start"]
+                                st.session_state["_pending_end_time"] = h_item["end"]
+                                st.session_state["final_corte_title"] = h_item["title"]
+                                st.session_state["cut_ready_banner"] = f"✅ Minutagem do Top #{h_item.get('rank', h_i+1)} aplicada: [{h_item['start']} → {h_item['end']}]"
+                                st.rerun()
+                        st.divider()
 
         # ── Botões de atalho de tempo ──────────────────────────────────────
         _btn_col_full, _btn_col_clear, _btn_col_spacer = st.columns([1.4, 1, 3])
@@ -9132,22 +9545,25 @@ if _has_media_ready:
         saved_social_pos = _cfg.get("social_overlay_position", "Inferior (Bottom)")
         saved_social_offset_y = max(-450, min(450, int(_cfg.get("social_overlay_offset_y", 0))))
         saved_social_font_size = int(_cfg.get("social_overlay_font_size", 32))
+        saved_social_preview_scale = max(20, min(100, int(_cfg.get("social_preview_scale", 50))))
         saved_social_style = _cfg.get("social_overlay_style", "Pílula Glassmorphism (Recomendado)")
         saved_social_icon_style = _cfg.get("social_overlay_icon_style", "Cores Oficiais da Marca")
         saved_yt_enabled = bool(_cfg.get("social_youtube_enabled", True))
         saved_yt_handle = str(_cfg.get("social_youtube_handle", ""))
         saved_ig_enabled = bool(_cfg.get("social_instagram_enabled", True))
         saved_ig_handle = str(_cfg.get("social_instagram_handle", ""))
+        saved_tiktok_enabled = bool(_cfg.get("social_tiktok_enabled", False))
+        saved_tiktok_handle = str(_cfg.get("social_tiktok_handle", ""))
         saved_x_enabled = bool(_cfg.get("social_x_enabled", False))
         saved_x_handle = str(_cfg.get("social_x_handle", ""))
 
-        with st.expander("🏷️ Assinatura & Redes Sociais no Corte (@YouTube, @Instagram, @X)", expanded=social_overlay_enabled):
+        with st.expander("🏷️ Assinatura & Redes Sociais no Corte (@YouTube, @Instagram, @TikTok, @X)", expanded=social_overlay_enabled):
             social_overlay_enabled = st.toggle(
                 "✨ Ativar Selo de Redes Sociais no Corte",
                 value=social_overlay_enabled,
                 key="social_overlay_tgl",
                 on_change=lambda: save_setting("social_overlay_enabled", st.session_state.social_overlay_tgl),
-                help="Insere ícones oficiais e o @ ou descrição para YouTube, Instagram e X em estilo elegante (Glassmorphism ou Minimalista)."
+                help="Insere ícones oficiais e o @ ou descrição para YouTube, Instagram, TikTok e X em estilo elegante (Glassmorphism ou Minimalista)."
             )
 
             col_sc_pos1, col_sc_pos2, col_sc_pos3 = st.columns([1.5, 1.2, 1.3])
@@ -9174,7 +9590,7 @@ if _has_media_ready:
             with col_sc_pos3:
                 social_overlay_font_size = st.slider(
                     "🔤 Tamanho da Fonte (px):",
-                    min_value=20,
+                    min_value=14,
                     max_value=54,
                     value=saved_social_font_size,
                     step=2,
@@ -9203,7 +9619,7 @@ if _has_media_ready:
                 )
 
             st.markdown("##### 📱 Canais & Identificadores (@):")
-            col_net_yt, col_net_ig, col_net_x = st.columns(3)
+            col_net_yt, col_net_ig, col_net_tk, col_net_x = st.columns(4)
 
             with col_net_yt:
                 social_youtube_enabled = st.checkbox("▶️ YouTube", value=saved_yt_enabled, key="chk_soc_yt")
@@ -9223,6 +9639,16 @@ if _has_media_ready:
                     placeholder="@meuperfil",
                     key="txt_soc_ig_handle",
                     disabled=not social_instagram_enabled
+                )
+
+            with col_net_tk:
+                social_tiktok_enabled = st.checkbox("🎵 TikTok", value=saved_tiktok_enabled, key="chk_soc_tk")
+                social_tiktok_handle = st.text_input(
+                    "Descrição / @ do TikTok:",
+                    value=saved_tiktok_handle,
+                    placeholder="@meuperfil",
+                    key="txt_soc_tk_handle",
+                    disabled=not social_tiktok_enabled
                 )
 
             with col_net_x:
@@ -9257,15 +9683,27 @@ if _has_media_ready:
                 "networks": {
                     "youtube": {"enabled": social_youtube_enabled, "handle": social_youtube_handle.strip()},
                     "instagram": {"enabled": social_instagram_enabled, "handle": social_instagram_handle.strip()},
+                    "tiktok": {"enabled": social_tiktok_enabled, "handle": social_tiktok_handle.strip()},
                     "x": {"enabled": social_x_enabled, "handle": social_x_handle.strip()}
                 }
             }
 
-            col_btn_prev, col_btn_folder = st.columns([1.5, 1.5])
+            col_btn_prev, col_prev_scale, col_btn_folder = st.columns([1.3, 1.7, 1.3])
             with col_btn_prev:
                 _btn_prev_label = "🔄 Atualizar Prévia do Selo" if st.session_state.get("show_social_preview") else "👁️ Visualizar Prévia do Selo"
                 if st.button(_btn_prev_label, key="btn_prev_social_overlay", use_container_width=True):
                     st.session_state["show_social_preview"] = True
+
+            with col_prev_scale:
+                social_preview_scale = st.slider(
+                    "🔍 Tamanho da Prévia (%):",
+                    min_value=20,
+                    max_value=100,
+                    value=saved_social_preview_scale,
+                    step=5,
+                    key="social_preview_scale_slider",
+                    help="Ajusta o tamanho visual da imagem de prévia na tela. O padrão é 50% (reduzido pela metade para visualização ergonômica sem ocupar a tela inteira)."
+                )
 
             with col_btn_folder:
                 if st.button("📂 Abrir Pasta de Ícones das Redes", key="btn_open_social_icons", use_container_width=True):
@@ -9304,9 +9742,15 @@ if _has_media_ready:
                 else:
                     _preview_composite = render_social_overlay_on_frame(_pr_frame, _preview_cfg)
                     if _preview_composite is not None:
+                        calc_prev_w = int(720 * (social_preview_scale / 100.0))
                         col_pv1, col_pv2 = st.columns([3.5, 1.2])
                         with col_pv1:
-                            st.image(_preview_composite, caption=f"Prévia da Assinatura ({selected_aspect}) — Posição: {social_overlay_position} | Fonte: {social_overlay_font_size}px", use_container_width=True)
+                            safe_display_image(
+                                _preview_composite,
+                                caption=f"Prévia da Assinatura ({selected_aspect}) — Posição: {social_overlay_position} | Fonte: {social_overlay_font_size}px | Tamanho: {social_preview_scale}%",
+                                use_container_width=(social_preview_scale >= 98),
+                                width=calc_prev_w
+                            )
                         with col_pv2:
                             if st.button("❌ Ocultar Prévia", key="btn_hide_social_prev", use_container_width=True):
                                 st.session_state["show_social_preview"] = False
@@ -9358,12 +9802,15 @@ if _has_media_ready:
             "social_overlay_position": social_overlay_position,
             "social_overlay_offset_y": social_overlay_offset_y,
             "social_overlay_font_size": social_overlay_font_size,
+            "social_preview_scale": social_preview_scale,
             "social_overlay_style": social_overlay_style,
             "social_overlay_icon_style": social_overlay_icon_style,
             "social_youtube_enabled": social_youtube_enabled,
             "social_youtube_handle": social_youtube_handle,
             "social_instagram_enabled": social_instagram_enabled,
             "social_instagram_handle": social_instagram_handle,
+            "social_tiktok_enabled": social_tiktok_enabled,
+            "social_tiktok_handle": social_tiktok_handle,
             "social_x_enabled": social_x_enabled,
             "social_x_handle": social_x_handle,
             "bg_music_enabled": bg_music_enabled,

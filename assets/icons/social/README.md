@@ -12,6 +12,7 @@ Coloque seus arquivos de imagem PNG (com fundo transparente) nesta pasta utiliza
 | :--- | :--- | :--- |
 | **YouTube** | `youtube.png` | `yt.png`, `youtube.svg`, `youtube.webp` |
 | **Instagram** | `instagram.png` | `insta.png`, `ig.png`, `instagram.svg`, `instagram.webp` |
+| **TikTok** | `tiktok.png` | `tt.png`, `tik_tok.png`, `tiktok.svg`, `tiktok.webp` |
 | **X (Twitter)** | `x.png` | `twitter.png`, `x_logo.png`, `x.svg`, `x.webp` |
 
 ---
