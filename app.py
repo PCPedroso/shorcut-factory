@@ -462,6 +462,217 @@ def inject_video_time_sync_js():
 
 inject_video_time_sync_js()
 
+def inject_video_hotkeys_js():
+    """
+    Injeta atalhos de teclado no estilo YouTube para todos os players de vídeo:
+    - 'l' / 'L': Avança 10s (com Ctrl: 5s, metade do tempo original)
+    - 'j' / 'J': Volta 10s (com Ctrl: 5s, metade do tempo original)
+    - 'k' / 'K': Pausa / Alterna Play/Pause
+    Inclui OSD flutuante de feedback visual e desativação automática durante digitação em formulários.
+    """
+    hotkeys_script = """
+    <script>
+    (function() {
+        const pDoc = (window.parent && window.parent.document) || document;
+        const rootWin = window.parent || window;
+        if (!pDoc || !rootWin) return;
+
+        // 1. Injeta CSS para o OSD (On-Screen Display) flutuante sobre os players
+        if (!pDoc.getElementById('viralcut-player-osd-styles')) {
+            const style = pDoc.createElement('style');
+            style.id = 'viralcut-player-osd-styles';
+            style.innerHTML = `
+                .viralcut-player-osd {
+                    position: absolute;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%) scale(0.85);
+                    background: rgba(14, 16, 22, 0.92);
+                    backdrop-filter: blur(8px);
+                    -webkit-backdrop-filter: blur(8px);
+                    border: 1px solid rgba(255, 107, 0, 0.7);
+                    color: #ffffff;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                    font-size: 16px;
+                    font-weight: 700;
+                    padding: 8px 18px;
+                    border-radius: 30px;
+                    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8), 0 0 18px rgba(255, 107, 0, 0.4);
+                    pointer-events: none;
+                    z-index: 99999;
+                    opacity: 0;
+                    transition: opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1), transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    user-select: none;
+                }
+                .viralcut-player-osd.show {
+                    opacity: 1;
+                    transform: translate(-50%, -50%) scale(1.05);
+                }
+            `;
+            pDoc.head.appendChild(style);
+        }
+
+        function showVideoOsd(video, icon, text) {
+            try {
+                if (!video) return;
+                const doc = video.ownerDocument || pDoc;
+                let container = video.parentElement;
+                if (!container) return;
+
+                const computedPos = (rootWin.getComputedStyle && rootWin.getComputedStyle(container).position) || container.style.position;
+                if (computedPos !== 'relative' && computedPos !== 'absolute') {
+                    container.style.position = 'relative';
+                }
+
+                let osd = container.querySelector('.viralcut-player-osd');
+                if (!osd) {
+                    osd = doc.createElement('div');
+                    osd.className = 'viralcut-player-osd';
+                    container.appendChild(osd);
+                }
+
+                osd.innerHTML = `<span style="font-size:18px;line-height:1;">${icon}</span> <span>${text}</span>`;
+                osd.classList.add('show');
+
+                if (video.__viralcutOsdTimeout) {
+                    clearTimeout(video.__viralcutOsdTimeout);
+                }
+                video.__viralcutOsdTimeout = setTimeout(() => {
+                    osd.classList.remove('show');
+                }, 650);
+            } catch(e) {}
+        }
+
+        function scanAndTrackVideos() {
+            try {
+                const videos = pDoc.querySelectorAll('video');
+                videos.forEach(v => {
+                    if (v.dataset.hotkeysTracked) return;
+                    v.dataset.hotkeysTracked = "true";
+
+                    const setAsActive = () => {
+                        rootWin.__viralcutActiveVideo = v;
+                    };
+
+                    ['play', 'pause', 'click', 'pointerdown', 'mouseenter'].forEach(evt => {
+                        v.addEventListener(evt, setAsActive);
+                    });
+                });
+            } catch(e) {}
+        }
+
+        function getTargetVideo() {
+            try {
+                const allVids = Array.from(pDoc.querySelectorAll('video')).filter(v => {
+                    const r = v.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                });
+                if (allVids.length === 0) return null;
+
+                // 1. Vídeo atualmente em reprodução tem prioridade máxima
+                const playingVid = allVids.find(v => !v.paused && !v.ended);
+                if (playingVid) return playingVid;
+
+                // 2. Vídeo com interação recente (hover, click, pause) se ainda estiver no DOM
+                if (rootWin.__viralcutActiveVideo && pDoc.contains(rootWin.__viralcutActiveVideo)) {
+                    return rootWin.__viralcutActiveVideo;
+                }
+
+                // 3. Fallback: vídeo mais centralizado na tela visível
+                const vh = rootWin.innerHeight || 800;
+                let bestVid = allVids[0];
+                let minDistance = Infinity;
+                allVids.forEach(v => {
+                    const r = v.getBoundingClientRect();
+                    const centerDist = Math.abs((r.top + r.bottom) / 2 - (vh / 2));
+                    if (centerDist < minDistance) {
+                        minDistance = centerDist;
+                        bestVid = v;
+                    }
+                });
+                return bestVid;
+            } catch(e) {
+                return null;
+            }
+        }
+
+        function handleVideoHotkey(e) {
+            try {
+                // Verifica se o usuário está digitando em campos de texto
+                const activeEl = pDoc.activeElement || document.activeElement;
+                if (activeEl) {
+                    const tag = (activeEl.tagName || '').toLowerCase();
+                    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+                    if (activeEl.isContentEditable) return;
+                    if (activeEl.getAttribute('role') === 'textbox') return;
+                }
+
+                // Verifica se o modal de snapshot está aberto
+                const snapModal = pDoc.getElementById('viralcut-snapshot-modal-overlay');
+                if (snapModal && snapModal.classList.contains('active')) return;
+
+                // Teclas válidas: j, k, l (maiúsculas e minúsculas)
+                const rawKey = e.key;
+                if (!rawKey) return;
+                const key = rawKey.toLowerCase();
+                if (key !== 'j' && key !== 'k' && key !== 'l') return;
+
+                // Ignora se Alt estiver pressionado
+                if (e.altKey) return;
+
+                const targetVid = getTargetVideo();
+                if (!targetVid) return;
+
+                // Define passo: se Ctrl estiver pressionado -> 5s (metade de 10s), caso contrário -> 10s
+                const isCtrl = e.ctrlKey || e.metaKey;
+                const step = isCtrl ? 5 : 10;
+
+                if (key === 'l') {
+                    // Avança
+                    const maxTime = (targetVid.duration && !isNaN(targetVid.duration) && targetVid.duration > 0) ? targetVid.duration : 999999;
+                    targetVid.currentTime = Math.min(maxTime, (targetVid.currentTime || 0) + step);
+                    showVideoOsd(targetVid, '⏩', `+${step}s`);
+                    e.preventDefault();
+                    e.stopPropagation();
+                } else if (key === 'j') {
+                    // Volta
+                    targetVid.currentTime = Math.max(0, (targetVid.currentTime || 0) - step);
+                    showVideoOsd(targetVid, '⏪', `-${step}s`);
+                    e.preventDefault();
+                    e.stopPropagation();
+                } else if (key === 'k') {
+                    // Pausa / Alterna Play-Pause
+                    if (targetVid.paused) {
+                        targetVid.play().catch(() => {});
+                        showVideoOsd(targetVid, '▶', 'Reproduzindo');
+                    } else {
+                        targetVid.pause();
+                        showVideoOsd(targetVid, '⏸', 'Pausado');
+                    }
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            } catch(e) {}
+        }
+
+        scanAndTrackVideos();
+
+        if (!rootWin.__viralcutHotkeysAttached) {
+            rootWin.__viralcutHotkeysAttached = true;
+            pDoc.addEventListener('keydown', handleVideoHotkey, true);
+            rootWin.addEventListener('keydown', handleVideoHotkey, true);
+            setInterval(scanAndTrackVideos, 800);
+        }
+    })();
+    </script>
+    """
+    st.html(hotkeys_script, unsafe_allow_javascript=True)
+
+inject_video_hotkeys_js()
+
 def inject_video_snapshot_js():
     """
     Injeta JavaScript para permitir captura instantânea de print do frame exato

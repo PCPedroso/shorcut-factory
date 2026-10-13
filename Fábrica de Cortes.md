@@ -18,7 +18,7 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
 | **Processamento de Vídeo** | `FFmpeg` (com `libass` e NVENC) | Recorte, filtros complexos, sidechain compress, equalização e queima de legendas/overlays |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
-| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (283 testes) |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (284 testes) |
 
 ---
 
@@ -33,7 +33,7 @@ shorcut-factory/
 │   ├── fonts/                 # Tipografias bundled (Montserrat-ExtraBold)
 │   └── icons/                 # Ícones oficiais de alta resolução
 │       └── social/            # Ícones de redes sociais (youtube.png, instagram.png, x.png)
-├── tests/                     # Suíte de Testes Unitários Automatizados (283 testes)
+├── tests/                     # Suíte de Testes Unitários Automatizados (284 testes)
 │   ├── test_clear_project_and_startup.py # Testes de inicialização limpa e reset de projetos
 │   ├── test_roi_crop.py          # Testes de remoção de patrocínios em L, tarjas e máscaras de ROI
 │   ├── test_youtube_subtitles_selection.py # Testes de mapeamento e download de legendas multilinguagem do YouTube
@@ -58,6 +58,7 @@ shorcut-factory/
 │   ├── test_web_downloads.py     # Testes de resiliência em downloads de portais de notícias e web
 │   ├── test_youtube_heatmap.py   # Testes de extração do Most Replayed, detecção de hotspots, alinhamento Whisper e cache
 │   ├── test_kick_support.py      # Testes de extração de metadados, streaming HLS e Time-Range Slicing da Kick.com
+│   ├── test_video_hotkeys.py     # Testes de injeção de atalhos de teclado de players estilo YouTube (J, K, L, Ctrl) e OSD
 │   └── test_multi_slice.py       # Testes de múltiplos trechos independentes (multi-slicing), limpeza de base ID e catálogo de trechos
 ├── core/
 │   ├── youtube_heatmap.py     # Motor de Mapa de Calor ("Mais Reproduzidos" / Most Replayed) do YouTube, detecção de picos de retenção, alinhamento inteligente com frases Whisper e geração de cortes
@@ -315,6 +316,15 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
       - **Badge Visual em Tempo Real**: Exibição do momento atual pausado (`⏱️ Momento Atual do Player`) atualizado diretamente no DOM sem acionar re-renderizações desnecessárias da aplicação.
     - `⏬ Baixar Vídeo MP4 Completo Agora`: Botão em 1 clique para baixar o vídeo caso a ingestão inicial tenha focado apenas em áudio/transcrição (ex: lives longas).
   - **Integração no Dashboard Modular de Topo**: Botão `🎬 Assistir Vídeo Local` no card de conteúdo existente do projeto para inspecionar vídeos já baixados imediatamente com os mesmos botões de captura de tempo inicial e final.
+- **⌨️ Teclas de Atalho de Player Semelhantes ao YouTube (`app.py`, `inject_video_hotkeys_js`, `tests/test_video_hotkeys.py`)**:
+  - **Atalhos Globais Intuitivos**:
+    - `"l"` e `"L"`: Avança 10 segundos no player (`+10s`).
+    - `"j"` e `"J"`: Volta 10 segundos no player (`-10s`).
+    - **Modificador `Ctrl` (Salto Cirúrgico)**: Se a tecla `Ctrl` estiver pressionada (`Ctrl+L` / `Ctrl+J`), o tempo de salto é reduzido pela metade, para **5 segundos** (`+5s` / `-5s`).
+    - `"k"` e `"K"`: Pausa ou alterna entre reprodução e pausa (`⏸ Pausado` / `▶ Reproduzindo`).
+  - **On-Screen Display (OSD) com Glassmorphism**: Badge flutuante translúcido e responsivo renderizado no centro do player ativo, fornecendo confirmação visual animada instantânea do salto temporal ou estado de reprodução.
+  - **Alvo Inteligente (Active Video Detection)**: Detecta e direciona os atalhos para o vídeo em reprodução ativa, o player com foco/interação do mouse mais recente ou o mais próximo do centro do viewport, funcionando de forma unificada em todas as seções (Ingestão, Fábrica de Enquadramento, Galeria e Multicam).
+  - **Proteção Estrita contra Digitação**: Suprime os atalhos automaticamente sempre que o usuário estiver digitando em campos de formulário (`<input>`, `<textarea>`, `<select>`, editores ou elementos com `contenteditable="true"`), prevenindo interferência na digitação normal.
 - **🏷️ Headline de Topo com Duração Configurável e Transições Animadas (`core/headline_drawer.py`, `app.py`, `tests/test_headline_drawer.py`, `tests/test_batch_quick_editor.py`)**:
   - **Temporização Flexível de Entrada e Saída**: Suporte a tempo de início exato (`start_offset_s`) e tempo de encerramento (`end_offset_s` / 0.0 para exibição até o encerramento do corte), além de modo automático pós-gancho viral.
   - **Catálogo Completo de Efeitos de Transição**:
