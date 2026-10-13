@@ -18,7 +18,7 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
 | **Processamento de Vídeo** | `FFmpeg` (com `libass` e NVENC) | Recorte, filtros complexos, sidechain compress, equalização e queima de legendas/overlays |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
-| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (282 testes) |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (283 testes) |
 
 ---
 
@@ -33,7 +33,7 @@ shorcut-factory/
 │   ├── fonts/                 # Tipografias bundled (Montserrat-ExtraBold)
 │   └── icons/                 # Ícones oficiais de alta resolução
 │       └── social/            # Ícones de redes sociais (youtube.png, instagram.png, x.png)
-├── tests/                     # Suíte de Testes Unitários Automatizados (282 testes)
+├── tests/                     # Suíte de Testes Unitários Automatizados (283 testes)
 │   ├── test_clear_project_and_startup.py # Testes de inicialização limpa e reset de projetos
 │   ├── test_roi_crop.py          # Testes de remoção de patrocínios em L, tarjas e máscaras de ROI
 │   ├── test_youtube_subtitles_selection.py # Testes de mapeamento e download de legendas multilinguagem do YouTube
@@ -73,7 +73,7 @@ shorcut-factory/
 │   ├── analyzer.py            # Análise Q&A/Temática, Séries Sugeridas flexíveis e Kit Viral com IA
 │   ├── video_processor.py     # Pipeline FFmpeg para os 5 formatos de enquadramento + download multi-thread
 │   ├── face_tracker.py        # Detecção facial MediaPipe, Deadband Anchor, Split Screen Proporcional & Auto-Switch
-│   ├── social_overlay.py      # Motor de badges e assinaturas de redes sociais (@YouTube, @Instagram, @TikTok, @X) com ícones oficiais e Glassmorphism
+│   ├── social_overlay.py      # Motor de badges e assinaturas de redes sociais (@YouTube, @Instagram, @TikTok, @X) com ícones oficiais, Glassmorphism e cadastro de perfis de canais (social_profiles.json)
 │   ├── subtitle_burner.py     # Geração de legendas dinâmicas em ASS + Headlines + Emojis + Callout + Reuso e parser de transcrição preservada (resolve_preserved_cut_transcript, parse_srt_to_transcript_dict)
 │   ├── thumbnail_generator.py # Extração de melhor frame (MediaPipe/sharpness) e capas 9:16 multicamadas
 │   ├── audio_mixer.py         # Mixagem de áudio com Ducking dinâmico via sidechaincompress FFmpeg
@@ -412,6 +412,15 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Fluxo Ágil & Confiável**: O usuário pausa o player de vídeo no momento exato desejado e clica em `⏱️ Capturar Tempo`. O timestamp milimétrico (`HH:MM:SS.ms`) do vídeo pausado é imediatamente capturado e injetado no campo, permitindo em seguida gerar a prévia do frame, remover fundo com Rembg, criar capas neon com IA ou definir como capa oficial sem digitação manual.
   - **Dupla Camada de Sincronização (Client-Side & Server-Side)**: O listener Javascript captura o evento no `pointerdown`/`mousedown`, atualizando o componente React, os parâmetros de URL (`captured_frame_time` e `last_frame_snap_time`) e a `session_state` do Streamlit de forma atômica e resiliente.
 - **🏷️ Assinatura e Badges de Redes Sociais nos Cortes (@YouTube, @Instagram, @TikTok, @X) (`core/social_overlay.py`, `app.py`, `tests/test_social_overlay.py`)**:
+  - **👤 Cadastro e Gestão de Múltiplos Perfis de Canais / Nichos (`data/social_profiles.json`, `load_social_profiles`, `save_social_profile`)**:
+    - Sistema estruturado para cadastrar, salvar e alternar rapidamente entre canais diferentes (ex: Canal Principal, Canal de Finanças, Canal de Humor, Cortes Tech).
+    - Cada perfil armazena seus próprios identificadores `@` para YouTube, Instagram, TikTok e X, posição no vídeo, ajuste fino de margem, tamanho de fonte, estilo de selo e estilo de ícones de forma completamente independente.
+    - Seletor em dropdown (`Canal / Perfil Ativo`) integrado no topo do expander com ações em 1 clique:
+      - `💾 Salvar`: Persiste alterações da tela no perfil ativo.
+      - `➕ Novo`: Cria um novo perfil com formulário dedicado e herança das configurações ativas como ponto de partida.
+      - `✏️ Nome`: Permite renomear o perfil atual em tempo real.
+      - `🗑️ Excluir`: Remove perfis com proteção para nunca excluir o único perfil existente.
+    - Sincronização atômica pré-renderização de widgets para evitar exceções de ciclo de vida do Streamlit (`StreamlitAPIException`).
   - **Identificadores Flexíveis por Canal**: Suporte a YouTube, Instagram, TikTok e X (Twitter) com seleção por checkbox e texto livre para o `@` ou descrição em cada canal.
   - **Ícones Oficiais Proporcionais à Tipografia**: Redimensionamento proporcional automático preservando a taxa de proporção (1.08x do tamanho da fonte) e compatibilidade com ícones personalizados adicionados na pasta `assets/icons/social/`.
   - **Estilos Visuais de Alta Conversão**:
@@ -446,8 +455,8 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Auto-Snap Inteligente às Bordas do Cenário (`snap_box_to_scene_borders`)**: Algoritmo de visão computacional baseado em gradientes Sobel que detecta linhas divisórias do estúdio, tarjas de GC/noticiários ou bordas do vídeo, ajustando automaticamente os retângulos desenhados para que não absorvam partes indesejadas do enquadramento.
   - **Detecção de Mudança de Cenário / Cortes de Câmera (`detect_scene_changes_in_range`)**: Varredura ultra-rápida por histogramas HSV ao longo da cena que detecta trocas bruscas de plano ou orador, com botão de 1 clique `✂️ Fatiar Cena nos Cortes Detectados` para criar cenas consecutivas instantâneas.
   - **Preenchimento Padrão com Fundo Desfocado (Blur) no Topo e Rodapé (`blur_background`, `blur_intensity`)**: Quando configurado com 1 ou 2 enquadramentos, preserva as proporções naturais dos recortes sem cortes laterais forçados e preenche automaticamente o espaço excedente superior e inferior com o fundo do vídeo ampliado e desfocado (com intensidade configurável), tanto na prévia interativa quanto no renderizador FFmpeg.
-- **🧪 Suíte de 282 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (multi-slicing de trechos independentes, kick.com HLS streaming, multicam background blur, multicam crop timerange sync, border snap, scene cuts detector, extended social margin, time mask, social media badges/overlay, preserve cut transcript on re-render, quick editor static image format adaptation, frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
+- **🧪 Suíte de 283 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação contínua validando todos os módulos do pipeline via `pytest` (cadastro e alternância de perfis de canais/redes sociais, multi-slicing de trechos independentes, kick.com HLS streaming, multicam background blur, multicam crop timerange sync, border snap, scene cuts detector, extended social margin, time mask, social media badges/overlay, preserve cut transcript on re-render, quick editor static image format adaptation, frame capturer, youtube thumbnail, live stream snapshot & freeze live edge, local video copy & slice, dynamic ingestion rule, sec2 gatekeeper logic, quick editor, batch quick editor, carrossel sync, particle explosion, transitions, headline drawer, partial download, audio mixer, translator, face tracker, proportional split screen, ui theme, web downloads, live stream snapshots, video format quality, incremental processing, section 1 video access e sincronização atômica de tempo do player).
 
 ---
 

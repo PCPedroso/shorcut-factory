@@ -9556,23 +9556,174 @@ if _has_media_ready:
         # ─────────────────────────────────────────────────────────────────
         # 🏷️ Assinatura & Redes Sociais no Corte (@YouTube, @Instagram, @X)
         # ─────────────────────────────────────────────────────────────────
-        social_overlay_enabled = _cfg.get("social_overlay_enabled", False)
-        saved_social_pos = _cfg.get("social_overlay_position", "Inferior (Bottom)")
-        saved_social_offset_y = max(-450, min(450, int(_cfg.get("social_overlay_offset_y", 0))))
-        saved_social_font_size = int(_cfg.get("social_overlay_font_size", 32))
-        saved_social_preview_scale = max(20, min(100, int(_cfg.get("social_preview_scale", 50))))
-        saved_social_style = _cfg.get("social_overlay_style", "Pílula Glassmorphism (Recomendado)")
-        saved_social_icon_style = _cfg.get("social_overlay_icon_style", "Cores Oficiais da Marca")
-        saved_yt_enabled = bool(_cfg.get("social_youtube_enabled", True))
-        saved_yt_handle = str(_cfg.get("social_youtube_handle", ""))
-        saved_ig_enabled = bool(_cfg.get("social_instagram_enabled", True))
-        saved_ig_handle = str(_cfg.get("social_instagram_handle", ""))
-        saved_tiktok_enabled = bool(_cfg.get("social_tiktok_enabled", False))
-        saved_tiktok_handle = str(_cfg.get("social_tiktok_handle", ""))
-        saved_x_enabled = bool(_cfg.get("social_x_enabled", False))
-        saved_x_handle = str(_cfg.get("social_x_handle", ""))
+        from core.social_overlay import (
+            load_social_profiles, save_social_profile, delete_social_profile,
+            rename_social_profile, set_active_social_profile_name, get_active_social_profile,
+            DEFAULT_PROFILE_DATA
+        )
+
+        _soc_profiles_dict = load_social_profiles()
+        _soc_profile_names = list(_soc_profiles_dict["profiles"].keys())
+        _active_profile_name = _soc_profiles_dict.get("active_profile")
+        if not _active_profile_name or _active_profile_name not in _soc_profiles_dict["profiles"]:
+            _active_profile_name = _soc_profile_names[0] if _soc_profile_names else "Canal Principal"
+
+        # Processa solicitação pendente de troca de perfil ANTES de instanciar os widgets
+        if "_pending_social_profile_name" in st.session_state:
+            _target_pname = st.session_state.pop("_pending_social_profile_name")
+            if _target_pname in _soc_profiles_dict["profiles"]:
+                _active_profile_name = _target_pname
+                set_active_social_profile_name(_active_profile_name)
+                st.session_state["sel_social_profile_name"] = _active_profile_name
+                _p_data = _soc_profiles_dict["profiles"][_active_profile_name]
+                st.session_state["social_overlay_tgl"] = bool(_p_data.get("social_overlay_enabled", True))
+                st.session_state["social_pos_radio"] = str(_p_data.get("social_overlay_position", "Inferior (Bottom)"))
+                st.session_state["social_offset_slider"] = int(_p_data.get("social_overlay_offset_y", 0))
+                st.session_state["social_font_size_slider"] = int(_p_data.get("social_overlay_font_size", 32))
+                st.session_state["social_preview_scale_slider"] = int(_p_data.get("social_preview_scale", 50))
+                st.session_state["social_style_sel"] = str(_p_data.get("social_overlay_style", "Pílula Glassmorphism (Recomendado)"))
+                st.session_state["social_icon_style_sel"] = str(_p_data.get("social_overlay_icon_style", "Cores Oficiais da Marca"))
+                st.session_state["chk_soc_yt"] = bool(_p_data.get("social_youtube_enabled", True))
+                st.session_state["txt_soc_yt_handle"] = str(_p_data.get("social_youtube_handle", ""))
+                st.session_state["chk_soc_ig"] = bool(_p_data.get("social_instagram_enabled", True))
+                st.session_state["txt_soc_ig_handle"] = str(_p_data.get("social_instagram_handle", ""))
+                st.session_state["chk_soc_tk"] = bool(_p_data.get("social_tiktok_enabled", False))
+                st.session_state["txt_soc_tk_handle"] = str(_p_data.get("social_tiktok_handle", ""))
+                st.session_state["chk_soc_x"] = bool(_p_data.get("social_x_enabled", False))
+                st.session_state["txt_soc_x_handle"] = str(_p_data.get("social_x_handle", ""))
+
+        _cur_profile = _soc_profiles_dict["profiles"].get(_active_profile_name, DEFAULT_PROFILE_DATA)
+
+        social_overlay_enabled = st.session_state.get("social_overlay_tgl", _cur_profile.get("social_overlay_enabled", False))
+        saved_social_pos = _cur_profile.get("social_overlay_position", "Inferior (Bottom)")
+        saved_social_offset_y = max(-450, min(450, int(_cur_profile.get("social_overlay_offset_y", 0))))
+        saved_social_font_size = int(_cur_profile.get("social_overlay_font_size", 32))
+        saved_social_preview_scale = max(20, min(100, int(_cur_profile.get("social_preview_scale", 50))))
+        saved_social_style = _cur_profile.get("social_overlay_style", "Pílula Glassmorphism (Recomendado)")
+        saved_social_icon_style = _cur_profile.get("social_overlay_icon_style", "Cores Oficiais da Marca")
+        saved_yt_enabled = bool(_cur_profile.get("social_youtube_enabled", True))
+        saved_yt_handle = str(_cur_profile.get("social_youtube_handle", ""))
+        saved_ig_enabled = bool(_cur_profile.get("social_instagram_enabled", True))
+        saved_ig_handle = str(_cur_profile.get("social_instagram_handle", ""))
+        saved_tiktok_enabled = bool(_cur_profile.get("social_tiktok_enabled", False))
+        saved_tiktok_handle = str(_cur_profile.get("social_tiktok_handle", ""))
+        saved_x_enabled = bool(_cur_profile.get("social_x_enabled", False))
+        saved_x_handle = str(_cur_profile.get("social_x_handle", ""))
 
         with st.expander("🏷️ Assinatura & Redes Sociais no Corte (@YouTube, @Instagram, @TikTok, @X)", expanded=social_overlay_enabled):
+            # ── Gerenciador de Perfis de Canais / Nichos ──
+            st.markdown("##### 👤 Cadastro de Perfis de Canais / Redes Sociais:")
+            st.caption("Cadastre perfis independentes para cada canal ou nicho (ex: Canal Principal, Finanças, Humor) com seus respectivos @ e estilos visuais.")
+
+            col_prof_sel, col_prof_save, col_prof_new, col_prof_ren, col_prof_del = st.columns([2.3, 0.9, 0.9, 0.9, 0.6])
+
+            def _on_social_profile_select():
+                chosen = st.session_state.get("sel_social_profile_name")
+                if chosen and chosen in _soc_profiles_dict["profiles"]:
+                    st.session_state["_pending_social_profile_name"] = chosen
+
+            if "sel_social_profile_name" in st.session_state and st.session_state["sel_social_profile_name"] not in _soc_profile_names:
+                st.session_state["sel_social_profile_name"] = _active_profile_name
+
+            cur_p_idx = _soc_profile_names.index(_active_profile_name) if _active_profile_name in _soc_profile_names else 0
+
+            with col_prof_sel:
+                st.selectbox(
+                    "Canal / Perfil Ativo:",
+                    _soc_profile_names,
+                    index=cur_p_idx,
+                    key="sel_social_profile_name",
+                    on_change=_on_social_profile_select,
+                    help="Alterne entre canais e perfis cadastrados para carregar instantaneamente seus @ e configurações.",
+                    label_visibility="collapsed"
+                )
+
+            with col_prof_save:
+                if st.button("💾 Salvar", key="btn_save_soc_prof", help=f"Salvar alterações atuais no perfil '{_active_profile_name}'", use_container_width=True):
+                    upd_data = {
+                        "social_overlay_enabled": bool(st.session_state.get("social_overlay_tgl", social_overlay_enabled)),
+                        "social_overlay_position": str(st.session_state.get("social_pos_radio", saved_social_pos)),
+                        "social_overlay_offset_y": int(st.session_state.get("social_offset_slider", saved_social_offset_y)),
+                        "social_overlay_font_size": int(st.session_state.get("social_font_size_slider", saved_social_font_size)),
+                        "social_preview_scale": int(st.session_state.get("social_preview_scale_slider", saved_social_preview_scale)),
+                        "social_overlay_style": str(st.session_state.get("social_style_sel", saved_social_style)),
+                        "social_overlay_icon_style": str(st.session_state.get("social_icon_style_sel", saved_social_icon_style)),
+                        "social_youtube_enabled": bool(st.session_state.get("chk_soc_yt", saved_yt_enabled)),
+                        "social_youtube_handle": str(st.session_state.get("txt_soc_yt_handle", saved_yt_handle)).strip(),
+                        "social_instagram_enabled": bool(st.session_state.get("chk_soc_ig", saved_ig_enabled)),
+                        "social_instagram_handle": str(st.session_state.get("txt_soc_ig_handle", saved_ig_handle)).strip(),
+                        "social_tiktok_enabled": bool(st.session_state.get("chk_soc_tk", saved_tiktok_enabled)),
+                        "social_tiktok_handle": str(st.session_state.get("txt_soc_tk_handle", saved_tiktok_handle)).strip(),
+                        "social_x_enabled": bool(st.session_state.get("chk_soc_x", saved_x_enabled)),
+                        "social_x_handle": str(st.session_state.get("txt_soc_x_handle", saved_x_handle)).strip(),
+                    }
+                    save_social_profile(_active_profile_name, upd_data)
+                    st.toast(f"💾 Perfil '{_active_profile_name}' salvo com sucesso!")
+                    st.rerun()
+
+            with col_prof_new:
+                if st.button("➕ Novo", key="btn_toggle_new_soc_prof", help="Cadastrar um novo canal/perfil", use_container_width=True):
+                    st.session_state["show_new_soc_prof_box"] = not st.session_state.get("show_new_soc_prof_box", False)
+                    st.session_state["show_ren_soc_prof_box"] = False
+                    st.rerun()
+
+            with col_prof_ren:
+                if st.button("✏️ Nome", key="btn_toggle_ren_soc_prof", help="Renomear o perfil ativo", use_container_width=True):
+                    st.session_state["show_ren_soc_prof_box"] = not st.session_state.get("show_ren_soc_prof_box", False)
+                    st.session_state["show_new_soc_prof_box"] = False
+                    st.rerun()
+
+            with col_prof_del:
+                if st.button("🗑️", key="btn_del_soc_prof", help=f"Excluir perfil '{_active_profile_name}'", use_container_width=True):
+                    if len(_soc_profile_names) > 1:
+                        delete_social_profile(_active_profile_name)
+                        rem = [p for p in _soc_profile_names if p != _active_profile_name]
+                        st.session_state["_pending_social_profile_name"] = rem[0]
+                        st.toast(f"🗑️ Perfil '{_active_profile_name}' excluído.")
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ Não é possível excluir o único perfil existente.")
+
+            # Formulário expansível de novo perfil
+            if st.session_state.get("show_new_soc_prof_box"):
+                with st.container():
+                    st.info("💡 Digite o nome do novo canal/nicho. As configurações atuais serão copiadas como base inicial.")
+                    col_np1, col_np2 = st.columns([3, 1])
+                    with col_np1:
+                        new_p_name = st.text_input("Nome do Novo Perfil / Canal:", placeholder="Ex: Canal Finanças, Cortes de Humor, PodTech...", key="txt_new_soc_p_name")
+                    with col_np2:
+                        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                        if st.button("Criar e Ativar", key="btn_confirm_new_soc_prof", use_container_width=True):
+                            if new_p_name and new_p_name.strip():
+                                clean_n = new_p_name.strip()
+                                base_cfg = dict(_cur_profile)
+                                save_social_profile(clean_n, base_cfg, set_as_active=True)
+                                st.session_state["_pending_social_profile_name"] = clean_n
+                                st.session_state["show_new_soc_prof_box"] = False
+                                st.toast(f"✨ Perfil '{clean_n}' cadastrado e ativado!")
+                                st.rerun()
+                            else:
+                                st.warning("Por favor, informe um nome.")
+
+            # Formulário expansível de renomear perfil
+            if st.session_state.get("show_ren_soc_prof_box"):
+                with st.container():
+                    col_rp1, col_rp2 = st.columns([3, 1])
+                    with col_rp1:
+                        ren_p_name = st.text_input(f"Renomear '{_active_profile_name}' para:", value=_active_profile_name, key="txt_ren_soc_p_name")
+                    with col_rp2:
+                        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                        if st.button("Salvar Novo Nome", key="btn_confirm_ren_soc_prof", use_container_width=True):
+                            if ren_p_name and ren_p_name.strip():
+                                clean_ren = ren_p_name.strip()
+                                rename_social_profile(_active_profile_name, clean_ren)
+                                st.session_state["_pending_social_profile_name"] = clean_ren
+                                st.session_state["show_ren_soc_prof_box"] = False
+                                st.toast(f"✏️ Perfil renomeado para '{clean_ren}'!")
+                                st.rerun()
+
+            st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+
             social_overlay_enabled = st.toggle(
                 "✨ Ativar Selo de Redes Sociais no Corte",
                 value=social_overlay_enabled,
@@ -9689,6 +9840,7 @@ if _has_media_ready:
 
             social_overlay_config = {
                 "enabled": social_overlay_enabled,
+                "profile_name": _active_profile_name,
                 "position": _pos_val,
                 "offset_y": int(social_overlay_offset_y),
                 "font_size": int(social_overlay_font_size),
@@ -9828,6 +9980,7 @@ if _has_media_ready:
             "social_tiktok_handle": social_tiktok_handle,
             "social_x_enabled": social_x_enabled,
             "social_x_handle": social_x_handle,
+            "active_social_profile": _active_profile_name,
             "bg_music_enabled": bg_music_enabled,
             "bg_music_track_id": bg_music_track_id,
             "bg_music_volume": bg_music_volume,

@@ -5,6 +5,7 @@ proporcionais à tipografia, estilos em pílula (Glassmorphism / Minimalista) e 
 """
 
 import os
+import json
 import subprocess
 import cv2
 import numpy as np
@@ -18,6 +19,26 @@ _PROJECT_DIR = os.path.abspath(os.path.join(_SCRIPT_DIR, ".."))
 _ICONS_DIR = os.path.join(_PROJECT_DIR, "assets", "icons", "social")
 _FONTS_DIR = os.path.join(_SCRIPT_DIR, "fonts")
 _FONT_PATH = os.path.join(_FONTS_DIR, "Montserrat-ExtraBold.ttf")
+
+SOCIAL_PROFILES_FILE = os.path.join("data", "social_profiles.json")
+
+DEFAULT_PROFILE_DATA = {
+    "social_overlay_enabled": True,
+    "social_overlay_position": "Inferior (Bottom)",
+    "social_overlay_offset_y": 0,
+    "social_overlay_font_size": 32,
+    "social_preview_scale": 50,
+    "social_overlay_style": "Pílula Glassmorphism (Recomendado)",
+    "social_overlay_icon_style": "Cores Oficiais da Marca",
+    "social_youtube_enabled": True,
+    "social_youtube_handle": "@meucanal",
+    "social_instagram_enabled": True,
+    "social_instagram_handle": "@meuperfil",
+    "social_tiktok_enabled": False,
+    "social_tiktok_handle": "@meuperfil",
+    "social_x_enabled": False,
+    "social_x_handle": "@meuperfil"
+}
 
 DEFAULT_SOCIAL_CONFIG = {
     "enabled": False,
@@ -34,6 +55,158 @@ DEFAULT_SOCIAL_CONFIG = {
         "x": {"enabled": False, "handle": "@meuperfil"}
     }
 }
+
+
+def load_social_profiles(filepath: str = None) -> dict:
+    """
+    Carrega todos os perfis de redes sociais cadastrados.
+    Retorna um dicionário no formato:
+    {
+        "active_profile": "Nome Do Perfil",
+        "profiles": {
+            "Nome Do Perfil": { ...dados... }
+        }
+    }
+    """
+    target_path = filepath or SOCIAL_PROFILES_FILE
+    if os.path.exists(target_path):
+        try:
+            with open(target_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and "profiles" in data and isinstance(data["profiles"], dict) and data["profiles"]:
+                act = data.get("active_profile")
+                if not act or act not in data["profiles"]:
+                    data["active_profile"] = next(iter(data["profiles"].keys()))
+                return data
+        except Exception:
+            pass
+
+    # Inicialização inteligente a partir de data/app_settings.json ou fallback padrão
+    initial_profile_name = "Canal Principal"
+    initial_data = dict(DEFAULT_PROFILE_DATA)
+    settings_file = os.path.join("data", "app_settings.json")
+    if os.path.exists(settings_file):
+        try:
+            with open(settings_file, "r", encoding="utf-8") as f:
+                saved_cfg = json.load(f)
+            for k in DEFAULT_PROFILE_DATA:
+                if k in saved_cfg:
+                    initial_data[k] = saved_cfg[k]
+            yt_h = saved_cfg.get("social_youtube_handle", "").strip().lstrip("@")
+            ig_h = saved_cfg.get("social_instagram_handle", "").strip().lstrip("@")
+            cand_name = yt_h or ig_h
+            if cand_name:
+                initial_profile_name = f"Canal Principal ({cand_name})"
+        except Exception:
+            pass
+
+    default_structure = {
+        "active_profile": initial_profile_name,
+        "profiles": {
+            initial_profile_name: initial_data
+        }
+    }
+    try:
+        os.makedirs(os.path.dirname(target_path) or "data", exist_ok=True)
+        with open(target_path, "w", encoding="utf-8") as f:
+            json.dump(default_structure, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+    return default_structure
+
+
+def save_social_profile(profile_name: str, profile_data: dict, set_as_active: bool = False, filepath: str = None) -> bool:
+    """Salva ou atualiza um perfil de redes sociais."""
+    if not profile_name or not str(profile_name).strip():
+        return False
+    clean_name = str(profile_name).strip()
+    target_path = filepath or SOCIAL_PROFILES_FILE
+    data = load_social_profiles(target_path)
+    data["profiles"][clean_name] = dict(profile_data)
+    if set_as_active or data.get("active_profile") not in data["profiles"]:
+        data["active_profile"] = clean_name
+    try:
+        os.makedirs(os.path.dirname(target_path) or "data", exist_ok=True)
+        with open(target_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception:
+        return False
+
+
+def delete_social_profile(profile_name: str, filepath: str = None) -> bool:
+    """Exclui um perfil de redes sociais. Se for o único, reseta para o perfil padrão."""
+    if not profile_name or not str(profile_name).strip():
+        return False
+    clean_name = str(profile_name).strip()
+    target_path = filepath or SOCIAL_PROFILES_FILE
+    data = load_social_profiles(target_path)
+    if clean_name in data["profiles"]:
+        del data["profiles"][clean_name]
+        if not data["profiles"]:
+            data["profiles"]["Canal Principal"] = dict(DEFAULT_PROFILE_DATA)
+            data["active_profile"] = "Canal Principal"
+        elif data.get("active_profile") == clean_name:
+            data["active_profile"] = next(iter(data["profiles"].keys()))
+        try:
+            with open(target_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            return True
+        except Exception:
+            return False
+    return False
+
+
+def rename_social_profile(old_name: str, new_name: str, filepath: str = None) -> bool:
+    """Renomeia um perfil de redes sociais existente."""
+    if not old_name or not new_name or not str(new_name).strip():
+        return False
+    clean_old = str(old_name).strip()
+    clean_new = str(new_name).strip()
+    if clean_old == clean_new:
+        return True
+    target_path = filepath or SOCIAL_PROFILES_FILE
+    data = load_social_profiles(target_path)
+    if clean_old in data["profiles"]:
+        p_data = data["profiles"].pop(clean_old)
+        data["profiles"][clean_new] = p_data
+        if data.get("active_profile") == clean_old:
+            data["active_profile"] = clean_new
+        try:
+            with open(target_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            return True
+        except Exception:
+            return False
+    return False
+
+
+def set_active_social_profile_name(profile_name: str, filepath: str = None) -> bool:
+    """Define o perfil ativo."""
+    if not profile_name or not str(profile_name).strip():
+        return False
+    clean_name = str(profile_name).strip()
+    target_path = filepath or SOCIAL_PROFILES_FILE
+    data = load_social_profiles(target_path)
+    if clean_name in data["profiles"]:
+        data["active_profile"] = clean_name
+        try:
+            with open(target_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            return True
+        except Exception:
+            return False
+    return False
+
+
+def get_active_social_profile(filepath: str = None) -> tuple:
+    """Retorna (nome_perfil_ativo, dados_do_perfil)."""
+    data = load_social_profiles(filepath)
+    act_name = data.get("active_profile", "Canal Principal")
+    act_data = data["profiles"].get(act_name, DEFAULT_PROFILE_DATA)
+    return act_name, act_data
+
 
 
 def _get_font(font_size: int) -> ImageFont.ImageFont:

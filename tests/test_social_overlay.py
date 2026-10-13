@@ -252,6 +252,72 @@ class TestSocialOverlay(unittest.TestCase):
         self.assertGreater(np.sum(arr[:, :, 3] > 0), 100)
 
 
+    def test_social_profiles_lifecycle(self):
+        import tempfile
+        from core.social_overlay import (
+            load_social_profiles, save_social_profile, delete_social_profile,
+            rename_social_profile, set_active_social_profile_name, get_active_social_profile
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
+            tmp_path = tf.name
+
+        try:
+            # 1. Inicialização limpa
+            data = load_social_profiles(tmp_path)
+            self.assertIn("active_profile", data)
+            self.assertIn("profiles", data)
+            self.assertGreaterEqual(len(data["profiles"]), 1)
+            initial_name = data["active_profile"]
+
+            # 2. Cadastro de um novo perfil para outro canal (ex: Canal Finanças)
+            financas_cfg = {
+                "social_overlay_enabled": True,
+                "social_overlay_position": "Superior (Top)",
+                "social_overlay_offset_y": 100,
+                "social_overlay_font_size": 36,
+                "social_preview_scale": 60,
+                "social_overlay_style": "Pílula Glassmorphism (Recomendado)",
+                "social_overlay_icon_style": "Cores Oficiais da Marca",
+                "social_youtube_enabled": True,
+                "social_youtube_handle": "@FinancasExpert",
+                "social_instagram_enabled": True,
+                "social_instagram_handle": "@financas.expert",
+                "social_tiktok_enabled": True,
+                "social_tiktok_handle": "@financas_tiktok",
+                "social_x_enabled": False,
+                "social_x_handle": ""
+            }
+            ok = save_social_profile("Canal Finanças", financas_cfg, set_as_active=True, filepath=tmp_path)
+            self.assertTrue(ok)
+
+            act_name, act_cfg = get_active_social_profile(tmp_path)
+            self.assertEqual(act_name, "Canal Finanças")
+            self.assertEqual(act_cfg["social_youtube_handle"], "@FinancasExpert")
+            self.assertEqual(act_cfg["social_instagram_handle"], "@financas.expert")
+
+            # 3. Alternar entre perfis
+            set_active_social_profile_name(initial_name, filepath=tmp_path)
+            act_name2, act_cfg2 = get_active_social_profile(tmp_path)
+            self.assertEqual(act_name2, initial_name)
+
+            # 4. Renomear perfil
+            ren_ok = rename_social_profile("Canal Finanças", "Finanças & Investimentos", filepath=tmp_path)
+            self.assertTrue(ren_ok)
+            data_after_ren = load_social_profiles(tmp_path)
+            self.assertIn("Finanças & Investimentos", data_after_ren["profiles"])
+            self.assertNotIn("Canal Finanças", data_after_ren["profiles"])
+
+            # 5. Excluir perfil
+            del_ok = delete_social_profile("Finanças & Investimentos", filepath=tmp_path)
+            self.assertTrue(del_ok)
+            data_after_del = load_social_profiles(tmp_path)
+            self.assertNotIn("Finanças & Investimentos", data_after_del["profiles"])
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+
 if __name__ == '__main__':
     unittest.main()
 
