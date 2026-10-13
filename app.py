@@ -4563,7 +4563,42 @@ if show_sec1:
 
         def _run_live_download_action(dl_url, vid_id, vfull_path, recent_min=None, start_s=None, end_s=None):
             if not dl_url or not str(dl_url).startswith("http"):
-                if vid_id:
+                if vid_id and str(vid_id).startswith("kick_"):
+                    _target_url = None
+                    _m_path = os.path.join("data", str(vid_id), "metadata.json")
+                    if os.path.exists(_m_path):
+                        try:
+                            with open(_m_path, "r", encoding="utf-8") as _mf_r:
+                                _target_url = json.load(_mf_r).get("url")
+                        except Exception:
+                            pass
+                    if not _target_url:
+                        _base_cand = str(vid_id).split("_t_")[0].split("_last")[0]
+                        _m_base = os.path.join("data", _base_cand, "metadata.json")
+                        if os.path.exists(_m_base):
+                            try:
+                                with open(_m_base, "r", encoding="utf-8") as _mf_r:
+                                    _target_url = json.load(_mf_r).get("url")
+                            except Exception:
+                                pass
+                    if not _target_url:
+                        lib_p = os.path.join("data", "library.json")
+                        if os.path.exists(lib_p):
+                            try:
+                                with open(lib_p, "r", encoding="utf-8") as _lf_r:
+                                    _items = json.load(_lf_r)
+                                    if isinstance(_items, list):
+                                        for _it in _items:
+                                            _i_id = str(_it.get("video_id", ""))
+                                            if _i_id in (str(vid_id), _base_cand) or str(vid_id) in _i_id:
+                                                _target_url = _it.get("url")
+                                                if _target_url:
+                                                    break
+                            except Exception:
+                                pass
+                    if _target_url:
+                        dl_url = _target_url
+                elif vid_id:
                     dl_url = f"https://www.youtube.com/watch?v={vid_id}"
             with st.spinner("🔴 Capturando trecho da live com Freeze Live Edge..."):
                 _vres = download_full_video(
@@ -4646,7 +4681,43 @@ if show_sec1:
                 except Exception:
                     pass
             if not _target_dl_url and _eff_live_id:
-                _target_dl_url = f"https://www.youtube.com/watch?v={_eff_live_id}"
+                if str(_eff_live_id).startswith("kick_"):
+                    _target_url = None
+                    _m_path = os.path.join("data", str(_eff_live_id), "metadata.json")
+                    if os.path.exists(_m_path):
+                        try:
+                            with open(_m_path, "r", encoding="utf-8") as _mf_r:
+                                _target_url = json.load(_mf_r).get("url")
+                        except Exception:
+                            pass
+                    if not _target_url:
+                        _base_cand = str(_eff_live_id).split("_t_")[0].split("_last")[0]
+                        _m_base = os.path.join("data", _base_cand, "metadata.json")
+                        if os.path.exists(_m_base):
+                            try:
+                                with open(_m_base, "r", encoding="utf-8") as _mf_r:
+                                    _target_url = json.load(_mf_r).get("url")
+                            except Exception:
+                                pass
+                    if not _target_url:
+                        lib_p = os.path.join("data", "library.json")
+                        if os.path.exists(lib_p):
+                            try:
+                                with open(lib_p, "r", encoding="utf-8") as _lf_r:
+                                    _items = json.load(_lf_r)
+                                    if isinstance(_items, list):
+                                        for _it in _items:
+                                            _i_id = str(_it.get("video_id", ""))
+                                            if _i_id in (str(_eff_live_id), _base_cand) or str(_eff_live_id) in _i_id:
+                                                _target_url = _it.get("url")
+                                                if _target_url:
+                                                    break
+                            except Exception:
+                                pass
+                    if _target_url:
+                        _target_dl_url = _target_url
+                if not _target_dl_url:
+                    _target_dl_url = f"https://www.youtube.com/watch?v={_eff_live_id}"
             live_col1, live_col2, live_col3, live_col4, live_col5 = st.columns(5)
             with live_col1:
                 if st.button("⚡ Últimos 15 min", key="btn_live_15m_top", use_container_width=True, help="Baixa em alta velocidade os últimos 15 minutos transmitidos na live até o momento atual."):

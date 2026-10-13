@@ -113,5 +113,78 @@ class TestKickSupport(unittest.TestCase):
         self.assertIn("-vn", call_args)
         self.assertIn("libmp3lame", call_args)
 
+    @patch('core.video_processor.os.remove')
+    @patch('core.video_processor.subprocess.run')
+    @patch('core.video_processor.os.path.exists')
+    @patch('core.video_processor.os.path.getsize')
+    @patch('core.extractor.extract_kick_metadata')
+    def test_download_full_video_kick_live_flag(self, mock_extract, mock_getsize, mock_exists, mock_subproc, mock_rm):
+        """Verifica se download_full_video com is_live=True roteia para download_kick_video sem chamar yt-dlp"""
+        mock_extract.return_value = {
+            "recording_url": "https://stream.kick.com/test/master.m3u8",
+            "error": None
+        }
+        mock_exists.return_value = True
+        mock_getsize.return_value = 50000000
+        mock_subproc.return_value = MagicMock(returncode=0)
+
+        res = video_processor.download_full_video(
+            url="https://kick.com/gabepeixe/videos/01a12bc9-9a78-7443-b6df-0f453895b31a",
+            output_path="test_kick_live.mp4",
+            is_live=True,
+            start_sec=100,
+            end_sec=200
+        )
+        self.assertIsNotNone(res.get("path"))
+        self.assertIsNone(res.get("error"))
+        call_args = mock_subproc.call_args[0][0]
+        self.assertIn("-ss", call_args)
+        self.assertIn("100.0", call_args)
+        self.assertIn("-t", call_args)
+        self.assertIn("100.0", call_args)
+
+    @patch('core.video_processor.os.remove')
+    @patch('core.video_processor.subprocess.run')
+    @patch('core.video_processor.os.path.exists')
+    @patch('core.video_processor.os.path.getsize')
+    @patch('core.extractor.extract_kick_metadata')
+    @patch('core.extractor.get_kick_playlist_total_duration')
+    def test_download_full_video_kick_recent_minutes(self, mock_dur, mock_extract, mock_getsize, mock_exists, mock_subproc, mock_rm):
+        """Verifica se captura de últimos minutos da live calcula -ss e -t corretamente baseado na duração total"""
+        mock_extract.return_value = {
+            "recording_url": "https://stream.kick.com/test/master.m3u8",
+            "error": None
+        }
+        mock_exists.return_value = True
+        mock_getsize.return_value = 50000000
+        mock_subproc.return_value = MagicMock(returncode=0)
+        # 3600 segundos de live total
+        mock_dur.return_value = 3600.0
+
+        # Últimos 15 minutos = 900s -> start = 3600 - 900 = 2700s, dur = 900s
+        res = video_processor.download_full_video(
+            url="https://kick.com/gabepeixe/videos/01a12bc9-9a78-7443-b6df-0f453895b31a",
+            output_path="test_kick_15m.mp4",
+            is_live=True,
+            recent_minutes=15.0
+        )
+        self.assertIsNotNone(res.get("path"))
+        call_args = mock_subproc.call_args[0][0]
+        self.assertIn("-ss", call_args)
+        self.assertIn("2700.0", call_args)
+        self.assertIn("-t", call_args)
+        self.assertIn("900.0", call_args)
+
+    @patch('urllib.request.urlopen')
+    def test_get_kick_playlist_total_duration(self, mock_urlopen):
+        """Verifica a extração da duração total de playlist HLS da Kick"""
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b"#EXTM3U\n#EXT-X-TWITCH-TOTAL-SECS:4319.650\n#EXTINF:10.0,\n0.ts\n"
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        dur = extractor.get_kick_playlist_total_duration("https://stream.kick.com/test/variant.m3u8")
+        self.assertAlmostEqual(dur, 4319.650, places=2)
+
 if __name__ == '__main__':
     unittest.main()
+

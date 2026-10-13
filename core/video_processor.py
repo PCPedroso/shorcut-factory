@@ -476,6 +476,94 @@ def build_finite_m3u8(base_seq: int, target_dur: float, pairs: list, start_sq: i
     return '\n'.join(out)
 
 
+def download_kick_video(
+    url: str,
+    output_path: str = "temp_video.mp4",
+    start_sec: float = None,
+    end_sec: float = None,
+    recent_minutes: float = None
+) -> dict:
+    """
+    Baixa vídeo em alta resolução de uma transmissão ao vivo ou VOD da Kick.com diretamente via FFmpeg HLS,
+    com suporte completo a recortes por intervalo de tempo ou últimos minutos (recent_minutes).
+    """
+    import subprocess
+    import imageio_ffmpeg
+    from core.extractor import extract_kick_metadata, parse_time_str, get_kick_playlist_total_duration
+
+    stream_url = url if (str(url).startswith('https://stream.kick.com') or '.m3u8' in str(url)) else None
+    if not stream_url:
+        k_meta = extract_kick_metadata(url)
+        stream_url = k_meta.get('recording_url')
+
+    if not stream_url:
+        return {"path": None, "error": "Não foi possível obter a URL do fluxo HLS da Kick.com."}
+
+    ffmpeg_path = FFMPEG_EXE or imageio_ffmpeg.get_ffmpeg_exe()
+    if not ffmpeg_path or not os.path.exists(ffmpeg_path):
+        return {"path": None, "error": "Executável FFmpeg não encontrado."}
+
+    s_parsed = None
+    duration = None
+
+    if recent_minutes is not None and recent_minutes > 0:
+        total_dur = get_kick_playlist_total_duration(stream_url)
+        recent_s = float(recent_minutes) * 60.0
+        if total_dur > 0:
+            s_parsed = max(0.0, total_dur - recent_s)
+            duration = min(total_dur, recent_s)
+        else:
+            duration = recent_s
+    else:
+        s_parsed = parse_time_str(start_sec)
+        e_parsed = parse_time_str(end_sec)
+        if e_parsed is not None and s_parsed is not None and e_parsed > s_parsed:
+            duration = e_parsed - s_parsed
+        elif e_parsed is not None and s_parsed is None:
+            duration = e_parsed
+
+    output_path = os.path.abspath(output_path)
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    if os.path.exists(output_path):
+        try:
+            os.remove(output_path)
+        except Exception:
+            pass
+
+    # 1. Tentativa rápida via stream copy (-c copy)
+    cmd = [ffmpeg_path, '-y']
+    if s_parsed is not None and s_parsed > 0:
+        cmd.extend(['-ss', str(s_parsed)])
+    cmd.extend(['-i', stream_url])
+    if duration is not None and duration > 0:
+        cmd.extend(['-t', str(duration)])
+    cmd.extend(['-c', 'copy', '-movflags', '+faststart', output_path])
+
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
+        return {"path": output_path, "error": None}
+
+    # 2. Fallback com recodificação leve se stream copy falhar
+    cmd_fallback = [ffmpeg_path, '-y']
+    if s_parsed is not None and s_parsed > 0:
+        cmd_fallback.extend(['-ss', str(s_parsed)])
+    cmd_fallback.extend(['-i', stream_url])
+    if duration is not None and duration > 0:
+        cmd_fallback.extend(['-t', str(duration)])
+    cmd_fallback.extend([
+        '-c:v', 'libx264', '-preset', 'veryfast',
+        '-c:a', 'aac', '-movflags', '+faststart',
+        output_path
+    ])
+    p2 = subprocess.run(cmd_fallback, capture_output=True, text=True)
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
+        return {"path": output_path, "error": None}
+
+    return {"path": None, "error": f"Falha ao gravar vídeo da Kick via FFmpeg: {p2.stderr or p.stderr or 'Arquivo vazio'}"}
+
+
 def download_live_video_snapshot(
     url: str,
     output_path: str = "temp_video.mp4",
@@ -495,6 +583,16 @@ def download_live_video_snapshot(
     - Para streams encerradas (was_live / VOD):
       Baixa via manifesto VOD completo ou yt-dlp sem loops infinitos.
     """
+    # 🟢 Intercepta transmissões e VODs da Kick.com nativamente sem yt-dlp
+    if 'kick.com' in str(url).lower() or str(url).startswith('https://stream.kick.com'):
+        return download_kick_video(
+            url=url,
+            output_path=output_path,
+            start_sec=start_sec,
+            end_sec=end_sec,
+            recent_minutes=recent_minutes
+        )
+
     import urllib.request
     import subprocess
     import concurrent.futures
@@ -839,6 +937,16 @@ def download_full_video(
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
 
+        # 🟢 Suporte nativo a transmissões e VODs da Kick.com via FFmpeg direto com Time-Range Slicing
+        if 'kick.com' in str(url).lower() or str(url).startswith('https://stream.kick.com'):
+            return download_kick_video(
+                url=url,
+                output_path=output_path,
+                start_sec=start_sec,
+                end_sec=end_sec,
+                recent_minutes=recent_minutes
+            )
+
         # 🔴 Se for live ao vivo, aciona o snapshot HLS de alta velocidade com Freeze Live Edge
         if is_live:
             return download_live_video_snapshot(
@@ -851,39 +959,6 @@ def download_full_video(
 
         if os.path.exists(output_path):
             os.remove(output_path)
-
-        # 🟢 Suporte nativo a VODs e transmissões da Kick.com via HLS direto com Time-Range Slicing
-        if 'kick.com' in url.lower() or url.startswith('https://stream.kick.com'):
-            from core.extractor import extract_kick_metadata, parse_time_str
-            stream_url = url if (url.startswith('https://stream.kick.com') or '.m3u8' in url) else None
-            if not stream_url:
-                k_meta = extract_kick_metadata(url)
-                stream_url = k_meta.get('recording_url')
-            
-            if stream_url:
-                s_parsed = parse_time_str(start_sec)
-                e_parsed = parse_time_str(end_sec)
-                cmd = [FFMPEG_EXE, '-y']
-                if s_parsed is not None and s_parsed > 0:
-                    cmd.extend(['-ss', str(s_parsed)])
-                cmd.extend(['-i', stream_url])
-                if e_parsed is not None and e_parsed > (s_parsed or 0):
-                    cmd.extend(['-t', str(e_parsed - (s_parsed or 0))])
-                cmd.extend(['-c', 'copy', '-movflags', '+faststart', output_path])
-                subprocess.run(cmd, capture_output=True, text=True)
-                if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
-                    return {"path": output_path, "error": None}
-                # Fallback se stream copy falhar: re-encode ultra-rápido
-                cmd_re = [FFMPEG_EXE, '-y']
-                if s_parsed is not None and s_parsed > 0:
-                    cmd_re.extend(['-ss', str(s_parsed)])
-                cmd_re.extend(['-i', stream_url])
-                if e_parsed is not None and e_parsed > (s_parsed or 0):
-                    cmd_re.extend(['-t', str(e_parsed - (s_parsed or 0))])
-                cmd_re.extend(['-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', output_path])
-                subprocess.run(cmd_re, capture_output=True, text=True)
-                if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
-                    return {"path": output_path, "error": None}
 
         deno_exe = os.path.join(DENO_DIR, "deno.exe")
         js_runtimes_cfg = {}

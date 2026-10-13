@@ -115,6 +115,68 @@ def extract_kick_metadata(url: str) -> dict:
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7',
     }
+    
+    # Se já for uma URL HLS direta do Kick, retorna estrutura compatível
+    if url.startswith('https://stream.kick.com') or ('.m3u8' in url and 'kick' in url.lower()):
+        return {
+            "title": "Kick Stream",
+            "clean_music_title": "Kick Stream",
+            "artist": None,
+            "track": None,
+            "album": None,
+            "genre": None,
+            "suggested_category_label": "🎮 Gameplay / Live Stream",
+            "suggested_category_key": "gameplay",
+            "heatmap": None,
+            "duration": None,
+            "upload_date": None,
+            "thumbnail": None,
+            "channel": "Kick Stream",
+            "url": url,
+            "recording_url": url,
+            "is_live": True,
+            "was_live": False,
+            "live_status": "is_live",
+            "error": None
+        }
+
+    # Resolução de canal/URL canônica para Kick caso a URL não contenha o canal ou seja um ID/UUID puro
+    uuid_match = re.search(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', url, re.IGNORECASE)
+    if uuid_match:
+        target_uuid = uuid_match.group(1).lower()
+        has_channel_pattern = bool(re.search(r'kick\.com/([A-Za-z0-9_-]+)/videos?/', url))
+        if not has_channel_pattern:
+            found_url = None
+            lib_file = os.path.join("data", "library.json")
+            if os.path.exists(lib_file):
+                try:
+                    with open(lib_file, "r", encoding="utf-8") as lf:
+                        items = json.load(lf)
+                        if isinstance(items, list):
+                            for it in items:
+                                it_url = it.get("url") or ""
+                                if target_uuid in it_url.lower() and re.search(r'kick\.com/[A-Za-z0-9_-]+/videos?/', it_url):
+                                    found_url = it_url
+                                    break
+                except Exception:
+                    pass
+            if not found_url and os.path.exists("data"):
+                try:
+                    for d in os.listdir("data"):
+                        if target_uuid in d.lower():
+                            mf = os.path.join("data", d, "metadata.json")
+                            if os.path.exists(mf):
+                                with open(mf, "r", encoding="utf-8") as mfr:
+                                    mdata = json.load(mfr)
+                                    it_url = mdata.get("url") or ""
+                                    if target_uuid in it_url.lower() and re.search(r'kick\.com/[A-Za-z0-9_-]+/videos?/', it_url):
+                                        found_url = it_url
+                                        break
+                except Exception:
+                    pass
+            if found_url:
+                url = found_url
+
     try:
         r = requests.get(url, headers=headers, timeout=15)
         r.raise_for_status()
@@ -218,14 +280,132 @@ def extract_kick_metadata(url: str) -> dict:
         }
 
 
+def get_kick_playlist_total_duration(stream_url: str) -> float:
+    """
+    Inspeciona a playlist m3u8 da Kick (master ou variante) e obtém a duração total em segundos.
+    Verifica a tag #EXT-X-TWITCH-TOTAL-SECS ou calcula somando as tags #EXTINF.
+    """
+    import urllib.request
+    import urllib.parse
+    import re
+
+    if not stream_url or not str(stream_url).startswith("http"):
+        return 0.0
+
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+
+    def _fetch_m3u8(u: str) -> str:
+        req = urllib.request.Request(u, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.read().decode('utf-8', errors='ignore')
+
+    try:
+        content = _fetch_m3u8(stream_url)
+
+        # 1. Checa se o próprio arquivo tem #EXT-X-TWITCH-TOTAL-SECS
+        m_total = re.search(r'#EXT-X-TWITCH-TOTAL-SECS:([\d.]+)', content)
+        if m_total:
+            return float(m_total.group(1))
+
+        # 2. Se for master playlist (contém variantes .m3u8), acessa a primeira variante
+        sub_m3u8_match = re.search(r'([\w./-]+\.m3u8[^\s]*)', content)
+        if sub_m3u8_match:
+            sub_path = sub_m3u8_match.group(1)
+            sub_url = urllib.parse.urljoin(stream_url, sub_path)
+            sub_content = _fetch_m3u8(sub_url)
+
+            m_sub_total = re.search(r'#EXT-X-TWITCH-TOTAL-SECS:([\d.]+)', sub_content)
+            if m_sub_total:
+                return float(m_sub_total.group(1))
+
+            extinfs = re.findall(r'#EXTINF:([\d.]+)', sub_content)
+            if extinfs:
+                return sum(float(x) for x in extinfs)
+
+        # 3. Soma #EXTINF do conteúdo principal se houver
+        extinfs = re.findall(r'#EXTINF:([\d.]+)', content)
+        if extinfs:
+            return sum(float(x) for x in extinfs)
+
+    except Exception:
+        pass
+
+    return 0.0
+
+
+def download_kick_audio(
+    url: str,
+    output_path: str,
+    start_sec: float = None,
+    end_sec: float = None,
+    recent_minutes: float = None
+) -> dict:
+    """
+    Baixa o áudio de uma transmissão ou VOD da Kick.com via FFmpeg direto da stream HLS,
+    com suporte completo a recortes de tempo (start/end) ou captura de minutos recentes (recent_minutes).
+    """
+    stream_url = url if (url.startswith('https://stream.kick.com') or '.m3u8' in url) else None
+    if not stream_url:
+        k_meta = extract_kick_metadata(url)
+        stream_url = k_meta.get('recording_url')
+
+    if not stream_url:
+        return {"path": None, "error": "Não foi possível obter a URL do fluxo HLS da Kick.com."}
+
+    ffmpeg_path = FFMPEG_EXE or imageio_ffmpeg.get_ffmpeg_exe()
+    if not ffmpeg_path or not os.path.exists(ffmpeg_path):
+        return {"path": None, "error": "Executável FFmpeg não encontrado."}
+
+    s_parsed = None
+    duration = None
+
+    if recent_minutes is not None and recent_minutes > 0:
+        total_dur = get_kick_playlist_total_duration(stream_url)
+        recent_s = float(recent_minutes) * 60.0
+        if total_dur > 0:
+            s_parsed = max(0.0, total_dur - recent_s)
+            duration = min(total_dur, recent_s)
+        else:
+            duration = recent_s
+    else:
+        s_parsed = parse_time_str(start_sec)
+        e_parsed = parse_time_str(end_sec)
+        if e_parsed is not None and s_parsed is not None and e_parsed > s_parsed:
+            duration = e_parsed - s_parsed
+        elif e_parsed is not None and s_parsed is None:
+            duration = e_parsed
+
+    output_path = os.path.abspath(output_path)
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    if os.path.exists(output_path):
+        try:
+            os.remove(output_path)
+        except Exception:
+            pass
+
+    cmd = [ffmpeg_path, '-y']
+    if s_parsed is not None and s_parsed > 0:
+        cmd.extend(['-ss', str(s_parsed)])
+    cmd.extend(['-i', stream_url])
+    if duration is not None and duration > 0:
+        cmd.extend(['-t', str(duration)])
+    cmd.extend(['-vn', '-c:a', 'libmp3lame', '-b:a', '192k', output_path])
+
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 1024:
+        return {"path": output_path, "error": None}
+
+    return {"path": None, "error": f"Falha ao extrair áudio da Kick: {res.stderr or 'Arquivo gerado vazio'}"}
+
+
 def get_video_metadata(url: str):
     """
     Extrai metadados, heatmaps e status de transmissão ao vivo de vídeos do YouTube, Instagram, TikTok, Kick e web.
     """
-    if 'kick.com' in url.lower():
-        k_meta = extract_kick_metadata(url)
-        if not k_meta.get('error'):
-            return k_meta
+    if 'kick.com' in str(url).lower() or str(url).startswith('https://stream.kick.com'):
+        return extract_kick_metadata(url)
 
     cookie_file = get_cookie_file()
     
@@ -485,6 +665,16 @@ def download_live_audio_snapshot(
     Gera sub-manifesto estático M3U8 com #EXT-X-ENDLIST e MEDIA-SEQUENCE sincronizado,
     eliminando loops de espera do streamer e convertendo via FFmpeg para MP3 192kbps.
     """
+    # 🟢 Suporte nativo a transmissões e VODs da Kick.com via FFmpeg direto sem yt-dlp
+    if 'kick.com' in str(url).lower() or str(url).startswith('https://stream.kick.com'):
+        return download_kick_audio(
+            url=url,
+            output_path=output_path,
+            start_sec=start_sec,
+            end_sec=end_sec,
+            recent_minutes=recent_minutes
+        )
+
     import urllib.request
     import subprocess
     import tempfile
@@ -637,6 +827,16 @@ def download_audio(
     Para transmissões ao vivo (is_live=True), aciona o motor de Live Snapshot M3U8 para captura
     ultra-rápida sem ficar preso em loops de streaming contínuo.
     """
+    # 🟢 Suporte nativo a transmissões e VODs da Kick.com via FFmpeg direto com Time-Range Slicing
+    if 'kick.com' in str(url).lower() or str(url).startswith('https://stream.kick.com'):
+        return download_kick_audio(
+            url=url,
+            output_path=output_path,
+            start_sec=start_sec,
+            end_sec=end_sec,
+            recent_minutes=recent_minutes
+        )
+
     # 🔴 Para transmissões ao vivo, aciona o snapshot M3U8 de alta velocidade
     if is_live:
         return download_live_audio_snapshot(
@@ -646,28 +846,6 @@ def download_audio(
             end_sec=end_sec,
             recent_minutes=recent_minutes
         )
-
-    # 🟢 Suporte nativo a VODs e transmissões da Kick.com via HLS direto com Time-Range Slicing
-    if 'kick.com' in url.lower() or url.startswith('https://stream.kick.com'):
-        stream_url = url if (url.startswith('https://stream.kick.com') or '.m3u8' in url) else None
-        if not stream_url:
-            k_meta = extract_kick_metadata(url)
-            stream_url = k_meta.get('recording_url')
-        if stream_url:
-            import subprocess
-            ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
-            s_parsed = parse_time_str(start_sec)
-            e_parsed = parse_time_str(end_sec)
-            cmd = [ffmpeg_path, '-y']
-            if s_parsed is not None and s_parsed > 0:
-                cmd.extend(['-ss', str(s_parsed)])
-            cmd.extend(['-i', stream_url])
-            if e_parsed is not None and e_parsed > (s_parsed or 0):
-                cmd.extend(['-t', str(e_parsed - (s_parsed or 0))])
-            cmd.extend(['-vn', '-c:a', 'libmp3lame', '-b:a', '192k', output_path])
-            subprocess.run(cmd, capture_output=True, text=True)
-            if os.path.exists(output_path) and os.path.getsize(output_path) > 1024:
-                return {"path": output_path, "error": None}
 
     ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
     cookie_file = get_cookie_file()
