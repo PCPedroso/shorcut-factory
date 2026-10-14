@@ -9922,8 +9922,8 @@ if _has_media_ready:
                 _p_data = _soc_profiles_dict["profiles"][_active_profile_name]
                 st.session_state["social_overlay_tgl"] = bool(_p_data.get("social_overlay_enabled", True))
                 st.session_state["social_pos_radio"] = str(_p_data.get("social_overlay_position", "Inferior (Bottom)"))
-                st.session_state["social_offset_slider"] = int(_p_data.get("social_overlay_offset_y", 0))
-                st.session_state["social_font_size_slider"] = int(_p_data.get("social_overlay_font_size", 32))
+                st.session_state["social_offset_input"] = int(_p_data.get("social_overlay_offset_y", 0))
+                st.session_state["social_font_size_input"] = int(_p_data.get("social_overlay_font_size", 32))
                 st.session_state["social_preview_scale_slider"] = int(_p_data.get("social_preview_scale", 50))
                 st.session_state["social_style_sel"] = str(_p_data.get("social_overlay_style", "Pílula Glassmorphism (Recomendado)"))
                 st.session_state["social_icon_style_sel"] = str(_p_data.get("social_overlay_icon_style", "Cores Oficiais da Marca"))
@@ -9941,7 +9941,7 @@ if _has_media_ready:
         social_overlay_enabled = st.session_state.get("social_overlay_tgl", _cur_profile.get("social_overlay_enabled", False))
         saved_social_pos = _cur_profile.get("social_overlay_position", "Inferior (Bottom)")
         saved_social_offset_y = max(-450, min(450, int(_cur_profile.get("social_overlay_offset_y", 0))))
-        saved_social_font_size = int(_cur_profile.get("social_overlay_font_size", 32))
+        saved_social_font_size = max(10, min(100, int(_cur_profile.get("social_overlay_font_size", 32))))
         saved_social_preview_scale = max(20, min(100, int(_cur_profile.get("social_preview_scale", 50))))
         saved_social_style = _cur_profile.get("social_overlay_style", "Pílula Glassmorphism (Recomendado)")
         saved_social_icon_style = _cur_profile.get("social_overlay_icon_style", "Cores Oficiais da Marca")
@@ -9987,8 +9987,8 @@ if _has_media_ready:
                     upd_data = {
                         "social_overlay_enabled": bool(st.session_state.get("social_overlay_tgl", social_overlay_enabled)),
                         "social_overlay_position": str(st.session_state.get("social_pos_radio", saved_social_pos)),
-                        "social_overlay_offset_y": int(st.session_state.get("social_offset_slider", saved_social_offset_y)),
-                        "social_overlay_font_size": int(st.session_state.get("social_font_size_slider", saved_social_font_size)),
+                        "social_overlay_offset_y": int(st.session_state.get("social_offset_input", st.session_state.get("social_offset_slider", saved_social_offset_y))),
+                        "social_overlay_font_size": int(st.session_state.get("social_font_size_input", st.session_state.get("social_font_size_slider", saved_social_font_size))),
                         "social_preview_scale": int(st.session_state.get("social_preview_scale_slider", saved_social_preview_scale)),
                         "social_overlay_style": str(st.session_state.get("social_style_sel", saved_social_style)),
                         "social_overlay_icon_style": str(st.session_state.get("social_icon_style_sel", saved_social_icon_style)),
@@ -10088,23 +10088,23 @@ if _has_media_ready:
                     key="social_pos_radio"
                 )
             with col_sc_pos2:
-                social_overlay_offset_y = st.slider(
+                social_overlay_offset_y = st.number_input(
                     "↕️ Ajuste Fino de Margem (px):",
                     min_value=-450,
                     max_value=450,
-                    value=saved_social_offset_y,
-                    step=5,
-                    key="social_offset_slider",
+                    value=int(saved_social_offset_y),
+                    step=1,
+                    key="social_offset_input",
                     help="Desloca verticalmente a assinatura para evitar sobrepor legendas ou elementos da interface do Reels/TikTok."
                 )
             with col_sc_pos3:
-                social_overlay_font_size = st.slider(
+                social_overlay_font_size = st.number_input(
                     "🔤 Tamanho da Fonte (px):",
-                    min_value=14,
-                    max_value=54,
-                    value=saved_social_font_size,
-                    step=2,
-                    key="social_font_size_slider",
+                    min_value=10,
+                    max_value=100,
+                    value=int(saved_social_font_size),
+                    step=1,
+                    key="social_font_size_input",
                     help="O tamanho dos ícones é redimensionado automaticamente de forma proporcional à tipografia."
                 )
 
