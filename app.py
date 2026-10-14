@@ -1771,16 +1771,22 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
 
             # 3. Controles Customizáveis e Modo de Container
             col_b_hl_m1, col_b_hl_m2, col_b_hl_m3 = st.columns(3)
+            _hl_modes = ["line_boxes", "connected_bubble", "single_card", "outline_only"]
+            _hl_mode_labels = {
+                "line_boxes": "📦 Caixa por Linha (TikTok/Reels)",
+                "connected_bubble": "💬 Balão Conectado (Instagram Stories)",
+                "single_card": "🃏 Card Único (Bloco)",
+                "outline_only": "✨ Sem Caixa (Contorno)"
+            }
+            cur_b_mode = st.session_state.get("batch_hl_mode")
+            mode_b_idx = _hl_modes.index(cur_b_mode) if cur_b_mode in _hl_modes else (3 if sel_b_hl_key == "floating_bold" else 0)
+
             with col_b_hl_m1:
                 sel_b_hl_mode = st.selectbox(
                     "Modo do Container:",
-                    ["line_boxes", "single_card", "outline_only"],
-                    index=0 if sel_b_hl_key != "floating_bold" else 2,
-                    format_func=lambda x: {
-                        "line_boxes": "📦 Caixa por Linha (TikTok/Reels)",
-                        "single_card": "🃏 Card Único (Bloco)",
-                        "outline_only": "✨ Sem Caixa (Contorno)"
-                    }[x],
+                    _hl_modes,
+                    index=mode_b_idx,
+                    format_func=lambda x: _hl_mode_labels.get(x, x),
                     key="batch_hl_mode"
                 )
             with col_b_hl_m2:
@@ -3416,16 +3422,22 @@ def render_quick_editor_component(video_path: str, unique_key: str):
 
             # 3. Controles Customizáveis e Modo de Container
             col_hl_m1, col_hl_m2, col_hl_m3 = st.columns(3)
+            _post_hl_modes = ["line_boxes", "connected_bubble", "single_card", "outline_only"]
+            _post_hl_mode_labels = {
+                "line_boxes": "📦 Caixa por Linha (TikTok/Reels)",
+                "connected_bubble": "💬 Balão Conectado (Instagram Stories)",
+                "single_card": "🃏 Card Único (Bloco)",
+                "outline_only": "✨ Sem Caixa (Contorno)"
+            }
+            cur_post_mode = st.session_state.get(f"hl_post_mode_{unique_key}")
+            mode_post_idx = _post_hl_modes.index(cur_post_mode) if cur_post_mode in _post_hl_modes else (3 if sel_hl_preset_key == "floating_bold" else 0)
+
             with col_hl_m1:
                 sel_hl_mode = st.selectbox(
                     "Modo do Container:",
-                    ["line_boxes", "single_card", "outline_only"],
-                    index=0 if sel_hl_preset_key != "floating_bold" else 2,
-                    format_func=lambda x: {
-                        "line_boxes": "📦 Caixa por Linha (TikTok/Reels)",
-                        "single_card": "🃏 Card Único (Bloco)",
-                        "outline_only": "✨ Sem Caixa (Contorno)"
-                    }[x],
+                    _post_hl_modes,
+                    index=mode_post_idx,
+                    format_func=lambda x: _post_hl_mode_labels.get(x, x),
                     key=f"hl_post_mode_{unique_key}"
                 )
             with col_hl_m2:

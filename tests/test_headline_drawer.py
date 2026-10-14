@@ -312,6 +312,34 @@ class TestHeadlineDrawer(unittest.TestCase):
             self.assertIn("eof_action=pass", fc_arg)
 
 
+    def test_render_headline_overlay_connected_bubble(self):
+        from core.headline_drawer import render_headline_overlay
+        import numpy as np
+
+        text = "LOJA ONLINE EM 5\nMINUTOS? 😱 🚨"
+        overlay = render_headline_overlay(
+            video_width=1080,
+            video_height=1920,
+            text=text,
+            config={
+                "container_mode": "connected_bubble",
+                "margin_top": 240,
+                "font_size": 65,
+                "bg_color": "#EEEEEE",
+                "text_color": "#000000",
+                "bg_alpha": 0.95,
+                "shadow": True,
+                "corner_radius": 24
+            }
+        )
+        self.assertEqual(overlay.shape, (1920, 1080, 4))
+        # Ensure alpha mask was drawn
+        self.assertTrue(overlay[:, :, 3].max() > 0)
+        # Background should be drawn with significant coverage
+        opaque_count = np.sum(overlay[:, :, 3] > 200)
+        self.assertGreater(opaque_count, 10000)
+
+
 if __name__ == '__main__':
     unittest.main()
 

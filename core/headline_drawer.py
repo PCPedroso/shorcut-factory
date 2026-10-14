@@ -490,6 +490,85 @@ def render_headline_overlay(
             
             text_y += m["h"] + (box_padding_y * 2) + line_spacing - (box_padding_y * 2)
 
+    elif container_mode in ("connected_bubble", "bubble", "connected_boxes"):
+        # 💬 Balão Conectado / Unificado (Estilo Instagram Stories / TikTok Sticker)
+        # Cada linha possui sua largura proporcional ao texto, unindo-se em um único container orgânico
+        # com cantos externos convexos e concordâncias internas côncavas arredondadas.
+        box_coords = []
+        text_coords = []
+        cur_box_y = cur_y
+        
+        # Raio de arredondamento adaptado à escala
+        r = max(8, min(48, corner_radius if corner_radius > 0 else int(font_size * 0.35)))
+
+        for i, m in enumerate(line_metrics):
+            lw = m["w"]
+            lh = m["h"]
+            box_w = lw + (box_padding_x * 2)
+            box_h = lh + (box_padding_y * 2)
+
+            if alignment == "left":
+                bx0 = int(video_width * ((100.0 - container_width_pct) / 200.0))
+            elif alignment == "right":
+                bx0 = int(video_width - (video_width * ((100.0 - container_width_pct) / 200.0)) - box_w)
+            else:
+                bx0 = (video_width - box_w) // 2
+
+            bx1 = bx0 + box_w
+            by0 = cur_box_y
+            by1 = by0 + box_h
+
+            box_coords.append((bx0, by0, bx1, by1))
+
+            tx = bx0 + box_padding_x - m["offset_x"]
+            ty = by0 + box_padding_y - m["offset_y"]
+            text_coords.append((tx, ty, m["text"]))
+
+            # Sobrepõe levemente com a próxima linha para fusão perfeita da bolha
+            cur_box_y = by1 - 6
+
+        # Máscara binária para a morfologia matemática
+        mask = np.zeros((video_height, video_width), dtype=np.uint8)
+        for bx0, by0, bx1, by1 in box_coords:
+            cv2.rectangle(mask, (bx0, by0), (bx1, by1), 255, -1)
+
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+        # Closing arredonda cantos côncavos (transições entre linhas)
+        closed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k)
+        # Opening arredonda cantos convexos (bordas externas)
+        opened = cv2.morphologyEx(closed, cv2.MORPH_OPEN, k)
+
+        # Suavização anti-aliasing
+        smooth_mask = cv2.GaussianBlur(opened.astype(np.float32), (3, 3), 0.8)
+
+        # Sombra projetada
+        if shadow_enabled and bg_opacity > 0.1:
+            s_alpha = int(90 * bg_opacity)
+            s_mask = np.zeros_like(smooth_mask)
+            if shadow_offset_y > 0 and shadow_offset_y < video_height:
+                s_mask[shadow_offset_y:, :] = smooth_mask[:-shadow_offset_y, :]
+            s_img = Image.fromarray((s_mask * (s_alpha / 255.0)).astype(np.uint8), mode="L")
+            s_layer = Image.new("RGBA", (video_width, video_height), (0, 0, 0, 0))
+            s_layer.paste((0, 0, 0, s_alpha), mask=s_img)
+            img.alpha_composite(s_layer)
+
+        # Fundo do balão conectado
+        if bg_opacity > 0.01:
+            bg_alpha_scaled = smooth_mask * bg_opacity
+            bg_alpha_uint8 = np.clip(bg_alpha_scaled, 0, 255).astype(np.uint8)
+            bg_mask_img = Image.fromarray(bg_alpha_uint8, mode="L")
+            bg_layer = Image.new("RGBA", (video_width, video_height), (0, 0, 0, 0))
+            bg_layer.paste(bg_rgba, mask=bg_mask_img)
+            img.alpha_composite(bg_layer)
+
+        # Atualiza draw para os textos por cima
+        draw = ImageDraw.Draw(img)
+        for tx, ty, t_text in text_coords:
+            if stroke_width > 0:
+                draw.text((tx, ty), t_text, font=font, fill=text_rgba, stroke_width=stroke_width, stroke_fill=stroke_rgba)
+            else:
+                draw.text((tx, ty), t_text, font=font, fill=text_rgba)
+
     elif container_mode == "line_boxes":
         # Cada linha recebe sua própria caixa arredondada
         for m in line_metrics:
