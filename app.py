@@ -2021,14 +2021,33 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
                 st.caption("Faça os ajustes desejados e clique no botão 🔄 para atualizar a prévia.")
 
             sample_p_text = b_hl_text.replace("{parte}", "01").replace("{num}", "1")
+            batch_prev_sig = (
+                str(sample_p_text),
+                round(float(b_hl_preview_sec), 2),
+                round(float(final_b_hl_start_offset), 2),
+                round(float(final_b_hl_end_offset), 2),
+                str(sel_b_trans_type),
+                round(float(sel_b_trans_dur), 2),
+                str(sel_b_hl_key),
+                str(sel_b_hl_mode),
+                int(sel_b_hl_margin_top),
+                int(sel_b_hl_font_size),
+                str(sel_b_hl_text_color).lower(),
+                str(sel_b_hl_bg_color).lower(),
+                round(float(sel_b_hl_bg_alpha), 2),
+                str(sel_b_hl_align),
+                int(sel_b_hl_pad_h),
+                int(sel_b_hl_pad_v),
+                int(sel_b_hl_line_spacing),
+                int(sel_b_hl_corner),
+                round(float(sel_b_hl_max_w_pct), 2),
+                bool(sel_b_hl_shadow),
+            )
+            cached_b_prev_sig = st.session_state.get("cached_batch_hl_prev_sig")
             need_b_prev_update = (
                 btn_trig_b_hl
                 or ("cached_batch_hl_prev" not in st.session_state)
-                or (b_hl_preview_sec != st.session_state.get("cached_batch_hl_prev_sec"))
-                or (final_b_hl_start_offset != st.session_state.get("cached_batch_hl_start_offset"))
-                or (final_b_hl_end_offset != st.session_state.get("cached_batch_hl_end_offset"))
-                or (sel_b_trans_type != st.session_state.get("cached_batch_hl_trans_type"))
-                or (sel_b_trans_dur != st.session_state.get("cached_batch_hl_trans_dur"))
+                or (batch_prev_sig != cached_b_prev_sig)
             )
 
             with col_b_hl_prev_view:
@@ -2040,11 +2059,8 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
                             config=b_hl_cfg,
                             timestamp_s=b_hl_preview_sec
                         )
+                        st.session_state["cached_batch_hl_prev_sig"] = batch_prev_sig
                         st.session_state["cached_batch_hl_prev_sec"] = b_hl_preview_sec
-                        st.session_state["cached_batch_hl_start_offset"] = final_b_hl_start_offset
-                        st.session_state["cached_batch_hl_end_offset"] = final_b_hl_end_offset
-                        st.session_state["cached_batch_hl_trans_type"] = sel_b_trans_type
-                        st.session_state["cached_batch_hl_trans_dur"] = sel_b_trans_dur
 
                 prev_frame_hl = st.session_state.get("cached_batch_hl_prev")
                 if prev_frame_hl is not None:
@@ -3299,6 +3315,16 @@ def render_quick_editor_component(video_path: str, unique_key: str):
 
             is_preset_active = (sel_p_choice != "-- Nenhuma (Personalizado) --" and sel_p_choice in user_hl_presets)
 
+            # Detecta se há ajustes finos aplicados em relação à pré-configuração salva
+            preset_has_changes = False
+            if is_preset_active:
+                cur_s = _collect_current_hl_settings(unique_key)
+                base_s = user_hl_presets[sel_p_choice]
+                for k in ["container_mode", "margin_top", "font_size", "text_color", "bg_color", "bg_alpha", "alignment", "padding_h", "padding_v", "line_spacing", "corner_radius", "max_width_pct", "shadow"]:
+                    if str(cur_s.get(k)).lower() != str(base_s.get(k)).lower():
+                        preset_has_changes = True
+                        break
+
             with col_p_rel:
                 if st.button("🔄", key=f"btn_rel_hl_preset_{unique_key}", help="Recarregar esta pré-configuração descartando alterações manuais", disabled=not is_preset_active, use_container_width=True):
                     _apply_hl_preset(user_hl_presets[sel_p_choice], unique_key)
@@ -3307,9 +3333,11 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     st.rerun()
 
             with col_p_save:
-                if st.button("💾 Salvar", key=f"btn_upd_hl_preset_{unique_key}", help=f"Atualizar e sobrescrever '{sel_p_choice}' com as configurações atuais da tela", disabled=not is_preset_active, use_container_width=True):
+                btn_save_title = "💾 Salvar*" if preset_has_changes else "💾 Salvar"
+                if st.button(btn_save_title, key=f"btn_upd_hl_preset_{unique_key}", help=f"Atualizar e sobrescrever '{sel_p_choice}' com as alterações e ajustes finos da tela", disabled=not is_preset_active, use_container_width=True):
                     upd_cfg = _collect_current_hl_settings(unique_key)
                     save_user_headline_preset(sel_p_choice, upd_cfg)
+                    st.session_state.pop(f"cached_hl_prev_sig_{unique_key}", None)
                     st.toast(f"💾 Pré-configuração '{sel_p_choice}' atualizada com sucesso!")
                     st.rerun()
 
@@ -3320,6 +3348,9 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     st.session_state.pop(last_loaded_key, None)
                     st.toast(f"🗑️ Pré-configuração '{sel_p_choice}' excluída com sucesso!")
                     st.rerun()
+
+            if is_preset_active and preset_has_changes:
+                st.caption(f"✏️ *Ajustes finos aplicados sobre **{sel_p_choice}**. Clique em **💾 Salvar*** para persistir as alterações neste preset ou crie um novo abaixo.*")
 
             col_sub_p1, col_sub_p2 = st.columns(2)
             with col_sub_p1:
@@ -3442,22 +3473,24 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 )
             with col_hl_m2:
                 saved_margin_top = int(_cfg.get("headline_margin_top", 240))
+                val_mtop = int(st.session_state.get(f"hl_post_mtop_{unique_key}", saved_margin_top))
                 sel_hl_margin_top = st.number_input(
                     "Margem do Topo Y (px):",
                     min_value=0,
                     max_value=1200,
-                    value=saved_margin_top,
+                    value=val_mtop,
                     step=10,
                     key=f"hl_post_mtop_{unique_key}",
                     help="Distância em pixels a partir da borda superior."
                 )
             with col_hl_m3:
                 saved_font_size = int(_cfg.get("headline_font_size", 70))
+                val_fsize = int(st.session_state.get(f"hl_post_fsize_{unique_key}", saved_font_size))
                 sel_hl_font_size = st.number_input(
                     "Tamanho da Fonte:",
                     min_value=20,
                     max_value=200,
-                    value=saved_font_size,
+                    value=val_fsize,
                     step=2,
                     key=f"hl_post_fsize_{unique_key}"
                 )
@@ -3480,34 +3513,37 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                     sel_hl_bg_alpha = st.slider(
                         "Opacidade do Fundo (%):",
                         min_value=0, max_value=100,
-                        value=st.session_state.get(f"hl_post_bgalpha_{unique_key}", 95 if sel_hl_preset_key != "floating_bold" else 0),
+                        value=int(st.session_state.get(f"hl_post_bgalpha_{unique_key}", 95 if sel_hl_preset_key != "floating_bold" else 0)),
                         step=5,
                         key=f"hl_post_bgalpha_{unique_key}"
                     ) / 100.0
                 with col_hl_c4:
+                    cur_align = st.session_state.get(f"hl_post_align_{unique_key}", "center")
+                    align_opts = ["center", "left", "right"]
+                    align_idx = align_opts.index(cur_align) if cur_align in align_opts else 0
                     sel_hl_align = st.selectbox(
                         "Alinhamento:",
-                        ["center", "left", "right"],
-                        index=0,
+                        align_opts,
+                        index=align_idx,
                         format_func=lambda x: {"center": "Centralizado", "left": "Esquerda", "right": "Direita"}[x],
                         key=f"hl_post_align_{unique_key}"
                     )
 
                 col_hl_p1, col_hl_p2, col_hl_p3, col_hl_p4 = st.columns(4)
                 with col_hl_p1:
-                    sel_hl_pad_h = st.slider("Padding Horizontal:", 10, 80, 28, 2, key=f"hl_post_padh_{unique_key}")
+                    sel_hl_pad_h = st.slider("Padding Horizontal:", 10, 80, value=int(st.session_state.get(f"hl_post_padh_{unique_key}", 28)), step=2, key=f"hl_post_padh_{unique_key}")
                 with col_hl_p2:
-                    sel_hl_pad_v = st.slider("Padding Vertical:", 5, 50, 16, 2, key=f"hl_post_padv_{unique_key}")
+                    sel_hl_pad_v = st.slider("Padding Vertical:", 5, 50, value=int(st.session_state.get(f"hl_post_padv_{unique_key}", 16)), step=2, key=f"hl_post_padv_{unique_key}")
                 with col_hl_p3:
-                    sel_hl_line_spacing = st.slider("Espaçamento Linhas:", 0, 50, 14, 2, key=f"hl_post_linesp_{unique_key}")
+                    sel_hl_line_spacing = st.slider("Espaçamento Linhas:", 0, 50, value=int(st.session_state.get(f"hl_post_linesp_{unique_key}", 14)), step=2, key=f"hl_post_linesp_{unique_key}")
                 with col_hl_p4:
-                    sel_hl_corner = st.slider("Cantos Arredondados:", 0, 50, 12, 2, key=f"hl_post_corner_{unique_key}")
+                    sel_hl_corner = st.slider("Cantos Arredondados:", 0, 50, value=int(st.session_state.get(f"hl_post_corner_{unique_key}", 12)), step=2, key=f"hl_post_corner_{unique_key}")
 
                 col_hl_s1, col_hl_s2 = st.columns(2)
                 with col_hl_s1:
-                    sel_hl_max_w_pct = st.slider("Largura Máxima do Bloco (% da tela):", 50, 100, 90, 5, key=f"hl_post_maxw_{unique_key}") / 100.0
+                    sel_hl_max_w_pct = st.slider("Largura Máxima do Bloco (% da tela):", 50, 100, value=int(st.session_state.get(f"hl_post_maxw_{unique_key}", 90)), step=5, key=f"hl_post_maxw_{unique_key}") / 100.0
                 with col_hl_s2:
-                    sel_hl_shadow = st.toggle("Sombra Projetada Suave (Drop Shadow)", value=True, key=f"hl_post_shadow_{unique_key}")
+                    sel_hl_shadow = st.toggle("Sombra Projetada Suave (Drop Shadow)", value=bool(st.session_state.get(f"hl_post_shadow_{unique_key}", True)), key=f"hl_post_shadow_{unique_key}")
 
             # Detecção inteligente de Gancho Viral no histórico deste vídeo
             edit_hist = load_edit_history(video_path)
@@ -3694,15 +3730,36 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                 )
                 st.caption("Faça os ajustes desejados e clique no botão 🔄 para atualizar a prévia.")
 
+            # Assinatura única de todos os parâmetros para atualização instantânea reativa da prévia
+            current_prev_sig = (
+                str(hl_text_input),
+                round(float(hl_preview_sec), 2),
+                round(float(final_hl_start_offset), 2),
+                round(float(final_hl_end_offset), 2),
+                str(sel_hl_trans_type),
+                round(float(sel_hl_trans_dur), 2),
+                str(sel_hl_preset_key),
+                str(sel_hl_mode),
+                int(sel_hl_margin_top),
+                int(sel_hl_font_size),
+                str(sel_hl_text_color).lower(),
+                str(sel_hl_bg_color).lower(),
+                round(float(sel_hl_bg_alpha), 2),
+                str(sel_hl_align),
+                int(sel_hl_pad_h),
+                int(sel_hl_pad_v),
+                int(sel_hl_line_spacing),
+                int(sel_hl_corner),
+                round(float(sel_hl_max_w_pct), 2),
+                bool(sel_hl_shadow),
+            )
+            cached_prev_sig = st.session_state.get(f"cached_hl_prev_sig_{unique_key}")
+
             # Gera ou atualiza a prévia automaticamente quando necessário
             need_prev_update = (
                 btn_trig_hl
                 or (f"cached_hl_prev_{unique_key}" not in st.session_state)
-                or (hl_preview_sec != st.session_state.get(f"cached_hl_prev_sec_{unique_key}"))
-                or (final_hl_start_offset != st.session_state.get(f"cached_hl_start_offset_{unique_key}"))
-                or (final_hl_end_offset != st.session_state.get(f"cached_hl_end_offset_{unique_key}"))
-                or (sel_hl_trans_type != st.session_state.get(f"cached_hl_trans_type_{unique_key}"))
-                or (sel_hl_trans_dur != st.session_state.get(f"cached_hl_trans_dur_{unique_key}"))
+                or (current_prev_sig != cached_prev_sig)
             )
             if need_prev_update:
                 with st.spinner("Atualizando prévia da Headline..."):
@@ -3712,11 +3769,8 @@ def render_quick_editor_component(video_path: str, unique_key: str):
                         config=current_hl_cfg,
                         timestamp_s=hl_preview_sec
                     )
+                    st.session_state[f"cached_hl_prev_sig_{unique_key}"] = current_prev_sig
                     st.session_state[f"cached_hl_prev_sec_{unique_key}"] = hl_preview_sec
-                    st.session_state[f"cached_hl_start_offset_{unique_key}"] = final_hl_start_offset
-                    st.session_state[f"cached_hl_end_offset_{unique_key}"] = final_hl_end_offset
-                    st.session_state[f"cached_hl_trans_type_{unique_key}"] = sel_hl_trans_type
-                    st.session_state[f"cached_hl_trans_dur_{unique_key}"] = sel_hl_trans_dur
 
             prev_hl_frame = st.session_state.get(f"cached_hl_prev_{unique_key}")
             prev_hl_sec_shown = st.session_state.get(f"cached_hl_prev_sec_{unique_key}", hl_preview_sec)
