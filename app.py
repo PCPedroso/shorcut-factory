@@ -9940,7 +9940,7 @@ if _has_media_ready:
 
         social_overlay_enabled = st.session_state.get("social_overlay_tgl", _cur_profile.get("social_overlay_enabled", False))
         saved_social_pos = _cur_profile.get("social_overlay_position", "Inferior (Bottom)")
-        saved_social_offset_y = max(-450, min(450, int(_cur_profile.get("social_overlay_offset_y", 0))))
+        saved_social_offset_y = int(_cur_profile.get("social_overlay_offset_y", 0))
         saved_social_font_size = max(10, min(100, int(_cur_profile.get("social_overlay_font_size", 32))))
         saved_social_preview_scale = max(20, min(100, int(_cur_profile.get("social_preview_scale", 50))))
         saved_social_style = _cur_profile.get("social_overlay_style", "Pílula Glassmorphism (Recomendado)")
@@ -10090,8 +10090,6 @@ if _has_media_ready:
             with col_sc_pos2:
                 social_overlay_offset_y = st.number_input(
                     "↕️ Ajuste Fino de Margem (px):",
-                    min_value=-450,
-                    max_value=450,
                     value=int(saved_social_offset_y),
                     step=1,
                     key="social_offset_input",
