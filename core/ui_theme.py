@@ -216,6 +216,7 @@ WORKFLOW_STEPS = [
     "2. 🧠 Mineração & IA (Llama 3)",
     "3. ✂️ Fábrica de Enquadramento 9:16",
     "4. 🎬 Galeria de Cortes & Pós",
+    "🛍️ Radar Shopee",
     "🌐 Fluxo Completo (Todas as Seções)"
 ]
 

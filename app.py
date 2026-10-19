@@ -30,6 +30,8 @@ import core.overlay_manager
 import core.ui_theme
 import core.social_overlay
 import core.multicam_crop
+import core.media_streamer
+import core.shopee_radar
 
 importlib.reload(core.extractor)
 importlib.reload(core.transcriber)
@@ -52,6 +54,11 @@ importlib.reload(core.overlay_manager)
 importlib.reload(core.ui_theme)
 importlib.reload(core.social_overlay)
 importlib.reload(core.multicam_crop)
+importlib.reload(core.media_streamer)
+importlib.reload(core.shopee_radar)
+
+from core.media_streamer import get_media_stream_url, is_large_media
+from core.shopee_radar import render_shopee_radar_tab
 
 from core.extractor import (
     download_audio, get_video_metadata, get_video_id,
@@ -1434,15 +1441,17 @@ def safe_display_image(img_source, caption=None, use_container_width=True, width
     """
     Exibe imagens no Streamlit lendo diretamente os bytes em memória
     para garantir 100% de estabilidade de renderização no Windows/Chrome.
+    Compatível com Streamlit 1.60+ (substitui use_container_width por width='stretch').
     """
     if img_source is None:
         return False
 
     img_kw = {}
-    if width is not None and int(width) > 0:
-        img_kw["width"] = int(width)
+    if width is not None and ((isinstance(width, int) and width > 0) or isinstance(width, str)):
+        img_kw["width"] = width
     else:
-        img_kw["use_container_width"] = use_container_width
+        # Streamlit 1.60+ usa width='stretch'/'content' ao invés de use_container_width
+        img_kw["width"] = "stretch" if use_container_width else "content"
 
     if isinstance(img_source, np.ndarray):
         if img_source.size > 0:
@@ -1468,34 +1477,65 @@ def safe_display_image(img_source, caption=None, use_container_width=True, width
 
 def safe_display_video(video_path: str, start_time: int = 0):
     """
-    Garante reprodução e streaming progressivo de vídeo MP4 via HTTP nativo do Streamlit,
-    evitando ler arquivos de 50-200MB inteiramente na memória RAM e sem sobrecarregar o WebSocket.
+    Garante reprodução e streaming progressivo de vídeo MP4 via servidor HTTP local (Range Requests)
+    ou nativo do Streamlit, evitando ler arquivos grandes inteiramente na memória RAM e contornando
+    o erro 'ValueError: buffer too large' no Windows asyncio (WSASend).
     """
     if not video_path:
         st.warning("Arquivo de vídeo não encontrado.")
         return
+
+    # Se já for uma URL externa ou endpoint HTTP
+    if isinstance(video_path, str) and (video_path.startswith("http://") or video_path.startswith("https://")):
+        try:
+            st.video(video_path, start_time=int(start_time or 0))
+            return
+        except Exception as e_url:
+            st.error(f"Erro ao reproduzir URL do vídeo: {e_url}")
+            return
+
     norm_p = os.path.normpath(video_path)
     if not os.path.exists(norm_p) or os.path.getsize(norm_p) == 0:
         st.warning(f"Arquivo de vídeo não encontrado ou vazio: {video_path}")
         return
 
     _st_time = int(start_time or 0)
+    file_sz = os.path.getsize(norm_p)
 
-    # 1. Tenta passar o caminho do arquivo direto (Streaming HTTP via MediaFileManager nativo)
+    # 1. Para vídeos grandes (>= 100 MB ou vídeos longos de podcasts de até múltiplos gigabytes),
+    # transmite via servidor local com Range Requests (HTTP 206) em blocos de 64KB,
+    # garantindo consumo zero de RAM no Streamlit e contornando o limite de 4GB do WSASend no Windows.
+    if file_sz >= 100 * 1024 * 1024:
+        try:
+            stream_url = get_media_stream_url(norm_p)
+            st.video(stream_url, start_time=_st_time)
+            return
+        except Exception as e_stream:
+            st.warning(f"Aviso no streaming direto ({e_stream}), tentando fallback nativo...")
+
+    # 2. Tenta passar o caminho do arquivo direto para arquivos pequenos (< 100MB)
     try:
         st.video(norm_p, start_time=_st_time)
         return
     except Exception:
         pass
 
-    # 2. Fallback com caminho normalizado com barras para frente
+    # 3. Fallback com caminho normalizado com barras para frente
     try:
         st.video(norm_p.replace('\\', '/'), start_time=_st_time)
         return
     except Exception:
         pass
 
-    # 3. Fallback abrindo como stream controlado (sem ler todo o arquivo em RAM com .read())
+    # 4. Fallback com streaming local independente do tamanho do arquivo
+    try:
+        stream_url = get_media_stream_url(norm_p)
+        st.video(stream_url, start_time=_st_time)
+        return
+    except Exception:
+        pass
+
+    # 5. Último recurso abrindo como stream controlado
     try:
         with open(norm_p, "rb") as f_v:
             st.video(f_v, start_time=_st_time)
@@ -1508,14 +1548,28 @@ def safe_display_audio(audio_source, format="audio/mp3", start_time=0):
     if not audio_source:
         return
     st_val = int(start_time) if start_time else 0
+    if isinstance(audio_source, str) and (audio_source.startswith("http://") or audio_source.startswith("https://")):
+        try:
+            st.audio(audio_source, format=format, start_time=st_val)
+            return
+        except Exception:
+            pass
     if isinstance(audio_source, str) and os.path.exists(audio_source):
         norm_p = os.path.normpath(audio_source)
+        try:
+            file_sz = os.path.getsize(norm_p)
+            if file_sz >= 50 * 1024 * 1024:
+                stream_url = get_media_stream_url(norm_p)
+                st.audio(stream_url, format=format, start_time=st_val)
+                return
+        except Exception:
+            pass
         try:
             st.audio(norm_p, format=format, start_time=st_val)
             return
         except Exception:
             try:
-                st.audio(norm_p.replace('\\', '/'), format=format)
+                st.audio(norm_p.replace('\\', '/'), format=format, start_time=st_val)
                 return
             except Exception:
                 pass
@@ -4445,6 +4499,7 @@ show_sec1 = workflow_step.startswith('1.') or workflow_step.startswith('🌐')
 show_sec2 = workflow_step.startswith('2.') or workflow_step.startswith('🌐')
 show_sec3 = workflow_step.startswith('3.') or workflow_step.startswith('🌐')
 show_sec4 = workflow_step.startswith('4.') or workflow_step.startswith('🌐')
+show_radar = workflow_step.startswith('🛍️')
 
 # Seção 1
 if show_sec1:
@@ -8726,6 +8781,7 @@ if _has_media_ready:
             from core.multicam_crop import (
                 patch_streamlit_drawable_canvas_compat,
                 normalize_box_coordinates,
+                boxes_to_fabric_json,
                 compute_slot_heights,
                 compose_multicam_preview_image,
                 compute_multicam_global_timerange,
@@ -8986,7 +9042,7 @@ if _has_media_ready:
                         col_hdr_cv, col_hdr_opt = st.columns([2.2, 1.8])
                         with col_hdr_cv:
                             st.markdown("##### 🖱️ Desenhe e Ajuste as Câmeras:")
-                            st.caption("Dica: Use a ferramenta retângulo para criar caixas amarelas. Clique em uma caixa para mover ou redimensionar pelos cantos.")
+                            st.caption("Defina os enquadramentos dos personagens ou cortes de câmera no frame de referência.")
                         with col_hdr_opt:
                             hide_player = st.toggle(
                                 "🔍 Ocultar Player (Canvas Expandido)",
@@ -8994,6 +9050,159 @@ if _has_media_ready:
                                 key=f"mc_hide_player_{sel_sc_idx}",
                                 help="Oculta o player do vídeo para expandir o canvas para tamanho ampliado, permitindo desenhar retângulos com máxima precisão e nitidez."
                             )
+
+                        cur_boxes = list(cur_scene.get("boxes", []))
+                        canvas_rev_key = f"mc_canvas_rev_{sel_sc_idx}"
+                        if canvas_rev_key not in st.session_state:
+                            st.session_state[canvas_rev_key] = 0
+                        canvas_rev = st.session_state[canvas_rev_key]
+
+                        tool_key = f"mc_tool_action_{sel_sc_idx}"
+                        prev_tool_key = f"mc_prev_tool_{sel_sc_idx}"
+                        if tool_key not in st.session_state:
+                            st.session_state[tool_key] = "✏️ Desenhar"
+
+                        # ── Menu Superior de Ações do Canvas ──
+                        with st.container():
+                            col_tool_sel, col_btn_undo, col_btn_del, col_btn_clr, col_btn_snap = st.columns([2.2, 0.85, 0.95, 0.85, 0.95])
+                            with col_tool_sel:
+                                selected_action = st.segmented_control(
+                                    "🛠️ Ação do Canvas:",
+                                    options=["✏️ Desenhar", "✋ Mover", "↔️ Redimensionar", "🎯 Selecionar"],
+                                    default=st.session_state.get(tool_key, "✏️ Desenhar"),
+                                    key=tool_key,
+                                    label_visibility="collapsed"
+                                ) or "✏️ Desenhar"
+                            with col_btn_undo:
+                                if st.button("↩️ Desfazer", key=f"btn_undo_{sel_sc_idx}", disabled=len(cur_boxes) == 0, use_container_width=True, help="Desfaz e remove a última caixa criada"):
+                                    if cur_boxes:
+                                        cur_boxes.pop()
+                                        cur_scene["boxes"] = cur_boxes
+                                        st.session_state["multicam_scenes"] = mc_scenes
+                                        st.session_state[canvas_rev_key] = st.session_state.get(canvas_rev_key, 0) + 1
+                                        canvas_rev = st.session_state[canvas_rev_key]
+                                        canvas_w_eval = min(1080, f_w) if hide_player else 680
+                                        canvas_h_eval = int(round(canvas_w_eval * float(f_h) / float(f_w)))
+                                        st.session_state[f"mc_init_dw_{sel_sc_idx}_{ref_ts_s:.1f}_{canvas_rev}"] = boxes_to_fabric_json(
+                                            cur_boxes,
+                                            canvas_w=canvas_w_eval,
+                                            canvas_h=canvas_h_eval,
+                                            video_w=f_w,
+                                            video_h=f_h
+                                        )
+                                        st.toast("↩️ Última caixa desfeita!")
+                                        st.rerun()
+                            with col_btn_del:
+                                if len(cur_boxes) == 0:
+                                    st.button("🗑️ Remover", key=f"btn_del_dis_{sel_sc_idx}", disabled=True, use_container_width=True)
+                                elif len(cur_boxes) == 1:
+                                    if st.button("🗑️ Remover", key=f"btn_del_single_{sel_sc_idx}", use_container_width=True, help="Remove a única caixa existente"):
+                                        cur_boxes.clear()
+                                        cur_scene["boxes"] = []
+                                        st.session_state["multicam_scenes"] = mc_scenes
+                                        st.session_state[canvas_rev_key] = st.session_state.get(canvas_rev_key, 0) + 1
+                                        canvas_rev = st.session_state[canvas_rev_key]
+                                        st.session_state[f"mc_init_dw_{sel_sc_idx}_{ref_ts_s:.1f}_{canvas_rev}"] = {"version": "4.4.0", "objects": []}
+                                        st.toast("🗑️ Caixa removida com sucesso!")
+                                        st.rerun()
+                                else:
+                                    with st.popover("🗑️ Remover...", use_container_width=True, help="Escolha qual câmera deseja remover"):
+                                        st.caption("Selecione a câmera para excluir:")
+                                        for b_i in range(len(cur_boxes)):
+                                            if st.button(f"🗑️ Excluir Câmera #{b_i+1}", key=f"btn_del_cam_{sel_sc_idx}_{b_i}", use_container_width=True):
+                                                cur_boxes.pop(b_i)
+                                                for n_i, b in enumerate(cur_boxes):
+                                                    b["order"] = n_i
+                                                    b["label"] = f"Câmera {n_i+1}"
+                                                cur_scene["boxes"] = cur_boxes
+                                                st.session_state["multicam_scenes"] = mc_scenes
+                                                st.session_state[canvas_rev_key] = st.session_state.get(canvas_rev_key, 0) + 1
+                                                canvas_rev = st.session_state[canvas_rev_key]
+                                                canvas_w_eval = min(1080, f_w) if hide_player else 680
+                                                canvas_h_eval = int(round(canvas_w_eval * float(f_h) / float(f_w)))
+                                                st.session_state[f"mc_init_dw_{sel_sc_idx}_{ref_ts_s:.1f}_{canvas_rev}"] = boxes_to_fabric_json(
+                                                    cur_boxes,
+                                                    canvas_w=canvas_w_eval,
+                                                    canvas_h=canvas_h_eval,
+                                                    video_w=f_w,
+                                                    video_h=f_h
+                                                )
+                                                st.toast(f"🗑️ Câmera #{b_i+1} excluída!")
+                                                st.rerun()
+                            with col_btn_clr:
+                                if st.button("🧹 Limpar", key=f"btn_clr_{sel_sc_idx}", disabled=len(cur_boxes) == 0, use_container_width=True, help="Limpa todas as caixas desta cena"):
+                                    cur_boxes.clear()
+                                    cur_scene["boxes"] = []
+                                    st.session_state["multicam_scenes"] = mc_scenes
+                                    st.session_state[canvas_rev_key] = st.session_state.get(canvas_rev_key, 0) + 1
+                                    canvas_rev = st.session_state[canvas_rev_key]
+                                    st.session_state[f"mc_init_dw_{sel_sc_idx}_{ref_ts_s:.1f}_{canvas_rev}"] = {"version": "4.4.0", "objects": []}
+                                    st.toast("🧹 Todas as caixas foram removidas!")
+                                    st.rerun()
+                            with col_btn_snap:
+                                if st.button("✨ Auto-Bordas", key=f"btn_snap_top_{sel_sc_idx}", disabled=len(cur_boxes) == 0, use_container_width=True, help="Alinha as caixas automaticamente às bordas do estúdio e tarjas"):
+                                    snapped = [snap_box_to_scene_borders(b, frame_bgr) for b in cur_boxes]
+                                    cur_scene["boxes"] = snapped
+                                    st.session_state["multicam_scenes"] = mc_scenes
+                                    st.session_state[canvas_rev_key] = st.session_state.get(canvas_rev_key, 0) + 1
+                                    canvas_rev = st.session_state[canvas_rev_key]
+                                    canvas_w_eval = min(1080, f_w) if hide_player else 680
+                                    canvas_h_eval = int(round(canvas_w_eval * float(f_h) / float(f_w)))
+                                    st.session_state[f"mc_init_dw_{sel_sc_idx}_{ref_ts_s:.1f}_{canvas_rev}"] = boxes_to_fabric_json(
+                                        snapped,
+                                        canvas_w=canvas_w_eval,
+                                        canvas_h=canvas_h_eval,
+                                        video_w=f_w,
+                                        video_h=f_h
+                                    )
+                                    st.toast("✨ Caixas alinhadas perfeitamente às bordas do cenário!")
+                                    st.rerun()
+
+                            col_tip, col_badge = st.columns([3.2, 0.8])
+                            with col_tip:
+                                if "Desenhar" in selected_action:
+                                    st.caption("✏️ **Modo Desenhar Ativo:** Clique e arraste no vídeo para criar um novo retângulo amarelo de enquadramento.")
+                                elif "Mover" in selected_action:
+                                    st.caption("✋ **Modo Mover Ativo:** Clique na caixa amarela e arraste pelo centro para reposicionar o enquadramento.")
+                                elif "Redimensionar" in selected_action:
+                                    st.caption("↔️ **Modo Redimensionar Ativo:** Clique na caixa amarela e arraste as alças dos cantos/bordas para alterar largura e altura.")
+                                else:
+                                    st.caption("🎯 **Modo Selecionar Ativo:** Clique em uma caixa para selecioná-la e inspecioná-la ou excluí-la pelos botões acima.")
+                            with col_badge:
+                                st.caption(f"📦 **{len(cur_boxes)}** câmera(s)")
+
+                        # Detecta se a ferramenta mudou para atualizar o canvas no novo modo com as caixas já desenhadas
+                        prev_action = st.session_state.get(prev_tool_key)
+                        if prev_action is not None and prev_action != selected_action:
+                            st.session_state[canvas_rev_key] = st.session_state.get(canvas_rev_key, 0) + 1
+                            canvas_rev = st.session_state[canvas_rev_key]
+                            canvas_w_eval = min(1080, f_w) if hide_player else 680
+                            canvas_h_eval = int(round(canvas_w_eval * float(f_h) / float(f_w)))
+                            st.session_state[f"mc_init_dw_{sel_sc_idx}_{ref_ts_s:.1f}_{canvas_rev}"] = boxes_to_fabric_json(
+                                cur_scene.get("boxes", []),
+                                canvas_w=canvas_w_eval,
+                                canvas_h=canvas_h_eval,
+                                video_w=f_w,
+                                video_h=f_h
+                            )
+                        st.session_state[prev_tool_key] = selected_action
+
+                        drawing_mode = "rect" if "Desenhar" in selected_action else "transform"
+
+                        # Obtém initial_drawing estável para a revisão ativa
+                        # Crítico: NÃO recalcular initial_drawing a cada interação do mouse para não disparar loop no Fabric.js!
+                        canvas_cache_key = f"mc_init_dw_{sel_sc_idx}_{ref_ts_s:.1f}_{canvas_rev}"
+                        if canvas_cache_key not in st.session_state:
+                            canvas_w_eval = min(1080, f_w) if hide_player else 680
+                            canvas_h_eval = int(round(canvas_w_eval * float(f_h) / float(f_w)))
+                            st.session_state[canvas_cache_key] = boxes_to_fabric_json(
+                                cur_scene.get("boxes", []),
+                                canvas_w=canvas_w_eval,
+                                canvas_h=canvas_h_eval,
+                                video_w=f_w,
+                                video_h=f_h
+                            )
+                        stable_initial_drawing = st.session_state[canvas_cache_key]
 
                         if hide_player:
                             canvas_w = min(1080, f_w)
@@ -9006,8 +9215,9 @@ if _has_media_ready:
                                 update_streamlit=True,
                                 height=canvas_h,
                                 width=canvas_w,
-                                drawing_mode="rect",
-                                key=f"mc_canvas_{sel_sc_idx}_{ref_ts_s:.1f}_exp",
+                                drawing_mode=drawing_mode,
+                                initial_drawing=stable_initial_drawing,
+                                key=f"mc_canvas_{sel_sc_idx}_{ref_ts_s:.1f}_exp_r{canvas_rev}",
                                 display_toolbar=True
                             )
 
@@ -9066,8 +9276,9 @@ if _has_media_ready:
                                     update_streamlit=True,
                                     height=canvas_h,
                                     width=canvas_w,
-                                    drawing_mode="rect",
-                                    key=f"mc_canvas_{sel_sc_idx}_{ref_ts_s:.1f}",
+                                    drawing_mode=drawing_mode,
+                                    initial_drawing=stable_initial_drawing,
+                                    key=f"mc_canvas_{sel_sc_idx}_{ref_ts_s:.1f}_r{canvas_rev}",
                                     display_toolbar=True
                                 )
                             with col_pl:
@@ -9140,6 +9351,7 @@ if _has_media_ready:
 
                         if detected_boxes:
                             cur_scene["boxes"] = detected_boxes
+                            st.session_state["multicam_scenes"] = mc_scenes
 
                         active_boxes = cur_scene.get("boxes", [])
                         if active_boxes:
@@ -12675,8 +12887,11 @@ if _has_media_ready:
                             st.markdown(f"**Tags SEO:** `{cut_item.get('tags_seo', '')}`")
     
                         st.divider()
-    
-    
+
+
+# ── ABA RADAR SHOPEE ────────────────────────────────────────────────────────
+if show_radar:
+    render_shopee_radar_tab()
 
 # ── EMPTY STATE QUANDO NENHUM VÍDEO FOI CARREGADO OU BAIXADO ───────────
 _active_chk_id = get_current_active_video_id(video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or "") or st.session_state.get("active_video_id") or ""

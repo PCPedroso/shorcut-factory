@@ -125,6 +125,71 @@ def normalize_box_coordinates(
     }
 
 
+def boxes_to_fabric_json(
+    boxes: list,
+    canvas_w: int,
+    canvas_h: int,
+    video_w: int,
+    video_h: int
+) -> dict:
+    """
+    Converte lista de caixas salvas (coordenadas do vídeo original)
+    para o formato JSON aceito pelo Fabric.js / streamlit-drawable-canvas (initial_drawing).
+    """
+    ratio_x = float(canvas_w) / float(video_w) if video_w > 0 else 1.0
+    ratio_y = float(canvas_h) / float(video_h) if video_h > 0 else 1.0
+
+    objects = []
+    for idx, b in enumerate(boxes or []):
+        bx = float(b.get("x", 0)) * ratio_x
+        by = float(b.get("y", 0)) * ratio_y
+        bw = float(b.get("w", 100)) * ratio_x
+        bh = float(b.get("h", 100)) * ratio_y
+
+        objects.append({
+            "type": "rect",
+            "version": "4.4.0",
+            "originX": "left",
+            "originY": "top",
+            "left": round(bx, 1),
+            "top": round(by, 1),
+            "width": max(10.0, round(bw, 1)),
+            "height": max(10.0, round(bh, 1)),
+            "fill": "rgba(255, 215, 0, 0.20)",
+            "stroke": "#FFD700",
+            "strokeWidth": 3,
+            "strokeDashArray": None,
+            "strokeLineCap": "butt",
+            "strokeDashOffset": 0,
+            "strokeLineJoin": "miter",
+            "strokeUniform": True,
+            "strokeMiterLimit": 4,
+            "scaleX": 1.0,
+            "scaleY": 1.0,
+            "angle": 0,
+            "flipX": False,
+            "flipY": False,
+            "opacity": 1.0,
+            "shadow": None,
+            "visible": True,
+            "backgroundColor": "",
+            "fillRule": "nonzero",
+            "paintFirst": "fill",
+            "globalCompositeOperation": "source-over",
+            "skewX": 0,
+            "skewY": 0,
+            "rx": 0,
+            "ry": 0,
+            "lockRotation": True,
+            "hasRotatingPoint": False,
+        })
+
+    return {
+        "version": "4.4.0",
+        "objects": objects
+    }
+
+
 def compute_multicam_global_timerange(
     scenes: list,
     fallback_start: str = "00:00:00.00",
