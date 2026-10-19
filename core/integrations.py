@@ -78,77 +78,36 @@ def upload_to_youtube_shorts(
     tags: list = None,
     privacy_status: str = "unlisted",  # 'private', 'unlisted', 'public'
     client_secrets_path: str = None,
+    thumbnail_path: str = None,
+    scheduled_at: str = None,
 ) -> dict:
     """
-    Faz o upload do vídeo diretamente para o canal do YouTube como Shorts.
-    Retorna o ID do vídeo e o link de acesso.
+    Faz o upload do vídeo para o canal do YouTube como Shorts através do YouTubePublisher.
+    Mantém 100% de compatibilidade retroativa com app.py e scripts existentes.
     """
-    if not os.path.exists(video_path):
-        return {"success": False, "error": f"Arquivo de vídeo não encontrado: {video_path}"}
-
-    creds = None
-    if os.path.exists(YOUTUBE_TOKEN_PATH):
-        try:
-            creds = Credentials.from_authorized_user_file(YOUTUBE_TOKEN_PATH, YOUTUBE_SCOPES)
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-                with open(YOUTUBE_TOKEN_PATH, "w") as token_file:
-                    token_file.write(creds.to_json())
-        except Exception:
-            creds = None
-
-    if not creds or not creds.valid:
-        if client_secrets_path and os.path.exists(client_secrets_path):
-            auth_res = authenticate_youtube_oauth(client_secrets_path)
-            if not auth_res["success"]:
-                return {"success": False, "error": f"Falha na autenticação: {auth_res['error']}"}
-            creds = Credentials.from_authorized_user_file(YOUTUBE_TOKEN_PATH, YOUTUBE_SCOPES)
-        else:
-            return {"success": False, "error": "Credenciais do YouTube não configuradas."}
-
-    try:
-        youtube = build("youtube", "v3", credentials=creds)
-
-        # Garante que tenha a hashtag #Shorts no título/descrição para o algoritmo indexar
-        final_title = title.strip()
-        if len(final_title) > 90:
-            final_title = final_title[:87] + "..."
-        if "#Shorts" not in final_title and len(final_title) <= 80:
-            final_title += " #Shorts"
-
-        final_desc = description.strip()
-        if "#Shorts" not in final_desc:
-            final_desc += "\n\n#Shorts #Viral"
-
-        body = {
-            "snippet": {
-                "title": final_title,
-                "description": final_desc,
-                "tags": tags or ["Shorts", "ViralCut"],
-                "categoryId": "22",  # People & Blogs
-            },
-            "status": {
-                "privacyStatus": privacy_status,
-                "selfDeclaredMadeForKids": False,
-            }
+    from core.publishing.youtube import YouTubePublisher
+    publisher = YouTubePublisher()
+    pub_res = publisher.publish(
+        video_path=video_path,
+        caption_data={
+            "title": title,
+            "description": description,
+            "tags": tags or ["Shorts", "ViralCut"]
+        },
+        thumbnail_path=thumbnail_path,
+        options={
+            "privacy_status": privacy_status,
+            "client_secrets_path": client_secrets_path,
+            "scheduled_at": scheduled_at
         }
+    )
 
-        media = MediaFileUpload(video_path, chunksize=-1, resumable=True, mimetype="video/mp4")
-        request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
-        
-        response = request.execute()
-        video_id = response.get("id")
-        video_url = f"https://youtube.com/shorts/{video_id}"
-
-        return {
-            "success": True,
-            "video_id": video_id,
-            "url": video_url,
-            "error": None
-        }
-
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+    return {
+        "success": pub_res.success,
+        "video_id": pub_res.post_id,
+        "url": pub_res.post_url,
+        "error": pub_res.error
+    }
 
 
 # ==========================================================

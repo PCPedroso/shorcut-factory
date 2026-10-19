@@ -32,6 +32,8 @@ import core.social_overlay
 import core.multicam_crop
 import core.media_streamer
 import core.shopee_radar
+import core.publishing
+import core.publishing.ui_tab
 
 importlib.reload(core.extractor)
 importlib.reload(core.transcriber)
@@ -56,9 +58,12 @@ importlib.reload(core.social_overlay)
 importlib.reload(core.multicam_crop)
 importlib.reload(core.media_streamer)
 importlib.reload(core.shopee_radar)
+importlib.reload(core.publishing)
+importlib.reload(core.publishing.ui_tab)
 
 from core.media_streamer import get_media_stream_url, is_large_media
 from core.shopee_radar import render_shopee_radar_tab
+from core.publishing.ui_tab import render_publishing_tab
 
 from core.extractor import (
     download_audio, get_video_metadata, get_video_id,
@@ -4499,6 +4504,7 @@ show_sec1 = workflow_step.startswith('1.') or workflow_step.startswith('🌐')
 show_sec2 = workflow_step.startswith('2.') or workflow_step.startswith('🌐')
 show_sec3 = workflow_step.startswith('3.') or workflow_step.startswith('🌐')
 show_sec4 = workflow_step.startswith('4.') or workflow_step.startswith('🌐')
+show_sec5 = workflow_step.startswith('5.') or workflow_step.startswith('🌐')
 show_radar = workflow_step.startswith('🛍️')
 
 # Seção 1
@@ -12892,6 +12898,10 @@ if _has_media_ready:
 # ── ABA RADAR SHOPEE ────────────────────────────────────────────────────────
 if show_radar:
     render_shopee_radar_tab()
+
+# ── SEÇÃO 5: CENTRAL DE PUBLICAÇÃO MULTIPLATAFORMA ─────────────────────────
+if show_sec5:
+    render_publishing_tab()
 
 # ── EMPTY STATE QUANDO NENHUM VÍDEO FOI CARREGADO OU BAIXADO ───────────
 _active_chk_id = get_current_active_video_id(video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or "") or st.session_state.get("active_video_id") or ""

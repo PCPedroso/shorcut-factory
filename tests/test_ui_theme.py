@@ -6,11 +6,12 @@ from core.ui_theme import (
 )
 
 def test_workflow_steps_structure():
-    assert len(WORKFLOW_STEPS) == 6
+    assert len(WORKFLOW_STEPS) == 7
     assert "1. 📥 Ingestão & Transcrição" in WORKFLOW_STEPS
     assert "2. 🧠 Mineração & IA (Llama 3)" in WORKFLOW_STEPS
     assert "3. ✂️ Fábrica de Enquadramento 9:16" in WORKFLOW_STEPS
     assert "4. 🎬 Galeria de Cortes & Pós" in WORKFLOW_STEPS
+    assert "5. 🚀 Central de Publicação" in WORKFLOW_STEPS
     assert "🛍️ Radar Shopee" in WORKFLOW_STEPS
     assert "🌐 Fluxo Completo (Todas as Seções)" in WORKFLOW_STEPS
 
