@@ -56,6 +56,15 @@ class XPublisher(BasePublisher):
                 message="Nenhuma credencial do X (Twitter) configurada no cofre seguro."
             )
 
+        # Suporte a Modo Assistido (Gratuito / Sem API Paga)
+        if creds.get("mode") == "assisted":
+            return AuthStatus(
+                is_authenticated=True,
+                platform=self.platform,
+                message="Modo Manual Assistido ativo (sem custos de API).",
+                account_name="X / Twitter (Exportação Manual)"
+            )
+
         screen_name = creds.get("screen_name") or creds.get("username")
 
         # Verifica OAuth 1.0a
@@ -125,6 +134,25 @@ class XPublisher(BasePublisher):
             options=options
         )
 
+    def _copy_to_windows_clipboard(self, text: str) -> bool:
+        """Copia texto diretamente para a área de transferência do Windows via utilitário clip."""
+        import subprocess
+        try:
+            p = subprocess.Popen(["clip"], stdin=subprocess.PIPE, shell=True)
+            p.communicate(input=text.encode("utf-16le"))
+            return p.returncode == 0
+        except Exception:
+            return False
+
+    def _reveal_in_windows_explorer(self, file_path: str):
+        """Abre o Windows Explorer com o arquivo de vídeo selecionado."""
+        import subprocess
+        norm_path = os.path.normpath(file_path)
+        try:
+            subprocess.Popen(f'explorer /select,"{norm_path}"')
+        except Exception:
+            pass
+
     def publish(
         self,
         video_path: str,
@@ -134,9 +162,50 @@ class XPublisher(BasePublisher):
     ) -> PublishResult:
         """
         Executa upload de vídeo em 4 fases e publica o tweet no X.
+        Suporta modo manual assistido (gratuito) caso o usuário não possua chaves pagas de API.
         """
         options = options or {}
         creds = self.vault.get_credential(Platform.X)
+
+        # Trata modo assistido manual gratuito
+        if (creds and creds.get("mode") == "assisted") or options.get("assisted_mode"):
+            if not os.path.exists(video_path):
+                return PublishResult(
+                    success=False,
+                    platform=self.platform,
+                    error=f"Arquivo de vídeo não encontrado: {video_path}"
+                )
+
+            if isinstance(caption_data, AdaptedCaption):
+                tweet_text = caption_data.full_text or caption_data.title
+            else:
+                tweet_text = caption_data.get("text") or caption_data.get("caption") or caption_data.get("title") or ""
+            tweet_text = tweet_text[:280]
+
+            self._copy_to_windows_clipboard(tweet_text)
+            self._reveal_in_windows_explorer(video_path)
+            if options.get("open_browser", True):
+                try:
+                    import webbrowser
+                    webbrowser.open("https://x.com/compose/post")
+                except Exception:
+                    pass
+
+            instructions = (
+                "✅ Exportação Assistida para X (Twitter) concluída:\n"
+                "1. O texto do Tweet foi copiado para sua Área de Transferência (Ctrl+V).\n"
+                "2. O vídeo foi selecionado no Windows Explorer.\n"
+                "3. O X (Twitter) foi aberto no navegador. Arraste o vídeo e cole o tweet."
+            )
+            return PublishResult(
+                success=True,
+                platform=self.platform,
+                post_id=None,
+                post_url="https://x.com/compose/post",
+                requires_manual_step=True,
+                manual_instructions=instructions
+            )
+
         if not creds:
             return PublishResult(
                 success=False,

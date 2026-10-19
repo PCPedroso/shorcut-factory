@@ -178,36 +178,57 @@ def _render_tiktok_config(vault: CredentialVault):
 
 def _render_x_config(vault: CredentialVault):
     creds = vault.get_credential(Platform.X) or {}
-    st.markdown("**X API v1.1 Upload & v2 Tweets**")
-    method = st.radio("Método de Autenticação:", ["OAuth 1.0a (Recomendado para Vídeo)", "OAuth 2.0 Bearer Token"], horizontal=True, key="cfg_x_method")
+    st.markdown("**Publicação no X (antigo Twitter)**")
+    
+    current_mode = creds.get("mode", "api" if (creds.get("api_key") or creds.get("bearer_token")) else "assisted")
+    chosen_mode = st.radio(
+        "Modo de Operação no X:",
+        [
+            "📋 Modo Manual Assistido (100% Gratuito - Clipboard + Web)",
+            "🔑 API Automática (Requer plano Developer Portal / Chaves)"
+        ],
+        index=0 if current_mode == "assisted" else 1,
+        key="cfg_x_chosen_mode"
+    )
 
-    if "OAuth 1.0a" in method:
-        api_key = st.text_input("API Key:", value=creds.get("api_key", ""), key="cfg_x_key")
-        api_secret = st.text_input("API Secret:", value=creds.get("api_secret", ""), type="password", key="cfg_x_secret")
-        acc_token = st.text_input("Access Token:", value=creds.get("access_token", ""), key="cfg_x_token")
-        acc_secret = st.text_input("Access Token Secret:", value=creds.get("access_token_secret", ""), type="password", key="cfg_x_toksecret")
-        screen_name = st.text_input("Screen Name (@perfil):", value=creds.get("screen_name", ""), key="cfg_x_name")
-
-        if st.button("Salvar Chaves OAuth 1.0a X", key="btn_save_x1"):
-            vault.save_credential(Platform.X, {
-                "api_key": api_key.strip(),
-                "api_secret": api_secret.strip(),
-                "access_token": acc_token.strip(),
-                "access_token_secret": acc_secret.strip(),
-                "screen_name": screen_name.strip()
-            })
-            st.success("Chaves do X salvas com sucesso!")
+    if "Modo Manual Assistido" in chosen_mode:
+        st.info("💡 **Sem custos de API**: O corte é validado, o tweet é copiado para sua Área de Transferência (Ctrl+V) e a página do X é aberta no navegador com o arquivo selecionado no Windows Explorer.")
+        if st.button("Ativar Modo Manual Assistido no X", key="btn_save_x_assisted"):
+            vault.save_credential(Platform.X, {"mode": "assisted"})
+            st.success("Modo Manual Assistido ativo para o X!")
             st.rerun()
     else:
-        bearer = st.text_input("Bearer Token:", value=creds.get("bearer_token", ""), type="password", key="cfg_x_bearer")
-        screen_name = st.text_input("Screen Name (@perfil):", value=creds.get("screen_name", ""), key="cfg_x_bearer_name")
-        if st.button("Salvar Bearer Token X", key="btn_save_xb"):
-            vault.save_credential(Platform.X, {
-                "bearer_token": bearer.strip(),
-                "screen_name": screen_name.strip()
-            })
-            st.success("Bearer Token do X salvo!")
-            st.rerun()
+        method = st.radio("Método de Autenticação:", ["OAuth 1.0a (Recomendado para Vídeo)", "OAuth 2.0 Bearer Token"], horizontal=True, key="cfg_x_method")
+
+        if "OAuth 1.0a" in method:
+            api_key = st.text_input("API Key:", value=creds.get("api_key", ""), key="cfg_x_key")
+            api_secret = st.text_input("API Secret:", value=creds.get("api_secret", ""), type="password", key="cfg_x_secret")
+            acc_token = st.text_input("Access Token:", value=creds.get("access_token", ""), key="cfg_x_token")
+            acc_secret = st.text_input("Access Token Secret:", value=creds.get("access_token_secret", ""), type="password", key="cfg_x_toksecret")
+            screen_name = st.text_input("Screen Name (@perfil):", value=creds.get("screen_name", ""), key="cfg_x_name")
+
+            if st.button("Salvar Chaves OAuth 1.0a X", key="btn_save_x1"):
+                vault.save_credential(Platform.X, {
+                    "mode": "api",
+                    "api_key": api_key.strip(),
+                    "api_secret": api_secret.strip(),
+                    "access_token": acc_token.strip(),
+                    "access_token_secret": acc_secret.strip(),
+                    "screen_name": screen_name.strip()
+                })
+                st.success("Chaves do X salvas com sucesso!")
+                st.rerun()
+        else:
+            bearer = st.text_input("Bearer Token:", value=creds.get("bearer_token", ""), type="password", key="cfg_x_bearer")
+            screen_name = st.text_input("Screen Name (@perfil):", value=creds.get("screen_name", ""), key="cfg_x_bearer_name")
+            if st.button("Salvar Bearer Token X", key="btn_save_xb"):
+                vault.save_credential(Platform.X, {
+                    "mode": "api",
+                    "bearer_token": bearer.strip(),
+                    "screen_name": screen_name.strip()
+                })
+                st.success("Bearer Token do X salvo!")
+                st.rerun()
 
 
 def _render_dispatch_panel(vault: CredentialVault, queue: PublishQueue):
