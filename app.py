@@ -8038,19 +8038,22 @@ if _has_media_ready:
             st.success(st.session_state.cut_ready_banner)
         
         if "_pending_start_time" in st.session_state:
-            st.session_state.final_start_time = st.session_state.pop("_pending_start_time")
-        if "_pending_end_time" in st.session_state:
-            st.session_state.final_end_time = st.session_state.pop("_pending_end_time")
-
-        if st.session_state.get("aspect_ratio_choice") == "📱 Vertical 9:16 (🎬 Multicâmera Interativo - 2 a 3 Câmeras por Mouse)":
+            _p_st = st.session_state.pop("_pending_start_time")
+            st.session_state.final_start_time = _p_st
             _mc_scs = st.session_state.get("multicam_scenes")
             if _mc_scs and isinstance(_mc_scs, list) and len(_mc_scs) > 0:
-                from core.multicam_crop import compute_multicam_global_timerange
-                _mc_s, _mc_e = compute_multicam_global_timerange(_mc_scs)
-                if _mc_s:
-                    st.session_state.final_start_time = _mc_s
-                if _mc_e:
-                    st.session_state.final_end_time = _mc_e
+                _mc_scs[0]["start_time"] = _p_st
+                st.session_state["mc_sc_start_0"] = _p_st
+                if "mc_ref_ts_0" in st.session_state:
+                    st.session_state["mc_ref_ts_0"] = _p_st
+
+        if "_pending_end_time" in st.session_state:
+            _p_et = st.session_state.pop("_pending_end_time")
+            st.session_state.final_end_time = _p_et
+            _mc_scs = st.session_state.get("multicam_scenes")
+            if _mc_scs and isinstance(_mc_scs, list) and len(_mc_scs) > 0:
+                _mc_scs[-1]["end_time"] = _p_et
+                st.session_state[f"mc_sc_end_{len(_mc_scs)-1}"] = _p_et
 
         if 'final_start_time' not in st.session_state:
             st.session_state.final_start_time = ""
@@ -8171,9 +8174,16 @@ if _has_media_ready:
             if st.button("📺 Preencher Vídeo Inteiro", key="btn_use_full_video", use_container_width=True,
                          help="Preenche explicitamente o tempo inicial (00:00:00.00) e final com a duração total do vídeo"):
                 if _known_total_dur and _known_total_dur > 0:
+                    _f_end = _format_dur_str(_known_total_dur)
                     st.session_state.final_start_time = "00:00:00.00"
-                    st.session_state.final_end_time = _format_dur_str(_known_total_dur)
-                    st.session_state.cut_ready_banner = f"✅ Vídeo inteiro selecionado: [00:00:00.00 → {_format_dur_str(_known_total_dur)}]"
+                    st.session_state.final_end_time = _f_end
+                    _mc_scs = st.session_state.get("multicam_scenes")
+                    if _mc_scs and isinstance(_mc_scs, list) and len(_mc_scs) > 0:
+                        _mc_scs[0]["start_time"] = "00:00:00.00"
+                        _mc_scs[-1]["end_time"] = _f_end
+                        st.session_state["mc_sc_start_0"] = "00:00:00.00"
+                        st.session_state[f"mc_sc_end_{len(_mc_scs)-1}"] = _f_end
+                    st.session_state.cut_ready_banner = f"✅ Vídeo inteiro selecionado: [00:00:00.00 → {_f_end}]"
                     st.rerun()
                 else:
                     st.info("ℹ️ Deixe os campos em branco: a aplicação considerará e processará o vídeo inteiro automaticamente ao gerar!")
@@ -8182,18 +8192,40 @@ if _has_media_ready:
                          help="Limpa os campos de tempo para considerar o vídeo inteiro"):
                 st.session_state.final_start_time = ""
                 st.session_state.final_end_time = ""
+                _mc_scs = st.session_state.get("multicam_scenes")
+                if _mc_scs and isinstance(_mc_scs, list) and len(_mc_scs) > 0:
+                    _mc_scs[0]["start_time"] = "00:00:00.00"
+                    _mc_scs[-1]["end_time"] = ""
+                    st.session_state["mc_sc_start_0"] = "00:00:00.00"
+                    st.session_state[f"mc_sc_end_{len(_mc_scs)-1}"] = ""
                 st.session_state.cut_ready_banner = ""
                 st.rerun()
 
         def _on_start_time_change():
             val = st.session_state.get("final_start_time", "")
             if val:
-                st.session_state.final_start_time = normalize_time_mask(val)
+                val = normalize_time_mask(val)
+                st.session_state.final_start_time = val
+            _mc_scs = st.session_state.get("multicam_scenes")
+            if _mc_scs and isinstance(_mc_scs, list) and len(_mc_scs) > 0:
+                _mc_scs[0]["start_time"] = val
+                st.session_state["mc_sc_start_0"] = val
+                if "mc_ref_ts_0" in st.session_state and val:
+                    try:
+                        if parse_time_str_to_seconds(st.session_state["mc_ref_ts_0"]) < parse_time_str_to_seconds(val):
+                            st.session_state["mc_ref_ts_0"] = val
+                    except Exception:
+                        pass
 
         def _on_end_time_change():
             val = st.session_state.get("final_end_time", "")
             if val:
-                st.session_state.final_end_time = normalize_time_mask(val)
+                val = normalize_time_mask(val)
+                st.session_state.final_end_time = val
+            _mc_scs = st.session_state.get("multicam_scenes")
+            if _mc_scs and isinstance(_mc_scs, list) and len(_mc_scs) > 0:
+                _mc_scs[-1]["end_time"] = val
+                st.session_state[f"mc_sc_end_{len(_mc_scs)-1}"] = val
 
         _end_placeholder = f"{_format_dur_str(_known_total_dur)} (Vídeo Inteiro)" if (_known_total_dur and _known_total_dur > 0) else "Fim do vídeo (Vídeo Inteiro)"
 
@@ -8829,6 +8861,13 @@ if _has_media_ready:
                         }]
 
                     mc_scenes = st.session_state["multicam_scenes"]
+                    if len(mc_scenes) == 1:
+                        if start_time and mc_scenes[0].get("start_time") != start_time:
+                            mc_scenes[0]["start_time"] = start_time
+                            st.session_state["mc_sc_start_0"] = start_time
+                        if end_time and mc_scenes[0].get("end_time") != end_time:
+                            mc_scenes[0]["end_time"] = end_time
+                            st.session_state["mc_sc_end_0"] = end_time
 
                     # ── Sincronização Automática do Intervalo de Corte ──
                     mc_global_start, mc_global_end = compute_multicam_global_timerange(
