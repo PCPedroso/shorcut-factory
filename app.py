@@ -1765,9 +1765,10 @@ def render_batch_quick_editor_component(parts_list: list, video_id: str):
 
             col_b_htxt, col_b_hbtn = st.columns([4, 1.2])
             with col_b_htxt:
+                if "batch_hl_text_input" not in st.session_state:
+                    st.session_state["batch_hl_text_input"] = default_hl
                 b_hl_text = st.text_area(
                     "Texto da Headline (suporta quebra manual com Enter e `{parte}`):",
-                    value=st.session_state.get("batch_hl_text_input", default_hl),
                     height=80,
                     key="batch_hl_text_input",
                     help="Ex: 'Caso Dark Horse • Parte {parte}'. A tag {parte} será substituída automaticamente por 01, 02, etc. Linhas separadas por Enter viram caixas independentes!"
@@ -8532,9 +8533,10 @@ if _has_media_ready:
                             )
                         with col_vpath:
                             saved_vpath = _cfg.get("split_video_path", "")
+                            if "split_vpath_input" not in st.session_state:
+                                st.session_state["split_vpath_input"] = saved_vpath
                             sec_vid_path_input = st.text_input(
                                 "Ou digite o caminho local:",
-                                value=saved_vpath,
                                 placeholder="C:\\Videos\\gameplay.mp4",
                                 key="split_vpath_input",
                                 on_change=lambda: save_setting("split_video_path", st.session_state.split_vpath_input)
@@ -8566,9 +8568,10 @@ if _has_media_ready:
                             )
                         with col_ifolder:
                             saved_ifolder = _cfg.get("split_image_folder", "")
+                            if "split_ifolder_input" not in st.session_state:
+                                st.session_state["split_ifolder_input"] = saved_ifolder
                             img_folder_input = st.text_input(
                                 "Ou informe uma pasta local com imagens:",
-                                value=saved_ifolder,
                                 placeholder="C:\\Imagens\\Slides",
                                 key="split_ifolder_input",
                                 on_change=lambda: save_setting("split_image_folder", st.session_state.split_ifolder_input)
