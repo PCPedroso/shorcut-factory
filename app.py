@@ -9075,7 +9075,6 @@ if _has_media_ready:
                                 selected_action = st.segmented_control(
                                     "🛠️ Ação do Canvas:",
                                     options=["✏️ Desenhar", "✋ Mover", "↔️ Redimensionar", "🎯 Selecionar"],
-                                    default=st.session_state.get(tool_key, "✏️ Desenhar"),
                                     key=tool_key,
                                     label_visibility="collapsed"
                                 ) or "✏️ Desenhar"
