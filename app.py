@@ -8842,7 +8842,13 @@ if _has_media_ready:
                 )
 
                 _active_mc_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
-                _mc_vid_id = get_current_active_video_id(_active_mc_url)
+                _mc_vid_id = (
+                    get_current_active_video_id(_active_mc_url)
+                    or get_video_id(_active_mc_url)
+                    or st.session_state.get("active_video_id")
+                    or _cfg.get("last_active_video_id")
+                    or ""
+                )
                 _v_full_mc = os.path.join("data", _mc_vid_id, "video_full.mp4") if _mc_vid_id else ""
 
                 if not _v_full_mc or not os.path.exists(_v_full_mc):
@@ -9383,6 +9389,8 @@ if _has_media_ready:
                             raw_rects = [
                                 o for o in canvas_result.json_data["objects"]
                                 if o.get("type") == "rect"
+                                and (float(o.get("width", 0)) * float(o.get("scaleX", 1.0))) >= 15
+                                and (float(o.get("height", 0)) * float(o.get("scaleY", 1.0))) >= 15
                             ]
                             for idx_b, r_obj in enumerate(raw_rects):
                                 n_box = normalize_box_coordinates(
@@ -9396,9 +9404,22 @@ if _has_media_ready:
                                 n_box["label"] = f"Câmera {idx_b+1}"
                                 detected_boxes.append(n_box)
 
-                        if detected_boxes:
+                        prev_boxes = cur_scene.get("boxes", [])
+                        if detected_boxes and detected_boxes != prev_boxes:
                             cur_scene["boxes"] = detected_boxes
                             st.session_state["multicam_scenes"] = mc_scenes
+                            canvas_cache_key = f"mc_init_dw_{sel_sc_idx}_{ref_ts_s:.1f}_{canvas_rev}"
+                            canvas_w_eval = min(1080, f_w) if hide_player else 680
+                            canvas_h_eval = int(round(canvas_w_eval * float(f_h) / float(f_w)))
+                            st.session_state[canvas_cache_key] = boxes_to_fabric_json(
+                                detected_boxes,
+                                canvas_w=canvas_w_eval,
+                                canvas_h=canvas_h_eval,
+                                video_w=f_w,
+                                video_h=f_h
+                            )
+                            if len(detected_boxes) != len(prev_boxes):
+                                st.rerun()
 
                         active_boxes = cur_scene.get("boxes", [])
                         if active_boxes:
