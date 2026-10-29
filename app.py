@@ -10266,7 +10266,8 @@ if _has_media_ready:
                 set_active_social_profile_name(_active_profile_name)
                 st.session_state["sel_social_profile_name"] = _active_profile_name
                 _p_data = _soc_profiles_dict["profiles"][_active_profile_name]
-                st.session_state["social_overlay_tgl"] = bool(_p_data.get("social_overlay_enabled", True))
+                # Mantém o estado atual do selo (desativado por padrão) ao trocar de perfil
+                st.session_state["social_overlay_tgl"] = bool(st.session_state.get("social_overlay_tgl", False))
                 st.session_state["social_pos_radio"] = str(_p_data.get("social_overlay_position", "Inferior (Bottom)"))
                 st.session_state["social_offset_input"] = int(_p_data.get("social_overlay_offset_y", 0))
                 st.session_state["social_font_size_input"] = int(_p_data.get("social_overlay_font_size", 32))
@@ -10284,7 +10285,10 @@ if _has_media_ready:
 
         _cur_profile = _soc_profiles_dict["profiles"].get(_active_profile_name, DEFAULT_PROFILE_DATA)
 
-        social_overlay_enabled = st.session_state.get("social_overlay_tgl", _cur_profile.get("social_overlay_enabled", False))
+        # Selo de Redes Sociais inicia DESATIVADO por padrão em cada sessão (ativação manual pelo usuário)
+        if "social_overlay_tgl" not in st.session_state:
+            st.session_state["social_overlay_tgl"] = False
+        social_overlay_enabled = bool(st.session_state["social_overlay_tgl"])
         saved_social_pos = _cur_profile.get("social_overlay_position", "Inferior (Bottom)")
         saved_social_offset_y = int(_cur_profile.get("social_overlay_offset_y", 0))
         saved_social_font_size = max(10, min(100, int(_cur_profile.get("social_overlay_font_size", 32))))
@@ -10416,7 +10420,6 @@ if _has_media_ready:
 
             social_overlay_enabled = st.toggle(
                 "✨ Ativar Selo de Redes Sociais no Corte",
-                value=social_overlay_enabled,
                 key="social_overlay_tgl",
                 on_change=lambda: save_setting("social_overlay_enabled", st.session_state.social_overlay_tgl),
                 help="Insere ícones oficiais e o @ ou descrição para YouTube, Instagram, TikTok e X em estilo elegante (Glassmorphism ou Minimalista)."

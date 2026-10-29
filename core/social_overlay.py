@@ -23,7 +23,7 @@ _FONT_PATH = os.path.join(_FONTS_DIR, "Montserrat-ExtraBold.ttf")
 SOCIAL_PROFILES_FILE = os.path.join("data", "social_profiles.json")
 
 DEFAULT_PROFILE_DATA = {
-    "social_overlay_enabled": True,
+    "social_overlay_enabled": False,
     "social_overlay_position": "Inferior (Bottom)",
     "social_overlay_offset_y": 0,
     "social_overlay_font_size": 32,
