@@ -2,7 +2,7 @@
 core/publishing/platform_registry.py — Registro Dinâmico de Publicadores por Plataforma.
 """
 
-from typing import Dict, Type, Optional, List
+from typing import Dict, Type, Optional, List, Any
 from .base import Platform, BasePublisher
 
 _REGISTRY: Dict[Platform, BasePublisher] = {}

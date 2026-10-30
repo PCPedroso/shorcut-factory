@@ -9,9 +9,13 @@ import os
 import json
 import base64
 import ctypes
-from ctypes import wintypes
 from typing import Dict, Any, Optional, List
 from .base import Platform
+
+try:
+    from ctypes import wintypes
+except Exception:
+    wintypes = None
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
@@ -21,11 +25,14 @@ LEGACY_YT_TOKEN = os.path.join(DATA_DIR, "youtube_token.json")
 
 
 # ── Suporte a Windows DPAPI via ctypes ────────────────────────────────────────
-class _DATA_BLOB(ctypes.Structure):
-    _fields_ = [
-        ("cbData", wintypes.DWORD),
-        ("pbData", ctypes.POINTER(ctypes.c_byte))
-    ]
+if wintypes is not None:
+    class _DATA_BLOB(ctypes.Structure):
+        _fields_ = [
+            ("cbData", wintypes.DWORD),
+            ("pbData", ctypes.POINTER(ctypes.c_byte))
+        ]
+else:
+    _DATA_BLOB = None
 
 
 def _dpapi_encrypt(plaintext_bytes: bytes) -> bytes:
@@ -119,10 +126,14 @@ class CredentialVault:
             decrypted = _dpapi_decrypt(raw_bytes)
             return json.loads(decrypted.decode("utf-8"))
         except Exception:
-            # Fallback caso o arquivo tenha sido salvo em formato texto puro para testes
+            # Fallback caso o arquivo tenha sido salvo em formato texto puro ou base64 (Linux/Colab)
             try:
                 with open(self.vault_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    loaded = json.load(f)
+                if isinstance(loaded, dict) and "_b64" in loaded:
+                    dec = base64.b64decode(loaded["_b64"].encode("ascii"))
+                    return json.loads(dec.decode("utf-8"))
+                return loaded
             except Exception:
                 return {}
 
