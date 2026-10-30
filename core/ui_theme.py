@@ -245,12 +245,21 @@ def render_empty_state_html(icon: str, title: str, description: str) -> str:
     """
 
 def render_section_header(number: str, title: str, badge_text: str = None, badge_variant: str = "neutral"):
-    """Renderiza um cabeçalho de seção profissional com título e badge de status inline."""
+    """Renderiza um cabeçalho de seção profissional com título, código do vídeo ativo e badge de status inline."""
+    code_val = ""
+    try:
+        code_val = str(st.session_state.get("active_video_code") or "").strip()
+    except Exception:
+        code_val = ""
+    code_html = (
+        f'<span class="viral-badge viral-badge-score" title="Código único do vídeo (11 caracteres)" style="margin-right: 6px;">🔑 Código: {code_val}</span>'
+        if code_val else ""
+    )
     badge_html = render_status_badge(badge_text, badge_variant) if badge_text else ""
     html = f"""
     <div class="viral-section-title">
         <h2>{number}. {title}</h2>
-        <div>{badge_html}</div>
+        <div>{code_html}{badge_html}</div>
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)

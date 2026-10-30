@@ -7,10 +7,96 @@ import os
 import json
 import shutil
 import re
+import hashlib
+import base64
 from datetime import datetime
 
 DATA_DIR = "data"
 LIBRARY_FILE = os.path.join(DATA_DIR, "library.json")
+
+
+def generate_youtube_style_id(text: str) -> str:
+    """Gera um ID de 11 caracteres similar ao do YouTube a partir de uma string."""
+    seed = str(text or "").strip()
+    # 1. Gera o hash SHA-256 em bytes
+    hash_bytes = hashlib.sha256(seed.encode("utf-8")).digest()
+    # 2. Codifica em Base64URL (remove caracteres não seguros para web)
+    base64url_hash = base64.urlsafe_b64encode(hash_bytes).decode("utf-8")
+    # 3. Retorna apenas os primeiros 11 caracteres
+    return base64url_hash[:11]
+
+
+def ensure_project_video_code(video_id: str, title: str = None, url: str = None) -> str:
+    """
+    Garante que o projeto possua um `video_code` de 11 caracteres (estilo YouTube).
+    Para projetos anteriores que ainda não possuem o código, gera e persiste
+    automaticamente em `library.json` e `data/<video_id>/metadata.json`.
+    """
+    if not video_id:
+        return generate_youtube_style_id(title or url or "") if (title or url) else ""
+
+    lib = get_library()
+    lib_item = next((v for v in lib if v.get("video_id") == video_id), None)
+
+    v_dir = os.path.join(DATA_DIR, video_id)
+    meta_path = os.path.join(v_dir, "metadata.json")
+    meta = {}
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    meta = loaded
+        except Exception:
+            meta = {}
+
+    existing_code = (
+        (lib_item.get("video_code") if lib_item else None)
+        or meta.get("video_code")
+        or ""
+    ).strip()
+
+    if len(existing_code) == 11:
+        code = existing_code
+    else:
+        eff_title = (
+            title
+            or (lib_item.get("title") if lib_item else None)
+            or meta.get("title")
+            or ""
+        ).strip()
+        eff_url = (
+            url
+            or (lib_item.get("url") if lib_item else None)
+            or meta.get("url")
+            or ""
+        ).strip()
+        seed = eff_title if (eff_title and eff_title != f"Vídeo {video_id}") else (eff_url or video_id)
+        code = generate_youtube_style_id(seed)
+
+    # Sincroniza em library.json se necessário
+    if lib_item is not None and lib_item.get("video_code") != code:
+        lib_item["video_code"] = code
+        try:
+            save_library_list(lib)
+        except Exception:
+            pass
+
+    # Sincroniza em data/<video_id>/metadata.json se a pasta existir
+    if os.path.isdir(v_dir) and meta.get("video_code") != code:
+        meta["video_id"] = meta.get("video_id") or video_id
+        meta["video_code"] = code
+        if lib_item:
+            for k in ("title", "url", "thumbnail", "upload_date", "channel", "added_at"):
+                if k not in meta and lib_item.get(k) is not None:
+                    meta[k] = lib_item.get(k)
+        try:
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=4)
+        except Exception:
+            pass
+
+    return code
 
 
 def find_video_slices(base_vid: str) -> list:
@@ -185,20 +271,30 @@ def add_or_update_video_in_library(
     thumbnail_url: str = None,
     duration_sec: int = None,
     channel: str = None,
-    is_live: bool = False
+    is_live: bool = False,
+    video_code: str = None
 ) -> dict:
-    """Registra ou atualiza um vídeo no catálogo da biblioteca."""
+    """Registra ou atualiza um vídeo no catálogo da biblioteca, garantindo o código de 11 caracteres."""
     lib = get_library()
-    
+    existing_item = next((v for v in lib if v.get("video_id") == video_id), None)
+
     formatted_date = format_upload_date(upload_date_raw)
-    
+    final_title = title or (existing_item.get("title") if existing_item else None) or f"Vídeo {video_id}"
+    seed = (title or "").strip() or (url or "").strip() or str(video_id or "")
+    resolved_code = (
+        (video_code or "").strip()
+        or (existing_item.get("video_code") if existing_item else "")
+        or generate_youtube_style_id(seed)
+    )
+
     video_entry = {
         "video_id": video_id,
-        "title": title or f"Vídeo {video_id}",
+        "video_code": resolved_code,
+        "title": final_title,
         "upload_date": formatted_date,
         "raw_upload_date": upload_date_raw,
         "url": url,
-        "thumbnail": thumbnail_url,
+        "thumbnail": thumbnail_url if thumbnail_url is not None else (existing_item.get("thumbnail") if existing_item else None),
         "duration_sec": duration_sec,
         "channel": channel or "Canal Desconhecido",
         "is_live": is_live,

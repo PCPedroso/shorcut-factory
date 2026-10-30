@@ -86,7 +86,7 @@ from core.video_processor import (
 )
 from core.library_manager import (
     get_library, add_or_update_video_in_library, remove_video_from_library,
-    create_project_from_cut_video, find_video_slices
+    create_project_from_cut_video, find_video_slices, generate_youtube_style_id, ensure_project_video_code
 )
 from core.config_manager import (
     load_settings, save_setting, save_all_settings, DEFAULT_SETTINGS
@@ -4290,13 +4290,14 @@ def load_video_saved_artifacts(video_id: str):
         st.session_state.video_url = _u
         st.session_state.input_yt_url = _u
 
+    st.session_state["active_video_code"] = ensure_project_video_code(video_id, url=st.session_state.get("video_url", ""))
     save_setting("last_active_video_id", video_id)
 
 
 def clear_current_project():
     """Limpa o projeto ativo da sessão e das configurações persistentes, permitindo iniciar um projeto limpo."""
     keys_to_clear = [
-        "active_video_id", "video_url", "input_yt_url", "transcription_done",
+        "active_video_id", "active_video_code", "video_url", "input_yt_url", "transcription_done",
         "video_ready", "full_text", "segments", "transcript_source",
         "pautas", "bundles", "shorts", "saved_steps", "ai_results",
         "input_yt_slice_start", "input_yt_slice_end", "input_yt_slice_label", "player_synced_time",
@@ -4325,7 +4326,11 @@ st.sidebar.header("📚 Biblioteca de Vídeos")
 
 _cur_act_id = st.session_state.get("active_video_id", "")
 if _cur_act_id:
+    _cur_act_code = ensure_project_video_code(_cur_act_id)
+    st.session_state["active_video_code"] = _cur_act_code
     st.sidebar.caption(f"📌 **Vídeo ativo:** `{_cur_act_id}`")
+    if _cur_act_code:
+        st.sidebar.caption(f"🔑 **Código do Vídeo:** `{_cur_act_code}`")
     if st.sidebar.button("🧹 Limpar Projeto / Iniciar Novo", key="btn_clear_active_proj", use_container_width=True, help="Descarrega o vídeo e limpa todas as análises atuais para começar do zero"):
         clear_current_project()
         st.rerun()
@@ -4351,7 +4356,10 @@ if library_videos:
                 safe_display_image(_local_thumb, use_container_width=True)
             elif str(v.get("thumbnail") or "").startswith("http"):
                 st.image(v["thumbnail"], use_container_width=True)
+            _v_code_lib = v.get("video_code") or ensure_project_video_code(v_id, v_title, v.get("url"))
             st.markdown(f"**Título:** {v_title}")
+            if _v_code_lib:
+                st.markdown(f"🔑 **Código:** `{_v_code_lib}`")
             st.markdown(f"📅 **Data:** `{v_date}`")
             if v.get("channel"):
                 st.caption(f"📺 {v['channel']}")
@@ -4503,6 +4511,22 @@ strategy_choice = st.session_state.get("analysis_strategy_radio") or _cfg.get("a
 
 # ── WORKFLOW STEPPER STUDIO & STATUS DINÂMICOS ───────────────────────────────
 workflow_step = render_workflow_stepper()
+
+# BARRA GLOBAL DO CODIGO DO VIDEO (VISIVEL EM TODAS AS ABAS)
+_active_tab_vid = st.session_state.get("active_video_id") or get_current_active_video_id(video_url) or ""
+if _active_tab_vid and (os.path.isdir(os.path.join("data", _active_tab_vid)) or st.session_state.get("active_video_id")):
+    _active_tab_code = ensure_project_video_code(_active_tab_vid, url=video_url)
+    st.session_state["active_video_code"] = _active_tab_code
+    if _active_tab_code:
+        st.markdown(
+            f'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;'
+            f'background:rgba(99,102,241,0.10);border:1px solid rgba(99,102,241,0.28);border-radius:10px;'
+            f'padding:6px 14px;margin-top:-10px;margin-bottom:14px;font-size:0.85rem;">'
+            f'<div>🔑 <strong>Código do Vídeo:</strong> <code style="color:#f472b6;font-weight:700;font-size:0.92rem;">{_active_tab_code}</code></div>'
+            f'<div style="color:#94a3b8;">📌 Projeto: <code>{_active_tab_vid}</code></div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
 
 show_sec1 = workflow_step.startswith('1.') or workflow_step.startswith('🌐')
 show_sec2 = workflow_step.startswith('2.') or workflow_step.startswith('🌐')
@@ -5484,7 +5508,7 @@ if show_sec1:
                                 v_dur = _e_val - _s_val
                         is_live_flag = meta.get("is_live", False)
     
-                        add_or_update_video_in_library(
+                        _lib_entry = add_or_update_video_in_library(
                             video_id=video_id,
                             title=v_title,
                             upload_date_raw=v_date,
@@ -5494,15 +5518,19 @@ if show_sec1:
                             channel=meta.get("channel"),
                             is_live=is_live_flag
                         )
+                        st.session_state["active_video_code"] = _lib_entry.get("video_code", "")
 
                         try:
                             with open(os.path.join(data_dir, "metadata.json"), "w", encoding="utf-8") as _mf_save:
                                 json.dump({
                                     "video_id": video_id,
+                                    "video_code": _lib_entry.get("video_code"),
                                     "title": v_title,
                                     "url": video_url,
+                                    "thumbnail": v_thumb,
                                     "is_live": is_live_flag,
                                     "duration": v_dur,
+                                    "duration_sec": v_dur,
                                     "upload_date": v_date,
                                     "channel": meta.get("channel")
                                 }, _mf_save, ensure_ascii=False, indent=2)
