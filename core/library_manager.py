@@ -15,25 +15,21 @@ DATA_DIR = "data"
 LIBRARY_FILE = os.path.join(DATA_DIR, "library.json")
 
 
-def generate_youtube_style_id(text: str) -> str:
-    """Gera um ID de 11 caracteres similar ao do YouTube a partir de uma string."""
-    seed = str(text or "").strip()
-    # 1. Gera o hash SHA-256 em bytes
-    hash_bytes = hashlib.sha256(seed.encode("utf-8")).digest()
-    # 2. Codifica em Base64URL (remove caracteres não seguros para web)
-    base64url_hash = base64.urlsafe_b64encode(hash_bytes).decode("utf-8")
-    # 3. Retorna apenas os primeiros 11 caracteres
-    return base64url_hash[:11]
+from core.video_code_manager import (
+    generate_youtube_style_id,
+    allocate_project_code,
+    allocate_cut_code,
+)
 
 
 def ensure_project_video_code(video_id: str, title: str = None, url: str = None) -> str:
     """
-    Garante que o projeto possua um `video_code` de 11 caracteres (estilo YouTube).
+    Garante que o projeto possua um `video_code` de 11 caracteres exclusivo (estilo YouTube).
     Para projetos anteriores que ainda não possuem o código, gera e persiste
-    automaticamente em `library.json` e `data/<video_id>/metadata.json`.
+    automaticamente em `library.json`, `data/<video_id>/metadata.json` e no registro global anti-colisão.
     """
     if not video_id:
-        return generate_youtube_style_id(title or url or "") if (title or url) else ""
+        return allocate_project_code("", title=title or "", url=url or "", data_dir=DATA_DIR) if (title or url) else ""
 
     lib = get_library()
     lib_item = next((v for v in lib if v.get("video_id") == video_id), None)
@@ -56,23 +52,26 @@ def ensure_project_video_code(video_id: str, title: str = None, url: str = None)
         or ""
     ).strip()
 
-    if len(existing_code) == 11:
-        code = existing_code
-    else:
-        eff_title = (
-            title
-            or (lib_item.get("title") if lib_item else None)
-            or meta.get("title")
-            or ""
-        ).strip()
-        eff_url = (
-            url
-            or (lib_item.get("url") if lib_item else None)
-            or meta.get("url")
-            or ""
-        ).strip()
-        seed = eff_title if (eff_title and eff_title != f"Vídeo {video_id}") else (eff_url or video_id)
-        code = generate_youtube_style_id(seed)
+    eff_title = (
+        title
+        or (lib_item.get("title") if lib_item else None)
+        or meta.get("title")
+        or ""
+    ).strip()
+    eff_url = (
+        url
+        or (lib_item.get("url") if lib_item else None)
+        or meta.get("url")
+        or ""
+    ).strip()
+
+    code = allocate_project_code(
+        video_id=video_id,
+        title=eff_title,
+        url=eff_url,
+        preferred_code=existing_code if len(existing_code) == 11 else None,
+        data_dir=DATA_DIR,
+    )
 
     # Sincroniza em library.json se necessário
     if lib_item is not None and lib_item.get("video_code") != code:
@@ -280,11 +279,16 @@ def add_or_update_video_in_library(
 
     formatted_date = format_upload_date(upload_date_raw)
     final_title = title or (existing_item.get("title") if existing_item else None) or f"Vídeo {video_id}"
-    seed = (title or "").strip() or (url or "").strip() or str(video_id or "")
-    resolved_code = (
+    pref_code = (
         (video_code or "").strip()
         or (existing_item.get("video_code") if existing_item else "")
-        or generate_youtube_style_id(seed)
+    )
+    resolved_code = allocate_project_code(
+        video_id=video_id,
+        title=final_title,
+        url=url or "",
+        preferred_code=pref_code if len(pref_code) == 11 else None,
+        data_dir=DATA_DIR,
     )
 
     video_entry = {

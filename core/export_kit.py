@@ -210,10 +210,22 @@ def create_viral_package(
 
         # Dados do vídeo original
         orig_info = orig_video_info or {}
+        orig_vid_id = orig_info.get("video_id") or os.path.basename(os.path.normpath(output_base_dir or ""))
         orig_title = orig_info.get("title", "Título Desconhecido")
         orig_channel = orig_info.get("channel", "Canal Desconhecido")
         orig_date = orig_info.get("upload_date", "Data N/D")
         orig_url = orig_info.get("url", "")
+
+        from core.video_code_manager import allocate_cut_code
+        cut_code = allocate_cut_code(
+            video_id=orig_vid_id,
+            start_time=start_time_str or "",
+            end_time=end_time_str or "",
+            aspect_mode=aspect_mode,
+            title=title,
+            folder_name=folder_name,
+            video_path=video_dest_path,
+        )
 
         thumb_info_str = f"• Capa / Thumbnail Principal: {thumb_filename}\n" if thumb_dest_path else ""
         if variations_copied:
@@ -230,7 +242,8 @@ def create_viral_package(
         # 4. info_publicacao.txt
         info_content = f"""════════════════════════════════════════════════════════════════
 🚀 PACOTE DE PUBLICAÇÃO VIRAL
-📁 CÓDIGO DO CORTE: {folder_name}
+📁 PASTA DO CORTE: {folder_name}
+🔑 CÓDIGO EXCLUSIVO DO CORTE (11 CHARS): {cut_code}
 ════════════════════════════════════════════════════════════════
 
 📌 TÍTULO DO CORTE:
@@ -269,6 +282,7 @@ def create_viral_package(
             f.write(tags_content)
 
         return {
+            "cut_code": cut_code,
             "folder_name": folder_name,
             "package_dir": package_dir,
             "video_filename": video_filename,

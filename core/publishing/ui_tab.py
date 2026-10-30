@@ -244,7 +244,42 @@ def _render_dispatch_panel(vault: CredentialVault, queue: PublishQueue):
         try:
             with open(catalog_path, "r", encoding="utf-8") as f:
                 cat_data = json.load(f)
+            if isinstance(cat_data, dict) and isinstance(cat_data.get("cuts"), list):
                 available_cuts = cat_data.get("cuts", [])
+            elif isinstance(cat_data, dict):
+                from core.cuts_catalog import load_cuts_catalog
+                ensured_cat = load_cuts_catalog(active_vid)
+                idx_counter = 1
+                for t_key, c_entry in ensured_cat.items():
+                    if not isinstance(c_entry, dict):
+                        continue
+                    fmts = c_entry.get("formats", {})
+                    if isinstance(fmts, dict) and fmts:
+                        for fmt_k, fmt_v in fmts.items():
+                            if not isinstance(fmt_v, dict):
+                                continue
+                            available_cuts.append({
+                                "index": idx_counter,
+                                "title": c_entry.get("title", "Sem Título"),
+                                "description": c_entry.get("description", ""),
+                                "hashtags": c_entry.get("hashtags", []),
+                                "tags_seo": c_entry.get("tags_seo", ""),
+                                "aspect_mode": fmt_k,
+                                "cut_code": fmt_v.get("cut_code") or c_entry.get("cut_code", ""),
+                                "video_path": fmt_v.get("video_path"),
+                            })
+                            idx_counter += 1
+                    else:
+                        available_cuts.append({
+                            "index": idx_counter,
+                            "title": c_entry.get("title", "Sem Título"),
+                            "description": c_entry.get("description", ""),
+                            "hashtags": c_entry.get("hashtags", []),
+                            "tags_seo": c_entry.get("tags_seo", ""),
+                            "cut_code": c_entry.get("cut_code", ""),
+                            "video_path": c_entry.get("video_path") or c_entry.get("cropped_path"),
+                        })
+                        idx_counter += 1
         except Exception:
             available_cuts = []
 
@@ -252,9 +287,17 @@ def _render_dispatch_panel(vault: CredentialVault, queue: PublishQueue):
 
     with c1:
         if available_cuts:
-            cut_options = [f"Corte #{c.get('index', i)}: {c.get('title', 'Sem Título')}" for i, c in enumerate(available_cuts)]
-            selected_cut_idx = st.selectbox("Selecione um Corte do Catálogo:", range(len(cut_options)), format_func=lambda x: cut_options[x], key="pub_cut_select")
+            def _fmt_cut_opt(idx_val: int) -> str:
+                c = available_cuts[idx_val]
+                code_part = f" [{c['cut_code']}]" if c.get("cut_code") else ""
+                fmt_part = f" ({c['aspect_mode']})" if c.get("aspect_mode") else ""
+                return f"Corte #{c.get('index', idx_val)}{code_part}{fmt_part}: {c.get('title', 'Sem Título')}"
+
+            selected_cut_idx = st.selectbox("Selecione um Corte do Catálogo:", range(len(available_cuts)), format_func=_fmt_cut_opt, key="pub_cut_select")
             chosen_cut = available_cuts[selected_cut_idx]
+            if chosen_cut.get("cut_code"):
+                st.session_state["active_cut_code"] = chosen_cut["cut_code"]
+                st.caption(f"🔑 **Código Exclusivo do Corte:** `{chosen_cut['cut_code']}`")
             chosen_video_path = chosen_cut.get("video_path") or chosen_cut.get("cropped_path")
             default_title = chosen_cut.get("title", "")
             default_desc = chosen_cut.get("description", "")

@@ -4291,13 +4291,18 @@ def load_video_saved_artifacts(video_id: str):
         st.session_state.input_yt_url = _u
 
     st.session_state["active_video_code"] = ensure_project_video_code(video_id, url=st.session_state.get("video_url", ""))
+    st.session_state["active_cut_code"] = ""
+    try:
+        load_cuts_catalog(video_id)
+    except Exception:
+        pass
     save_setting("last_active_video_id", video_id)
 
 
 def clear_current_project():
     """Limpa o projeto ativo da sessão e das configurações persistentes, permitindo iniciar um projeto limpo."""
     keys_to_clear = [
-        "active_video_id", "active_video_code", "video_url", "input_yt_url", "transcription_done",
+        "active_video_id", "active_video_code", "active_cut_code", "video_url", "input_yt_url", "transcription_done",
         "video_ready", "full_text", "segments", "transcript_source",
         "pautas", "bundles", "shorts", "saved_steps", "ai_results",
         "input_yt_slice_start", "input_yt_slice_end", "input_yt_slice_label", "player_synced_time",
@@ -4522,7 +4527,9 @@ if _active_tab_vid and (os.path.isdir(os.path.join("data", _active_tab_vid)) or 
             f'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;'
             f'background:rgba(99,102,241,0.10);border:1px solid rgba(99,102,241,0.28);border-radius:10px;'
             f'padding:6px 14px;margin-top:-10px;margin-bottom:14px;font-size:0.85rem;">'
-            f'<div>🔑 <strong>Código do Vídeo:</strong> <code style="color:#f472b6;font-weight:700;font-size:0.92rem;">{_active_tab_code}</code></div>'
+            f'<div>🔑 <strong>Código do Vídeo Base:</strong> <code style="color:#f472b6;font-weight:700;font-size:0.92rem;">{_active_tab_code}</code>'
+            + (f' &nbsp;|&nbsp; ✂️ <strong>Código do Corte Ativo:</strong> <code style="color:#38bdf8;font-weight:700;font-size:0.92rem;">{st.session_state.get("active_cut_code")}</code>' if st.session_state.get("active_cut_code") else '')
+            + '</div>'
             f'<div style="color:#94a3b8;">📌 Projeto: <code>{_active_tab_vid}</code></div>'
             f'</div>',
             unsafe_allow_html=True
@@ -10823,7 +10830,11 @@ if _has_media_ready:
     
             with col_meta_status:
                 if existing_inst:
-                    st.success(f"⚡ **Instância Encontrada no Cache ({existing_inst.get('rendered_at')})!**")
+                    _inst_code = existing_inst.get("cut_code", "")
+                    if _inst_code:
+                        st.session_state["active_cut_code"] = _inst_code
+                    _inst_code_lbl = f" | 🔑 Código do Corte: `{_inst_code}`" if _inst_code else ""
+                    st.success(f"⚡ **Instância Encontrada no Cache ({existing_inst.get('rendered_at')})!**{_inst_code_lbl}")
                 elif existing_cut:
                     other_formats = list(existing_cut.get("formats", {}).keys())
                     st.info(f"💡 Minutagem já gerada em: `{', '.join(other_formats)}`. Textos reaproveitados!")
@@ -12210,7 +12221,7 @@ if _has_media_ready:
                             )
     
                             # Registra no Catálogo de Cortes
-                            register_cut_instance(
+                            _reg_entry = register_cut_instance(
                                 video_id=video_id,
                                 start_time=start_time,
                                 end_time=end_time,
@@ -12227,6 +12238,16 @@ if _has_media_ready:
                             )
     
                             # Botões de Ação do Corte Renderizado
+                            _rendered_cut_code = (
+                                (_reg_entry or {}).get("formats", {}).get(selected_aspect, {}).get("cut_code")
+                                or package_res.get("cut_code")
+                                or ""
+                            )
+                            if _rendered_cut_code:
+                                st.session_state["active_cut_code"] = _rendered_cut_code
+                                st.markdown(
+                                    f"🔑 **Código Exclusivo deste Corte:** `{_rendered_cut_code}`"
+                                )
                             saved_thumb = package_res.get("thumbnail_dest_path")
                             has_saved_thumb = saved_thumb and os.path.exists(saved_thumb)
     
@@ -12402,6 +12423,7 @@ if _has_media_ready:
                                 st.session_state["_pending_cut_desc"] = cut_item.get('description', '')
                                 st.session_state["_pending_cut_hashtags"] = " ".join(cut_item.get('hashtags', [])) if isinstance(cut_item.get('hashtags'), list) else cut_item.get('hashtags', '')
                                 st.session_state["_pending_cut_tags_seo"] = cut_item.get('tags_seo', '')
+                                st.session_state["active_cut_code"] = cut_item.get('cut_code', '')
                                 st.session_state.cut_ready_banner = f"✂️ Trecho carregado na Fábrica: **{cut_item.get('title', 'Corte')}** `[{cut_item.get('start_time')} → {cut_item.get('end_time')}]`"
                                 st.session_state["scroll_to_section3"] = True
                                 navigate_to_step("3")
@@ -12916,7 +12938,9 @@ if _has_media_ready:
                                             st.rerun()
                                 abs_fol_g = os.path.abspath(_fd.get("folder_path", ""))
                                 link_fol_g = abs_fol_g.replace('\\', '/')
-                                st.markdown(f"📁 **Pasta Local:** [{_fd.get('folder_name', 'Abrir Pasta')}](file:///{link_fol_g}) &nbsp; `📁 {abs_fol_g}`", unsafe_allow_html=True)
+                                _gal_cut_code = _fd.get("cut_code") or cut_item.get("cut_code") or ""
+                                _gal_code_str = f"🔑 **Código do Corte:** `{_gal_cut_code}` &nbsp;|&nbsp; " if _gal_cut_code else ""
+                                st.markdown(f"{_gal_code_str}📁 **Pasta Local:** [{_fd.get('folder_name', 'Abrir Pasta')}](file:///{link_fol_g}) &nbsp; `📁 {abs_fol_g}`", unsafe_allow_html=True)
 
                             if num_fmt == 1:
                                 fmt_key, fmt_data = next(iter(formats_dict.items()))
@@ -12932,7 +12956,8 @@ if _has_media_ready:
 
                                 col_vid, col_side = st.columns([1.4, 2.6])
                                 with col_vid:
-                                    st.markdown(f"**{fmt_badge}**")
+                                    _fmt_cc = fmt_data.get("cut_code") or cut_item.get("cut_code") or ""
+                                    st.markdown(f"**{fmt_badge}**" + (f" &nbsp; `🔑 {_fmt_cc}`" if _fmt_cc else ""))
                                     if v_file and os.path.exists(v_file):
                                         safe_display_video(v_file)
                                         _render_actions_box(v_file, fmt_key, fmt_data, fmt_badge, f_idx)
@@ -12960,7 +12985,8 @@ if _has_media_ready:
                                             "9:16_crop": "📱 9:16 Crop (VCCFT)",
                                             "16:9": "💻 16:9 Original (HOFHD)"
                                         }.get(fmt_key, fmt_key)
-                                        st.markdown(f"**{fmt_badge}**")
+                                        _fmt_cc = fmt_data.get("cut_code") or cut_item.get("cut_code") or ""
+                                        st.markdown(f"**{fmt_badge}**" + (f" &nbsp; `🔑 {_fmt_cc}`" if _fmt_cc else ""))
                                         v_file = fmt_data.get("video_path")
                                         if v_file and os.path.exists(v_file):
                                             safe_display_video(v_file)

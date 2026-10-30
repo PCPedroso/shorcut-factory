@@ -10,6 +10,7 @@ import shutil
 import re
 from datetime import datetime
 from core.export_kit import build_cut_folder_name
+from core.video_code_manager import allocate_cut_code
 
 
 def _get_catalog_path(video_id: str) -> str:
@@ -30,8 +31,52 @@ def _raw_load_cuts_catalog(video_id: str) -> dict:
     return {}
 
 
+def ensure_catalog_cut_codes(video_id: str, catalog: dict = None) -> dict:
+    """
+    Garante que todos os pequenos cortes e instâncias de formato registrados em `cuts_catalog.json`
+    possuam seu próprio `cut_code` exclusivo de 11 caracteres (retrocompatível para cortes antigos).
+    """
+    if not video_id:
+        return catalog or {}
+    cat = catalog if catalog is not None else _raw_load_cuts_catalog(video_id)
+    if not isinstance(cat, dict) or not cat:
+        return cat
+
+    modified = False
+    for time_key, c_data in cat.items():
+        if not isinstance(c_data, dict):
+            continue
+        s_t = c_data.get("start_time", "")
+        e_t = c_data.get("end_time", "")
+        c_title = c_data.get("title", "")
+        formats = c_data.get("formats", {})
+        if not isinstance(formats, dict):
+            continue
+        for asp_mode, fmt_info in formats.items():
+            if not isinstance(fmt_info, dict):
+                continue
+            existing = str(fmt_info.get("cut_code") or "").strip()
+            code = allocate_cut_code(
+                video_id=video_id,
+                start_time=s_t,
+                end_time=e_t,
+                aspect_mode=asp_mode,
+                title=c_title,
+                folder_name=fmt_info.get("folder_name", ""),
+                video_path=fmt_info.get("video_path", ""),
+                preferred_code=existing if len(existing) == 11 else None,
+            )
+            if fmt_info.get("cut_code") != code:
+                fmt_info["cut_code"] = code
+                modified = True
+
+    if modified:
+        save_cuts_catalog(video_id, cat)
+    return cat
+
+
 def load_cuts_catalog(video_id: str, sync_carrossel: bool = True) -> dict:
-    """Carrega o catálogo de cortes de um vídeo específico, sincronizando partes de carrossel se existirem."""
+    """Carrega o catálogo de cortes de um vídeo específico, sincronizando partes de carrossel e códigos exclusivos."""
     if not video_id:
         return {}
     if sync_carrossel:
@@ -39,7 +84,8 @@ def load_cuts_catalog(video_id: str, sync_carrossel: bool = True) -> dict:
             sync_carrossel_parts_to_catalog(video_id)
         except Exception:
             pass
-    return _raw_load_cuts_catalog(video_id)
+    cat = _raw_load_cuts_catalog(video_id)
+    return ensure_catalog_cut_codes(video_id, cat)
 
 
 def save_cuts_catalog(video_id: str, catalog: dict):
@@ -200,7 +246,17 @@ def sync_carrossel_parts_to_catalog(video_id: str) -> dict:
                 }
 
             resolved_thumb_path = thumb_path if os.path.exists(thumb_path) else None
+            part_cut_code = allocate_cut_code(
+                video_id=video_id,
+                start_time=start_time_str,
+                end_time=end_time_str,
+                aspect_mode=aspect_mode,
+                title=part_title,
+                folder_name=f"carrossel_parte_{idx}",
+                video_path=fpath,
+            )
             catalog[time_key]["formats"][aspect_mode] = {
+                "cut_code": part_cut_code,
                 "aspect_mode": aspect_mode,
                 "folder_name": "carrossel",
                 "folder_path": carrossel_dir,
@@ -329,8 +385,21 @@ def register_cut_instance(
         elif os.path.exists(cand_sub2):
             resolved_sub_path = cand_sub2
 
-    # Registra a instância específica deste formato
+    # Registra a instância específica deste formato com código exclusivo de 11 caracteres
+    prev_fmt = catalog[key]["formats"].get(aspect_mode, {}) if isinstance(catalog[key].get("formats"), dict) else {}
+    prev_code = str(prev_fmt.get("cut_code") or "").strip()
+    cut_code = allocate_cut_code(
+        video_id=video_id,
+        start_time=start_time,
+        end_time=end_time,
+        aspect_mode=aspect_mode,
+        title=title,
+        folder_name=folder_name,
+        video_path=video_path,
+        preferred_code=prev_code if len(prev_code) == 11 else None,
+    )
     catalog[key]["formats"][aspect_mode] = {
+        "cut_code": cut_code,
         "aspect_mode": aspect_mode,
         "folder_name": folder_name,
         "folder_path": folder_path,

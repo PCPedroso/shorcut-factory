@@ -83,6 +83,7 @@ shorcut-factory/
 │   ├── export_kit.py          # Nomenclatura estrita (VLDSS, VRIRA...), pastas de publicação com thumbnail e persistência de transcricao_corte.json
 │   ├── cuts_catalog.py        # Catálogo e cache inteligente multi-instância (cuts_catalog.json)
 │   ├── batch_processor.py     # Processamento sequencial em lote com Smart Skip e Phase 4
+│   ├── video_code_manager.py  # Motor centralizado de geração e unicidade global (anti-colisão) de códigos de 11 caracteres para vídeos base e cortes (video_codes_registry.json)
 │   ├── library_manager.py     # Catálogo global de vídeos processados (library.json) e descoberta de múltiplos trechos fatiados (find_video_slices)
 │   └── config_manager.py      # Persistência contínua de preferências (app_settings.json)
 ├── data/
@@ -496,12 +497,12 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
 - **🖼️ Cache Local Anti-Hotlink de Thumbnails na Biblioteca (`ensure_local_thumbnail` em `core/library_manager.py`, `tests/test_library_thumbnail_cache.py`)**:
   - Contorna o bloqueio de hotlink (`HTTP 351 Forbidden`) aplicado por CDNs como `pbs.twimg.com` (X/Twitter) quando o navegador envia `Referer: http://localhost:8501`.
   - Realiza o download server-side (sem `Referer`) validando a assinatura binária (JPEG/PNG/WEBP) e grava em cache local (`data/<video_id>/thumbnail_cover.jpg`), com fallback automático extraindo um frame representativo (10% da duração) de `video_full.mp4`.
-- **🔑 Código Único de 11 Caracteres Estilo YouTube por Projeto (`generate_youtube_style_id`, `ensure_project_video_code` em `core/library_manager.py`, `core/ui_theme.py`, `app.py`, `tests/test_video_code_generator.py`)**:
-  - Geração determinística de um identificador curto de 11 caracteres via hash SHA-256 codificado em Base64URL (`base64.urlsafe_b64encode(sha256)[:11]`) sempre que um novo vídeo é baixado ou importado.
-  - Geração retroativa automática ao abrir qualquer projeto anterior que ainda não possua `video_code`, persistindo o código sincronizado em `data/library.json` e `data/<video_id>/metadata.json`.
-  - Visibilidade global em **todas as abas** (barra superior persistente abaixo do Stepper, badge `🔑 Código: <id>` em todos os cabeçalhos de seção `render_section_header` e indicador na Biblioteca de Vídeos da barra lateral).
-- **🧪 Suíte de 350 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação e validação contínua via `pytest` (348 aprovados, 2 skipped). Cobertura completa de todos os módulos do pipeline: esteira de publicação multiplataforma (YouTube, Instagram, TikTok, X, Kwai, queue, worker, preflight, caption adapter, vault DPAPI, UI), radar shopee (resolução, anti-bloqueio, catálogo, diagnósticos), servidor de streaming HTTP, canvas multicâmera, hotkeys de vídeo, kick.com live stream HLS download & recent_minutes slicing, cadastro e alternância de perfis de canais/redes sociais, time mask, dynamic ingestion rule, carrossel sync, headline drawer, transitions, audio mixer, translator, face tracker, ui theme e export kit.
+- **🔑 Código Exclusivo de 11 Caracteres Estilo YouTube para Vídeos Base & Pequenos Cortes (`core/video_code_manager.py`, `core/library_manager.py`, `core/export_kit.py`, `core/cuts_catalog.py`, `core/ui_theme.py`, `app.py`, `tests/test_video_code_generator.py`)**:
+  - Geração determinística de identificadores curtos de 11 caracteres via hash SHA-256 codificado em Base64URL (`base64.urlsafe_b64encode(sha256)[:11]`) tanto para cada **vídeo base** (`video_code`) quanto para cada **pequeno corte / formato renderizado** (`cut_code`), com **Registro Global Anti-Colisão** (`data/video_codes_registry.json` + resolução determinística por nonce `#1`, `#2`...) garantindo que dois vídeos ou cortes jamais repitam o mesmo código.
+  - Geração retroativa automática ao abrir qualquer projeto anterior (`ensure_project_video_code` e `ensure_catalog_cut_codes` em `load_cuts_catalog`), preenchendo e persistindo códigos exclusivos sincronizados em `data/library.json`, `data/<video_id>/metadata.json`, `data/<video_id>/cuts_catalog.json` e `info_publicacao.txt`.
+  - Visibilidade global em **todas as abas** (barra superior exibindo `🔑 Código do Vídeo Base` e `✂️ Código do Corte Ativo`, cabeçalhos de seção `render_section_header`, Biblioteca de Vídeos, Seção 3 após renderização/cache, cards da Galeria na Seção 4 e seletor de cortes da Central de Publicação na Seção 5).
+- **🧪 Suíte de 353 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação e validação contínua via `pytest` (351 aprovados, 2 skipped). Cobertura completa de todos os módulos do pipeline: esteira de publicação multiplataforma (YouTube, Instagram, TikTok, X, Kwai, queue, worker, preflight, caption adapter, vault DPAPI, UI), códigos exclusivos anti-colisão de 11 caracteres para vídeos e cortes (`video_code_manager`), radar shopee (resolução, anti-bloqueio, catálogo, diagnósticos), servidor de streaming HTTP, canvas multicâmera, hotkeys de vídeo, kick.com live stream HLS download & recent_minutes slicing, cadastro e alternância de perfis de canais/redes sociais, time mask, dynamic ingestion rule, carrossel sync, headline drawer, transitions, audio mixer, translator, face tracker, ui theme e export kit.
 
 ---
 
