@@ -4343,11 +4343,14 @@ if library_videos:
         v_id = v.get("video_id")
         
         with st.sidebar.expander(f"🎬 {v_title[:35]}...", expanded=False):
-            if v.get("thumbnail"):
-                if os.path.exists(v["thumbnail"]):
-                    safe_display_image(v["thumbnail"], use_container_width=True)
-                elif str(v["thumbnail"]).startswith("http"):
-                    st.image(v["thumbnail"], use_container_width=True)
+            # Thumbnail sempre servida a partir de copia local: CDNs como pbs.twimg.com (X)
+            # bloqueiam hotlink com Referer localhost, deixando a imagem quebrada.
+            from core.library_manager import ensure_local_thumbnail
+            _local_thumb = ensure_local_thumbnail(v_id, v.get("thumbnail"))
+            if _local_thumb:
+                safe_display_image(_local_thumb, use_container_width=True)
+            elif str(v.get("thumbnail") or "").startswith("http"):
+                st.image(v["thumbnail"], use_container_width=True)
             st.markdown(f"**Título:** {v_title}")
             st.markdown(f"📅 **Data:** `{v_date}`")
             if v.get("channel"):

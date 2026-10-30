@@ -233,6 +233,84 @@ def remove_video_from_library(video_id: str, delete_folder: bool = True) -> bool
     return True
 
 
+_THUMB_CACHE_NAME = "thumbnail_cover.jpg"
+_THUMB_FALLBACK_DIR = os.path.join(DATA_DIR, ".thumb_cache")
+_THUMB_FAILED_IDS = set()
+
+
+def _is_valid_image_bytes(data: bytes) -> bool:
+    """Confere a assinatura binária de JPEG, PNG ou WEBP."""
+    if not data or len(data) < 1024:
+        return False
+    return data[:3] == b"\xff\xd8\xff" or data[:8] == b"\x89PNG\r\n\x1a\n" or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+
+
+def ensure_local_thumbnail(video_id: str, thumbnail: str = None, timeout: float = 6.0) -> str:
+    """
+    Garante uma cópia local da thumbnail de um projeto e retorna seu caminho (ou "" se impossível).
+
+    Motivo: CDNs como pbs.twimg.com (X/Twitter) bloqueiam hotlink quando o navegador envia
+    `Referer: http://localhost:8501` (HTTP 351 Forbidden), deixando a imagem quebrada na barra lateral.
+    O download feito pelo servidor (sem Referer) funciona e fica em cache em data/<video_id>/.
+
+    Ordem: arquivo local existente → cache → download da URL → frame extraído de video_full.mp4.
+    """
+    if thumbnail and not str(thumbnail).startswith(("http://", "https://")) and os.path.exists(thumbnail):
+        return thumbnail
+    if not video_id:
+        return ""
+
+    v_dir = os.path.join(DATA_DIR, video_id)
+    cache_dir = v_dir if os.path.isdir(v_dir) else _THUMB_FALLBACK_DIR
+    cache_path = os.path.join(cache_dir, _THUMB_CACHE_NAME if cache_dir == v_dir else f"{video_id}.jpg")
+    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
+        return cache_path
+    if video_id in _THUMB_FAILED_IDS:
+        return ""
+
+    # 1. Download server-side da URL remota (sem Referer, evitando bloqueio de hotlink)
+    if thumbnail and str(thumbnail).startswith(("http://", "https://")):
+        try:
+            import urllib.request
+            req = urllib.request.Request(str(thumbnail), headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36",
+                "Accept": "image/avif,image/webp,image/*,*/*;q=0.8",
+            })
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = resp.read()
+            if _is_valid_image_bytes(data):
+                os.makedirs(cache_dir, exist_ok=True)
+                with open(cache_path, "wb") as f:
+                    f.write(data)
+                return cache_path
+        except Exception:
+            pass
+
+    # 2. Fallback: frame representativo do próprio vídeo baixado
+    video_path = os.path.join(v_dir, "video_full.mp4")
+    if os.path.exists(video_path):
+        try:
+            import cv2
+            cap = cv2.VideoCapture(video_path)
+            total = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+            if total > 0:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, int(total * 0.1))
+            ok, frame = cap.read()
+            cap.release()
+            if ok and frame is not None:
+                h, w = frame.shape[:2]
+                if w > 640:
+                    frame = cv2.resize(frame, (640, int(h * 640 / w)))
+                os.makedirs(cache_dir, exist_ok=True)
+                if cv2.imwrite(cache_path, frame):
+                    return cache_path
+        except Exception:
+            pass
+
+    _THUMB_FAILED_IDS.add(video_id)
+    return ""
+
+
 def update_video_thumbnail_in_library(video_id: str, thumbnail_path: str) -> bool:
     """Atualiza o caminho da thumbnail de um vídeo existente na biblioteca e em seu metadata.json."""
     if not video_id:
