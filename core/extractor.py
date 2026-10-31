@@ -6,9 +6,15 @@ import requests
 import subprocess
 from PIL import Image
 import imageio_ffmpeg
+from core.runtime_env import (
+    ensure_ffmpeg_environment,
+    get_js_runtimes_config,
+    get_youtube_client_Strategies,
+    get_youtube_extractor_args_list,
+)
 
-FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
-FFMPEG_DIR = os.path.dirname(FFMPEG_EXE)
+FFMPEG_EXE = ensure_ffmpeg_environment()
+FFMPEG_DIR = os.path.dirname(FFMPEG_EXE) if FFMPEG_EXE else ""
 current_path = os.environ.get("PATH", "")
 if FFMPEG_DIR and os.path.exists(FFMPEG_DIR) and FFMPEG_DIR not in current_path:
     os.environ["PATH"] = FFMPEG_DIR + os.pathsep + current_path
@@ -408,17 +414,21 @@ def get_video_metadata(url: str):
         return extract_kick_metadata(url)
 
     cookie_file = get_cookie_file()
+    js_runtimes_cfg = get_js_runtimes_config()
     
     common_flags = {
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
         'playlist_items': '1',
-        'ignoreerrors': True
+        'ignoreerrors': True,
+        'js_runtimes': js_runtimes_cfg,
     }
 
     options_list = [
         dict(common_flags),
+        dict(common_flags, extractor_args={'youtube': {'player_client': ['ios', 'android_vr', 'web']}}),
+        dict(common_flags, extractor_args={'youtube': {'player_client': ['tv_embedded', 'mweb', 'ios']}}),
         dict(common_flags, extractor_args={'youtube': {'player_client': ['android', 'web']}}),
         dict(common_flags, live_from_start=True),
     ]
@@ -847,17 +857,19 @@ def download_audio(
             recent_minutes=recent_minutes
         )
 
-    ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+    ffmpeg_path = ensure_ffmpeg_environment()
     cookie_file = get_cookie_file()
+    js_runtimes_cfg = get_js_runtimes_config()
+    extractor_args_list = get_youtube_extractor_args_list(is_live=is_live)
 
-    # Sanitização de extractor_args: nunca usar cliente android em lives
-    ext_args = {'youtube': {'player_client': ['web']}} if is_live else {'youtube': {'player_client': ['web', 'android']}}
+    ext_args = extractor_args_list[0]
 
     base_opts = {
         'format': 'bestaudio[ext=m4a]/bestaudio[protocol=https]/bestaudio/best',
         'outtmpl': output_path.replace('.mp3', '.%(ext)s'),
-        'ffmpeg_location': os.path.dirname(ffmpeg_path) if ffmpeg_path else None,
+        'ffmpeg_location': ffmpeg_path if ffmpeg_path else None,
         'extractor_args': ext_args,
+        'js_runtimes': js_runtimes_cfg,
         'concurrent_fragment_downloads': 16,
         'http_chunk_size': 10485760,  # 10MB chunk size
         'buffersize': 1048576,        # 1MB buffer
@@ -865,7 +877,7 @@ def download_audio(
         'fragment_retries': 10,
         'noplaylist': True,
         'playlist_items': '1',
-        'ignoreerrors': True,
+        'ignoreerrors': False,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -891,10 +903,11 @@ def download_audio(
         except Exception:
             pass
 
-    attempts = [
-        dict(base_opts),
-        dict(base_opts, live_from_start=True, hls_use_mpegts=True)
-    ]
+    attempts = [dict(base_opts)]
+    if not is_live:
+        for ext_a in extractor_args_list[1:]:
+            attempts.append(dict(base_opts, extractor_args=ext_a))
+    attempts.append(dict(base_opts, live_from_start=True, hls_use_mpegts=True))
     if is_live:
         attempts.reverse()
 

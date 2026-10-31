@@ -34,6 +34,12 @@ import core.media_streamer
 import core.shopee_radar
 import core.publishing
 import core.publishing.ui_tab
+import core.runtime_env
+from core.runtime_env import (
+    is_remote_browser_session,
+    get_preferred_compute_device,
+    build_directory_zip_bytes,
+)
 
 importlib.reload(core.extractor)
 importlib.reload(core.transcriber)
@@ -1510,7 +1516,7 @@ def safe_display_video(video_path: str, start_time: int = 0):
     # 1. Para vídeos grandes (>= 100 MB ou vídeos longos de podcasts de até múltiplos gigabytes),
     # transmite via servidor local com Range Requests (HTTP 206) em blocos de 64KB,
     # garantindo consumo zero de RAM no Streamlit e contornando o limite de 4GB do WSASend no Windows.
-    if file_sz >= 100 * 1024 * 1024:
+    if file_sz >= 100 * 1024 * 1024 and not is_remote_browser_session():
         try:
             stream_url = get_media_stream_url(norm_p)
             st.video(stream_url, start_time=_st_time)
@@ -1532,13 +1538,14 @@ def safe_display_video(video_path: str, start_time: int = 0):
     except Exception:
         pass
 
-    # 4. Fallback com streaming local independente do tamanho do arquivo
-    try:
-        stream_url = get_media_stream_url(norm_p)
-        st.video(stream_url, start_time=_st_time)
-        return
-    except Exception:
-        pass
+    # 4. Fallback com streaming local independente do tamanho do arquivo (apenas sessão local)
+    if not is_remote_browser_session():
+        try:
+            stream_url = get_media_stream_url(norm_p)
+            st.video(stream_url, start_time=_st_time)
+            return
+        except Exception:
+            pass
 
     # 5. Último recurso abrindo como stream controlado
     try:
@@ -1563,7 +1570,7 @@ def safe_display_audio(audio_source, format="audio/mp3", start_time=0):
         norm_p = os.path.normpath(audio_source)
         try:
             file_sz = os.path.getsize(norm_p)
-            if file_sz >= 50 * 1024 * 1024:
+            if file_sz >= 50 * 1024 * 1024 and not is_remote_browser_session():
                 stream_url = get_media_stream_url(norm_p)
                 st.audio(stream_url, format=format, start_time=st_val)
                 return
@@ -1607,8 +1614,8 @@ def get_file_bytes_loader(filepath: str):
 
 def open_in_file_explorer(target_path: str) -> bool:
     """
-    Abre a pasta diretamente no Explorador de Arquivos do Windows (ou seleciona o arquivo).
-    Garante o uso de caminho absoluto e fallback de pasta para máxima confiabilidade.
+    Abre a pasta diretamente no Explorador de Arquivos do Windows (quando em ambiente local)
+    ou disponibiliza download direto (.zip da pasta ou arquivo) quando em ambiente remoto / Google Colab.
     """
     if not target_path:
         return False
@@ -1620,6 +1627,33 @@ def open_in_file_explorer(target_path: str) -> bool:
                 abs_p = parent_d
             else:
                 return False
+
+        if is_remote_browser_session():
+            base_label = os.path.basename(abs_p.rstrip("/\\")) or "arquivos"
+            dl_key = f"remote_dl_{abs_hash if (abs_hash := abs(hash(abs_p))) else 0}"
+            if os.path.isdir(abs_p):
+                zip_bytes = build_directory_zip_bytes(abs_p)
+                st.info(f"☁️ Ambiente Remoto/Colab detectado (`{abs_p}`). Baixe o pacote da pasta abaixo:")
+                st.download_button(
+                    label=f"📦 Baixar Pasta '{base_label}.zip'",
+                    data=zip_bytes,
+                    file_name=f"{base_label}.zip",
+                    mime="application/zip",
+                    key=dl_key,
+                    use_container_width=True,
+                )
+                return True
+            elif os.path.isfile(abs_p):
+                st.info(f"☁️ Ambiente Remoto/Colab detectado (`{abs_p}`). Baixe o arquivo abaixo:")
+                st.download_button(
+                    label=f"📥 Baixar Arquivo '{base_label}'",
+                    data=get_file_bytes_loader(abs_p),
+                    file_name=base_label,
+                    mime="application/octet-stream",
+                    key=dl_key,
+                    use_container_width=True,
+                )
+                return True
 
         if os.path.isdir(abs_p):
             os.startfile(abs_p)
@@ -4410,7 +4444,8 @@ if auto_load_last != bool(_cfg.get("auto_load_last_project", False)):
     _cfg["auto_load_last_project"] = auto_load_last
 
 _devices = ["cuda", "cpu"]
-_dev_idx = _devices.index(_cfg.get("device_option", "cuda")) if _cfg.get("device_option") in _devices else 0
+_preferred_dev = get_preferred_compute_device(_cfg.get("device_option", "cuda"))
+_dev_idx = _devices.index(_preferred_dev) if _preferred_dev in _devices else 0
 device_option = st.sidebar.selectbox("Dispositivo de Processamento", _devices, index=_dev_idx)
 
 _model_sizes = ["tiny", "small", "medium", "large-v3"]

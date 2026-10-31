@@ -17,20 +17,20 @@ import shutil
 from core.quick_editor import get_video_duration
 
 # Garante que o Deno e o FFmpeg estejam no PATH do processo
-DENO_DIR = os.path.expanduser(r"~/.deno/bin")
-FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
-FFMPEG_DIR = os.path.dirname(FFMPEG_EXE)
+from core.runtime_env import (
+    ensure_ffmpeg_environment,
+    get_js_runtimes_config,
+    get_youtube_client_Strategies,
+    get_youtube_extractor_args_list,
+    download_youtube_via_public_mirrors,
+)
 
-# Garante que exista um executável chamado ffmpeg.exe na pasta para ferramentas que buscam pelo nome padrão
-ffmpeg_alias = os.path.join(FFMPEG_DIR, "ffmpeg.exe")
-if not os.path.exists(ffmpeg_alias) and os.path.exists(FFMPEG_EXE):
-    try:
-        shutil.copy2(FFMPEG_EXE, ffmpeg_alias)
-    except Exception:
-        pass
+DENO_DIR = os.path.expanduser(r"~/.deno/bin")
+FFMPEG_EXE = ensure_ffmpeg_environment()
+FFMPEG_DIR = os.path.dirname(FFMPEG_EXE) if FFMPEG_EXE else ""
 
 current_path = os.environ.get("PATH", "")
-paths_to_add = [p for p in [DENO_DIR, FFMPEG_DIR] if os.path.exists(p) and p not in current_path]
+paths_to_add = [p for p in [DENO_DIR, FFMPEG_DIR] if p and os.path.exists(p) and p not in current_path]
 if paths_to_add:
     os.environ["PATH"] = os.pathsep.join(paths_to_add) + os.pathsep + current_path
 
@@ -960,12 +960,9 @@ def download_full_video(
         if os.path.exists(output_path):
             os.remove(output_path)
 
-        deno_exe = os.path.join(DENO_DIR, "deno.exe")
-        js_runtimes_cfg = {}
-        if os.path.exists(deno_exe):
-            js_runtimes_cfg['deno'] = {'path': deno_exe}
-        elif os.path.exists(r"C:\Program Files\nodejs\node.exe"):
-            js_runtimes_cfg['node'] = {'path': r"C:\Program Files\nodejs\node.exe"}
+        ffmpeg_resolved = ensure_ffmpeg_environment() or FFMPEG_EXE
+        js_runtimes_cfg = get_js_runtimes_config()
+        extractor_args_list = get_youtube_extractor_args_list(is_live=is_live)
 
         from core.extractor import get_cookie_file, parse_time_str
         cookie_file = get_cookie_file()
@@ -976,24 +973,24 @@ def download_full_video(
             'format': format_spec,
             'outtmpl': output_path,
             'merge_output_format': 'mp4',
-            'ffmpeg_location': os.path.dirname(FFMPEG_EXE) if FFMPEG_EXE else None,
+            'ffmpeg_location': ffmpeg_resolved if ffmpeg_resolved else None,
             'concurrent_fragment_downloads': 16,
-            'http_chunk_size': 10485760,  # 10MB chunk size to avoid YouTube throttling
-            'buffersize': 1048576,        # 1MB RAM buffer
+            'http_chunk_size': 10485760,
+            'buffersize': 1048576,
             'retries': 10,
             'fragment_retries': 10,
             'noplaylist': True,
             'playlist_items': '1',
-            'ignoreerrors': True,
+            'ignoreerrors': False,
             'quiet': False,
             'no_warnings': True,
-            'js_runtimes': js_runtimes_cfg
+            'js_runtimes': js_runtimes_cfg,
+            'extractor_args': extractor_args_list[0],
         }
 
         if cookie_file:
             base_opts['cookiefile'] = cookie_file
 
-        # Se um intervalo de tempo foi especificado, aplica download seletivo de seções ultra-rápido
         s_parsed = parse_time_str(start_sec)
         e_parsed = parse_time_str(end_sec)
         if s_parsed is not None or e_parsed is not None:
@@ -1006,32 +1003,85 @@ def download_full_video(
             except Exception:
                 pass
 
-        attempts = [
-            dict(base_opts),
-            dict(base_opts, format='bestvideo[width<=1920][height<=1920]+bestaudio/bestvideo+bestaudio/best', live_from_start=True, hls_use_mpegts=True),
-            dict(base_opts, live_from_start=True, hls_use_mpegts=True)
-        ]
+        attempts = [dict(base_opts)]
+        for ext_args in extractor_args_list[1:]:
+            attempts.append(
+                dict(
+                    base_opts,
+                    format='bestvideo[width<=1920][height<=1920]+bestaudio/best[ext=mp4]/bestvideo+bestaudio/best',
+                    extractor_args=ext_args,
+                )
+            )
+        attempts.append(
+            dict(
+                base_opts,
+                format='best[ext=mp4]/best',
+                extractor_args={'youtube': {'player_client': ['ios', 'tv_embedded', 'mweb', 'android']}},
+            )
+        )
+        attempts.append(
+            dict(
+                base_opts,
+                format='bestvideo[width<=1920][height<=1920]+bestaudio/bestvideo+bestaudio/best',
+                live_from_start=True,
+                hls_use_mpegts=True,
+            )
+        )
         if is_live:
-            attempts = [attempts[1], attempts[2], attempts[0]]
+            attempts = [attempts[-1]] + attempts[:-1]
+
+        def _recover_alternate_ext_if_needed(target_out: str) -> bool:
+            if os.path.exists(target_out) and os.path.getsize(target_out) > 0:
+                return True
+            base_no_ext = os.path.splitext(target_out)[0]
+            for ext_cand in (".mkv", ".webm", ".m4v", ".ts", ".mp4.mkv", ".mp4.webm"):
+                cand_file = base_no_ext + ext_cand
+                if not os.path.exists(cand_file):
+                    cand_file = target_out + ext_cand
+                if os.path.exists(cand_file) and os.path.getsize(cand_file) > 10240:
+                    try:
+                        cmd_remux = [ffmpeg_resolved, "-y", "-i", cand_file, "-c", "copy", "-movflags", "+faststart", target_out]
+                        subprocess.run(cmd_remux, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180)
+                        if os.path.exists(target_out) and os.path.getsize(target_out) > 10240:
+                            try:
+                                os.remove(cand_file)
+                            except Exception:
+                                pass
+                            return True
+                    except Exception:
+                        pass
+            return False
 
         last_err = None
         for ydl_opts in attempts:
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
-                if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                    ret_code = ydl.download([url])
+                if _recover_alternate_ext_if_needed(output_path):
                     return {"path": output_path, "error": None}
+                if ret_code and not last_err:
+                    last_err = f"yt-dlp code {ret_code}"
             except Exception as exc_attempt:
                 last_err = str(exc_attempt)
-                # Se o vídeo principal já foi baixado com sucesso (> 100KB), não precisa retentar!
-                if os.path.exists(output_path) and os.path.getsize(output_path) > 102400:
+                if _recover_alternate_ext_if_needed(output_path) and os.path.getsize(output_path) > 102400:
                     return {"path": output_path, "error": None}
                 continue
 
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+        if _recover_alternate_ext_if_needed(output_path):
             return {"path": output_path, "error": None}
-        else:
-            return {"path": None, "error": last_err or "Falha ao gerar o arquivo de vídeo final."}
+
+        if any(d in str(url).lower() for d in ("youtube.com", "youtu.be")):
+            mirror_res = download_youtube_via_public_mirrors(
+                url=url,
+                output_path=output_path,
+                ffmpeg_exe=ffmpeg_resolved,
+                start_sec=s_parsed,
+                end_sec=e_parsed,
+            )
+            if mirror_res.get("path") and os.path.exists(mirror_res["path"]) and os.path.getsize(mirror_res["path"]) > 10240:
+                return {"path": mirror_res["path"], "error": None}
+
+        return {"path": None, "error": last_err or "Falha ao gerar o arquivo de vídeo final."}
 
     except Exception as exc:
         return {"path": None, "error": str(exc)}
