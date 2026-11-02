@@ -913,7 +913,8 @@ def inject_copy_code_js():
 </body>
 </html>
 """
-    components.html(iframe_html, height=0, scrolling=False)
+    import streamlit.components.v1 as _components
+    _components.html(iframe_html, height=0, scrolling=False)
 
 
 def _try_inject_copy_code_js():
