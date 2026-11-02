@@ -764,14 +764,12 @@ def inject_copy_code_js():
 (function() {
     'use strict';
 
-    // Garante execução única mesmo se o componente for re-renderizado
     if (window.__viralcutCopyInjected) return;
     window.__viralcutCopyInjected = true;
 
     var pDoc;
     try { pDoc = window.parent.document; } catch(e) { return; }
 
-    // ── Feedback visual ──────────────────────────────────────────────────────
     function showToast(msg) {
         try {
             var toast = pDoc.getElementById('viralcut-copy-toast');
@@ -808,11 +806,11 @@ def inject_copy_code_js():
             if (!el.dataset.origHtml) el.dataset.origHtml = el.innerHTML;
             var textEl = el.querySelector('.viralcut-code-text') || el.querySelector('code') || el;
             var hintEl = el.querySelector('.viralcut-copy-hint');
-            if (hintEl) hintEl.textContent = '\u2705';
+            if (hintEl) hintEl.textContent = '✅';
             if (textEl && textEl !== el) {
                 textEl.textContent = code + ' (Copiado!)';
             } else {
-                el.innerHTML = '<span style="color:#34d399;font-weight:700;">\u2705 ' + code + ' (Copiado!)</span>';
+                el.innerHTML = '<span style="color:#34d399;font-weight:700;">✅ ' + code + ' (Copiado!)</span>';
             }
             if (el.__resetTimer) clearTimeout(el.__resetTimer);
             el.__resetTimer = setTimeout(function() {
@@ -823,13 +821,11 @@ def inject_copy_code_js():
                 }
             }, 1800);
         } catch(e) {}
-        showToast('\uD83D\uDCCB C\u00f3digo <code style="background:rgba(255,255,255,.15);padding:2px 6px;border-radius:4px;color:#38bdf8;font-weight:700;">' + code + '</code> copiado!');
+        showToast('📋 Código <code style="background:rgba(255,255,255,.15);padding:2px 6px;border-radius:4px;color:#38bdf8;font-weight:700;">' + code + '</code> copiado!');
     }
 
-    // ── Copiar texto via Clipboard API do iframe ─────────────────────────────
     function doCopy(code, badgeEl) {
         if (!code) return;
-        // Tenta Clipboard API (funciona aqui pois o iframe tem allow="clipboard-write")
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(code).then(function() {
                 triggerFeedback(badgeEl, code);
@@ -841,7 +837,6 @@ def inject_copy_code_js():
         }
     }
 
-    // Fallback: cria textarea visível no documento pai, seleciona, execCommand
     function fallbackCopy(code, badgeEl) {
         try {
             var ta = pDoc.createElement('textarea');
@@ -858,19 +853,17 @@ def inject_copy_code_js():
         } catch(e) {}
     }
 
-    // ── Extrair código do elemento badge ─────────────────────────────────────
     function getCode(el) {
         var code = (el.getAttribute('data-copy-code') || '').trim();
         if (!code) {
             var textEl = el.querySelector('.viralcut-code-text') || el.querySelector('code') || el;
-            code = (textEl.textContent || textEl.innerText || '').trim();
-            // Remove ícones e sufixos
-            code = code.replace(/[\uD800-\uDFFF].|[\u2600-\u27BF]|[🔑✂️📋]/gu, '').replace(/[(]Copiado![)]/g, '').trim();
+            var raw = (textEl.textContent || textEl.innerText || '').trim();
+            var m = raw.match(/([a-zA-Z0-9_-]{11})/);
+            code = m ? m[1] : raw;
         }
         return code;
     }
 
-    // ── Anexar listener direto em cada badge ────────────────────────────────
     function attachToBadge(b) {
         if (b.__viralcutCopyAttached) return;
         b.__viralcutCopyAttached = true;
@@ -894,7 +887,6 @@ def inject_copy_code_js():
         } catch(e) {}
     }
 
-    // Delegação global no documento pai (captura antes do React)
     if (!pDoc.__viralcutCopyDelegated) {
         pDoc.__viralcutCopyDelegated = true;
         pDoc.addEventListener('click', function(e) {
