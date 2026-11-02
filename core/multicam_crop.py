@@ -15,6 +15,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 import imageio_ffmpeg
 from core.frame_capturer import parse_time_str_to_seconds, format_seconds_to_time_str, extract_frame_at_timestamp
+from core.runtime_env import get_ffmpeg_hwaccel_flags, get_ffmpeg_video_encode_flags, run_ffmpeg_with_fallback
 
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
@@ -788,7 +789,8 @@ def render_multicam_scene_clip(
     divider_color: str = "black",
     divider_width: int = 4,
     blur_background: bool = True,
-    blur_intensity: int = 25
+    blur_intensity: int = 25,
+    device: str = None
 ) -> dict:
     """
     Renderiza um trecho/cena individual com a configuração multicâmera especificada.
@@ -811,15 +813,14 @@ def render_multicam_scene_clip(
 
     cmd = [
         FFMPEG_EXE, "-y",
+        *get_ffmpeg_hwaccel_flags(device),
         "-ss", str(start_time_str),
         "-to", str(end_time_str),
         "-i", input_video_path,
         "-filter_complex", filter_complex,
         "-map", "[v_out]",
         "-map", "0:a?",
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "20",
+        *get_ffmpeg_video_encode_flags(device=device, crf=20),
         "-c:a", "aac",
         "-b:a", "192k",
         "-pix_fmt", "yuv420p",
@@ -827,7 +828,7 @@ def render_multicam_scene_clip(
         output_scene_path
     ]
 
-    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="ignore")
+    res = run_ffmpeg_with_fallback(cmd, output_path=output_scene_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="ignore")
     if res.returncode != 0 or not os.path.exists(output_scene_path) or os.path.getsize(output_scene_path) == 0:
         return {
             "status": "error",
@@ -842,7 +843,8 @@ def render_multicam_cut(
     scenes: list,
     output_video_path: str,
     fallback_start_time: str = "00:00:00.00",
-    fallback_end_time: str = ""
+    fallback_end_time: str = "",
+    device: str = None
 ) -> dict:
     """
     Processa o corte completo suportando 1 cena única ou múltiplas cenas alternadas no tempo.
@@ -888,7 +890,8 @@ def render_multicam_cut(
             divider_color=single["divider_color"],
             divider_width=single["divider_width"],
             blur_background=single.get("blur_background", True),
-            blur_intensity=single.get("blur_intensity", 25)
+            blur_intensity=single.get("blur_intensity", 25),
+            device=device
         )
 
     # Caso 2: Múltiplas cenas temporais alternadas
@@ -907,7 +910,8 @@ def render_multicam_cut(
                 divider_color=scn["divider_color"],
                 divider_width=scn["divider_width"],
                 blur_background=scn.get("blur_background", True),
-                blur_intensity=scn.get("blur_intensity", 25)
+                blur_intensity=scn.get("blur_intensity", 25),
+                device=device
             )
             if seg_res.get("status") != "success":
                 return seg_res

@@ -12,6 +12,7 @@ import numpy as np
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+from core.runtime_env import get_ffmpeg_video_encode_flags
 
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
@@ -681,7 +682,8 @@ def crop_video_with_smart_face_tracking(
     margin_ratio: float = 1.55,          # Margem de segurança nas laterais do interlocutor
     max_zoom_factor: float = 1.85,       # Zoom máximo permitido
     person_preference: str = "auto",     # 'auto', 'right', 'left', 'center'
-    crop_margins: dict = None
+    crop_margins: dict = None,
+    device: str = None
 ) -> dict:
     """
     Recorta o vídeo no formato 9:16 (1080x1920) acompanhando o orador principal.
@@ -758,9 +760,7 @@ def crop_video_with_smart_face_tracking(
             "-pix_fmt", "bgr24",
             "-r", f"{fps:.2f}",
             "-i", "-",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "20",
+            *get_ffmpeg_video_encode_flags(device=device, crf=20),
             "-pix_fmt", "yuv420p",
             temp_video_no_audio
         ]
@@ -1129,7 +1129,8 @@ def generate_split_preview_image(
     split_image_paths: list = None,
     split_media_position: str = "bottom",
     split_blur_margin_pct: float = 5.0,
-    crop_margins: dict = None
+    crop_margins: dict = None,
+    device: str = None
 ) -> dict:
     """
     Gera uma imagem de prévia instantânea do Layout Dividido (Split Screen 9:16),
@@ -1259,7 +1260,8 @@ def crop_video_with_dynamic_auto_switch(
     split_image_paths: list = None,
     split_media_position: str = "bottom",
     split_blur_margin_pct: float = 5.0,
-    crop_margins: dict = None
+    crop_margins: dict = None,
+    device: str = None
 ) -> dict:
     """
     Renderiza vídeo 9:16 em Layout Dividido (Split Screen):
@@ -1344,13 +1346,11 @@ def crop_video_with_dynamic_auto_switch(
             "-pix_fmt", "bgr24",
             "-r", str(fps),
             "-i", "-",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "20",
+            *get_ffmpeg_video_encode_flags(device=device, crf=20),
             "-pix_fmt", "yuv420p",
             temp_video_raw
         ]
-        ffmpeg_proc = subprocess.Popen(cmd_ffmpeg, stdin=subprocess.PIPE)
+        ffmpeg_proc = subprocess.Popen(cmd_ffmpeg, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
         base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
         options = vision.FaceDetectorOptions(base_options=base_options, min_detection_confidence=0.35)
@@ -1526,7 +1526,8 @@ def crop_video_with_smart_blur_tracking(
     person_preference: str = "auto",
     face_margin_ratio: float = 1.55,
     auto_tracking: bool = True,
-    crop_margins: dict = None
+    crop_margins: dict = None,
+    device: str = None
 ) -> dict:
     """
     Renderiza vídeo vertical 9:16 (1080x1920) com fundo desfocado dinâmico e
@@ -1591,13 +1592,11 @@ def crop_video_with_smart_blur_tracking(
             "-pix_fmt", "bgr24",
             "-r", str(fps),
             "-i", "-",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "20",
+            *get_ffmpeg_video_encode_flags(device=device, crf=20),
             "-pix_fmt", "yuv420p",
             temp_video_raw
         ]
-        ffmpeg_proc = subprocess.Popen(cmd_ffmpeg, stdin=subprocess.PIPE)
+        ffmpeg_proc = subprocess.Popen(cmd_ffmpeg, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
         base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
         options = vision.FaceDetectorOptions(base_options=base_options, min_detection_confidence=0.35)

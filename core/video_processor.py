@@ -23,6 +23,9 @@ from core.runtime_env import (
     get_youtube_client_Strategies,
     get_youtube_extractor_args_list,
     download_youtube_via_public_mirrors,
+    get_ffmpeg_hwaccel_flags,
+    get_ffmpeg_video_encode_flags,
+    run_ffmpeg_with_fallback,
 )
 
 DENO_DIR = os.path.expanduser(r"~/.deno/bin")
@@ -269,22 +272,21 @@ def slice_or_copy_local_video(
                 "end_s": end_s
             }
 
-        # 2. Fallback: Recodificação rápida (H.264 / AAC)
+        # 2. Fallback: Recodificação rápida (H.264 NVENC GPU ou CPU fallback / AAC)
         cmd_reencode = [
             FFMPEG_EXE, "-y",
+            *get_ffmpeg_hwaccel_flags(),
             "-ss", f"{start_s:.3f}",
             "-t", f"{duration:.3f}",
             "-i", source_path,
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "20",
+            *get_ffmpeg_video_encode_flags(crf=20),
             "-c:a", "aac",
             "-b:a", "192k",
             "-pix_fmt", "yuv420p",
             "-movflags", "+faststart",
             tmp_dst
         ]
-        res_reencode = subprocess.run(cmd_reencode, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        res_reencode = run_ffmpeg_with_fallback(cmd_reencode, output_path=tmp_dst, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         if res_reencode.returncode == 0 and os.path.exists(tmp_dst) and os.path.getsize(tmp_dst) > 0:
             if is_same:
                 os.replace(tmp_dst, destination_path)
@@ -545,7 +547,7 @@ def download_kick_video(
     if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
         return {"path": output_path, "error": None}
 
-    # 2. Fallback com recodificação leve se stream copy falhar
+    # 2. Fallback com recodificação acelerada se stream copy falhar
     cmd_fallback = [ffmpeg_path, '-y']
     if s_parsed is not None and s_parsed > 0:
         cmd_fallback.extend(['-ss', str(s_parsed)])
@@ -553,11 +555,11 @@ def download_kick_video(
     if duration is not None and duration > 0:
         cmd_fallback.extend(['-t', str(duration)])
     cmd_fallback.extend([
-        '-c:v', 'libx264', '-preset', 'veryfast',
+        *get_ffmpeg_video_encode_flags(crf=20),
         '-c:a', 'aac', '-movflags', '+faststart',
         output_path
     ])
-    p2 = subprocess.run(cmd_fallback, capture_output=True, text=True)
+    p2 = run_ffmpeg_with_fallback(cmd_fallback, output_path=output_path, min_size=10240, capture_output=True, text=True)
     if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
         return {"path": output_path, "error": None}
 
@@ -1173,6 +1175,7 @@ def cut_video(
     crop_margins: dict = None,
     social_overlay_config: dict = None,
     multicam_scenes: list = None,
+    device: str = None,
 ) -> dict:
     """
     Corta e formata o vídeo com alta precisão e esteira completa de pós-produção via FFmpeg.
@@ -1208,7 +1211,8 @@ def cut_video(
                 auto_zoom=face_auto_zoom,
                 margin_ratio=face_margin_ratio,
                 person_preference=person_preference,
-                crop_margins=crop_margins
+                crop_margins=crop_margins,
+                device=device
             )
             return _apply_all_post_processing(
                 result, output_path, start_time_str, end_time_str,
@@ -1220,7 +1224,8 @@ def cut_video(
                 climax_zoom_enabled, climax_zoom_factor,
                 thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
                 bg_music_start_offset, video_start_offset,
-                social_overlay_config=social_overlay_config
+                social_overlay_config=social_overlay_config,
+                device=device
             )
 
         elif aspect_ratio_mode == "9:16_split":
@@ -1244,7 +1249,8 @@ def cut_video(
                 split_image_paths=split_image_paths,
                 split_media_position=split_media_position,
                 split_blur_margin_pct=split_blur_margin_pct,
-                crop_margins=crop_margins
+                crop_margins=crop_margins,
+                device=device
             )
             return _apply_all_post_processing(
                 result, output_path, start_time_str, end_time_str,
@@ -1256,7 +1262,8 @@ def cut_video(
                 climax_zoom_enabled, climax_zoom_factor,
                 thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
                 bg_music_start_offset, video_start_offset,
-                social_overlay_config=social_overlay_config
+                social_overlay_config=social_overlay_config,
+                device=device
             )
 
         elif aspect_ratio_mode == "9:16_blur":
@@ -1273,7 +1280,8 @@ def cut_video(
                     person_preference=person_preference,
                     face_margin_ratio=face_margin_ratio,
                     auto_tracking=True,
-                    crop_margins=crop_margins
+                    crop_margins=crop_margins,
+                    device=device
                 )
                 return _apply_all_post_processing(
                     result, output_path, start_time_str, end_time_str,
@@ -1285,7 +1293,8 @@ def cut_video(
                     climax_zoom_enabled, climax_zoom_factor,
                     thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
                     bg_music_start_offset, video_start_offset,
-                    social_overlay_config=social_overlay_config
+                    social_overlay_config=social_overlay_config,
+                    device=device
                 )
             else:
                 # Modo Manual Estático
@@ -1317,18 +1326,18 @@ def cut_video(
                 )
                 cmd = [
                     FFMPEG_EXE, "-y",
+                    *get_ffmpeg_hwaccel_flags(device),
                     "-ss", start_time_str,
                     "-to", end_time_str,
                     "-i", input_path,
                     "-filter_complex", filter_complex,
                     "-map", "[v]",
                     "-map", "0:a?",
-                    "-c:v", "libx264",
-                    "-preset", "veryfast",
-                    "-crf", "20",
+                    *get_ffmpeg_video_encode_flags(device=device, crf=20),
                     "-c:a", "aac",
                     "-b:a", "192k",
                     "-pix_fmt", "yuv420p",
+                    "-movflags", "+faststart",
                     output_path
                 ]
 
@@ -1345,13 +1354,16 @@ def cut_video(
             start_time_str = mc_eff_start
             end_time_str = mc_eff_end
 
-            result = render_multicam_cut(
-                input_video_path=input_path,
-                scenes=mc_scenes,
-                output_video_path=output_path,
-                fallback_start_time=start_time_str,
-                fallback_end_time=end_time_str
-            )
+            mc_kwargs = {
+                "input_video_path": input_path,
+                "scenes": mc_scenes,
+                "output_video_path": output_path,
+                "fallback_start_time": start_time_str,
+                "fallback_end_time": end_time_str,
+            }
+            if device is not None:
+                mc_kwargs["device"] = device
+            result = render_multicam_cut(**mc_kwargs)
             return _apply_all_post_processing(
                 result, output_path, start_time_str, end_time_str,
                 subtitle_enabled, subtitle_transcript_path, subtitle_highlight_color, subtitle_base_color, subtitle_font_size,
@@ -1362,7 +1374,8 @@ def cut_video(
                 climax_zoom_enabled, climax_zoom_factor,
                 thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
                 bg_music_start_offset, video_start_offset,
-                social_overlay_config=social_overlay_config
+                social_overlay_config=social_overlay_config,
+                device=device
             )
 
         elif aspect_ratio_mode == "9:16_crop":
@@ -1374,15 +1387,14 @@ def cut_video(
                 filter_complex = "[0:v]crop=ih*(9/16):ih:(iw-ow)/2:0,scale=1080:1920[v]"
             cmd = [
                 FFMPEG_EXE, "-y",
+                *get_ffmpeg_hwaccel_flags(device),
                 "-ss", start_time_str,
                 "-to", end_time_str,
                 "-i", input_path,
                 "-filter_complex", filter_complex,
                 "-map", "[v]",
                 "-map", "0:a?",
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-crf", "20",
+                *get_ffmpeg_video_encode_flags(device=device, crf=20),
                 "-c:a", "aac",
                 "-b:a", "192k",
                 "-pix_fmt", "yuv420p",
@@ -1421,15 +1433,14 @@ def cut_video(
                     )
                 cmd = [
                     FFMPEG_EXE, "-y",
+                    *get_ffmpeg_hwaccel_flags(device),
                     "-ss", start_time_str,
                     "-to", end_time_str,
                     "-i", input_path,
                     "-filter_complex", filter_complex,
                     "-map", "[v]",
                     "-map", "0:a?",
-                    "-c:v", "libx264",
-                    "-preset", "veryfast",
-                    "-crf", "20",
+                    *get_ffmpeg_video_encode_flags(device=device, crf=20),
                     "-c:a", "aac",
                     "-b:a", "192k",
                     "-pix_fmt", "yuv420p",
@@ -1440,15 +1451,14 @@ def cut_video(
                 filter_complex = f"[0:v]crop=iw/{effective_hz_zoom}:ih/{effective_hz_zoom}:(in_w-out_w)/2:(in_h-out_h)/2,scale=1920:1080[v]"
                 cmd = [
                     FFMPEG_EXE, "-y",
+                    *get_ffmpeg_hwaccel_flags(device),
                     "-ss", start_time_str,
                     "-to", end_time_str,
                     "-i", input_path,
                     "-filter_complex", filter_complex,
                     "-map", "[v]",
                     "-map", "0:a?",
-                    "-c:v", "libx264",
-                    "-preset", "veryfast",
-                    "-crf", "20",
+                    *get_ffmpeg_video_encode_flags(device=device, crf=20),
                     "-c:a", "aac",
                     "-b:a", "192k",
                     "-pix_fmt", "yuv420p",
@@ -1456,14 +1466,42 @@ def cut_video(
                     output_path
                 ]
             else:
+                # Se for corte 16:9 sem recorte/zoom e iniciando do frame 0, tenta cópia direta (instantânea)
+                start_s_169 = parse_time_to_seconds(start_time_str)
+                if start_s_169 <= 0.05:
+                    cmd_fast_copy = [
+                        FFMPEG_EXE, "-y",
+                        "-ss", start_time_str,
+                        "-to", end_time_str,
+                        "-i", input_path,
+                        "-c", "copy",
+                        "-avoid_negative_ts", "make_zero",
+                        "-movflags", "+faststart",
+                        output_path
+                    ]
+                    res_copy_169 = subprocess.run(cmd_fast_copy, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                    if res_copy_169.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1024:
+                        return _apply_all_post_processing(
+                            {"path": output_path, "error": None}, output_path, start_time_str, end_time_str,
+                            subtitle_enabled, subtitle_transcript_path, subtitle_highlight_color, subtitle_base_color, subtitle_font_size,
+                            headline_enabled, headline_text, headline_preset, headline_text_color, headline_bg_color, headline_font_size, headline_margin_top,
+                            emojis_enabled, zoom_punch_enabled, bg_music_enabled, bg_music_track_path, bg_music_volume, ducking_preset,
+                            progress_bar_enabled, progress_bar_color, progress_bar_height,
+                            callout_enabled, callout_text, callout_duration,
+                            climax_zoom_enabled, climax_zoom_factor,
+                            thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
+                            bg_music_start_offset, video_start_offset,
+                            social_overlay_config=social_overlay_config,
+                            device=device
+                        )
+
                 cmd = [
                     FFMPEG_EXE, "-y",
+                    *get_ffmpeg_hwaccel_flags(device),
                     "-ss", start_time_str,
                     "-to", end_time_str,
                     "-i", input_path,
-                    "-c:v", "libx264",
-                    "-preset", "veryfast",
-                    "-crf", "20",
+                    *get_ffmpeg_video_encode_flags(device=device, crf=20),
                     "-c:a", "aac",
                     "-b:a", "192k",
                     "-pix_fmt", "yuv420p",
@@ -1472,7 +1510,7 @@ def cut_video(
                 ]
 
 
-        result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        result = run_ffmpeg_with_fallback(cmd, output_path=output_path, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         _stderr_txt = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
 
         if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
@@ -1486,7 +1524,8 @@ def cut_video(
                 climax_zoom_enabled, climax_zoom_factor,
                 thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
                 bg_music_start_offset, video_start_offset,
-                social_overlay_config=social_overlay_config
+                social_overlay_config=social_overlay_config,
+                device=device
             )
 
         # Fallback MoviePy se FFmpeg direto retornar erro
@@ -1528,7 +1567,8 @@ def cut_video(
             climax_zoom_enabled, climax_zoom_factor,
             thumbnail_enabled, thumbnail_output_path, aspect_ratio_mode, input_path,
             bg_music_start_offset, video_start_offset,
-            social_overlay_config=social_overlay_config
+            social_overlay_config=social_overlay_config,
+            device=device
         )
     except Exception as e:
         return {"path": None, "error": str(e)}
@@ -1572,7 +1612,8 @@ def _apply_all_post_processing(
     source_video_path: str = None,
     bg_music_start_offset: float = 0.0,
     video_start_offset: float = 0.0,
-    social_overlay_config: dict = None
+    social_overlay_config: dict = None,
+    device: str = None
 ) -> dict:
     """
     Esteira unificada de pós-produção (Fases 2, 3 e 4):
@@ -1649,16 +1690,15 @@ def _apply_all_post_processing(
 
             cmd = [
                 FFMPEG_EXE, "-y",
+                *get_ffmpeg_hwaccel_flags(device),
                 "-i", curr_path,
                 "-filter_complex", zf,
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-crf", "20",
+                *get_ffmpeg_video_encode_flags(device=device, crf=20),
                 "-c:a", "copy",
                 "-movflags", "+faststart",
                 tmp_z
             ]
-            z_res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            z_res = run_ffmpeg_with_fallback(cmd, output_path=tmp_z, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             if z_res.returncode == 0 and os.path.exists(tmp_z) and os.path.getsize(tmp_z) > 0:
                 if os.path.exists(output_path):
                     os.remove(output_path)
@@ -1695,16 +1735,15 @@ def _apply_all_post_processing(
 
                 cmd = [
                     FFMPEG_EXE, "-y",
+                    *get_ffmpeg_hwaccel_flags(device),
                     "-i", curr_path,
                     "-filter_complex", pb_filter,
-                    "-c:v", "libx264",
-                    "-preset", "veryfast",
-                    "-crf", "20",
+                    *get_ffmpeg_video_encode_flags(device=device, crf=20),
                     "-c:a", "copy",
                     "-movflags", "+faststart",
                     tmp_pb
                 ]
-                pb_res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                pb_res = run_ffmpeg_with_fallback(cmd, output_path=tmp_pb, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
                 if pb_res.returncode == 0 and os.path.exists(tmp_pb) and os.path.getsize(tmp_pb) > 0:
                     if os.path.exists(output_path):
                         os.remove(output_path)
@@ -1739,6 +1778,7 @@ def _apply_all_post_processing(
             callout_enabled=callout_enabled,
             callout_text=callout_text,
             callout_duration=callout_duration,
+            device=device,
         )
         if sub_result.get("error"):
             result["subtitle_error"] = sub_result["error"]
@@ -1755,7 +1795,8 @@ def _apply_all_post_processing(
             social_res = apply_social_overlay_to_video(
                 video_path=curr_path,
                 output_path=output_path,
-                config=social_overlay_config
+                config=social_overlay_config,
+                device=device
             )
             if social_res.get("error"):
                 result["social_warning"] = social_res["error"]
@@ -2367,20 +2408,21 @@ def split_video_smart(
             ]
             res = subprocess.run(cmd_copy, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
-            # Se copy falhou, faz re-encode rápido
+            # Se copy falhou, faz re-encode rápido (com GPU se habilitada)
             if res.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) < 1024:
                 cmd_enc = [
                     FFMPEG_EXE, "-y",
+                    *get_ffmpeg_hwaccel_flags(),
                     "-ss", str(round(t_start, 3)),
                     "-i", input_path,
                     "-t", str(duration),
-                    "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+                    *get_ffmpeg_video_encode_flags(crf=18, preset_cpu="fast"),
                     "-c:a", "aac", "-b:a", "192k",
                     "-avoid_negative_ts", "make_zero",
                     "-movflags", "+faststart",
                     out_path
                 ]
-                res2 = subprocess.run(cmd_enc, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                res2 = run_ffmpeg_with_fallback(cmd_enc, output_path=out_path, min_size=1024, crf=18, preset_cpu="fast", stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
                 if res2.returncode != 0:
                     errors.append(f"Parte {idx}: erro FFmpeg")
                     continue
@@ -2511,8 +2553,7 @@ def replace_video_with_static_image(
         "-loop", "1",
         "-i", image_path,
         "-i", audio_source,
-        "-c:v", "libx264",
-        "-tune", "stillimage",
+        *get_ffmpeg_video_encode_flags(crf=20, tune="stillimage"),
         "-c:a", "aac",
         "-b:a", "192k",
         "-pix_fmt", "yuv420p",
@@ -2523,7 +2564,7 @@ def replace_video_with_static_image(
     ]
 
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True)
+        res = run_ffmpeg_with_fallback(cmd, output_path=temp_output, capture_output=True, text=True)
         if res.returncode != 0:
             err_msg = res.stderr[-500:] if res.stderr else "Erro desconhecido no FFmpeg"
             return {"success": False, "error": f"FFmpeg falhou ao gerar vídeo com imagem estática: {err_msg}"}

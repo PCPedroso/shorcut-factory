@@ -5,12 +5,17 @@ from core.runtime_env import (
     is_colab_env,
     is_linux_or_cloud_env,
     is_remote_browser_session,
+    has_cuda_support,
     get_preferred_compute_device,
+    get_ffmpeg_hwaccel_flags,
+    get_ffmpeg_video_encode_flags,
+    convert_ffmpeg_cmd_to_cpu,
     ensure_ffmpeg_environment,
     get_js_runtimes_config,
     get_youtube_client_Strategies,
     get_youtube_extractor_args_list,
     build_directory_zip_bytes,
+    patch_windows_asyncio_connection_lost,
 )
 
 
@@ -56,6 +61,27 @@ def test_get_preferred_compute_device():
     assert dev_cpu == "cpu"
     dev_cuda = get_preferred_compute_device("cuda")
     assert dev_cuda in ("cuda", "cpu")
+    if has_cuda_support():
+        assert dev_cuda == "cuda"
+
+
+def test_ffmpeg_gpu_and_cpu_flags():
+    cpu_hw = get_ffmpeg_hwaccel_flags("cpu")
+    assert cpu_hw == []
+    cpu_enc = get_ffmpeg_video_encode_flags(device="cpu", preset_cpu="veryfast", crf=20)
+    assert "-c:v" in cpu_enc
+    assert "libx264" in cpu_enc
+
+    fake_gpu_cmd = [
+        "ffmpeg", "-y", "-hwaccel", "cuda", "-i", "in.mp4",
+        "-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr",
+        "-cq", "20", "-b:v", "0", "-maxrate", "8M", "-bufsize", "16M",
+        "out.mp4"
+    ]
+    fallback_cmd = convert_ffmpeg_cmd_to_cpu(fake_gpu_cmd, preset_cpu="veryfast", crf=20)
+    assert "-hwaccel" not in fallback_cmd
+    assert "h264_nvenc" not in fallback_cmd
+    assert "libx264" in fallback_cmd
 
 
 def test_build_directory_zip_bytes(tmp_path):
@@ -72,3 +98,13 @@ def test_build_directory_zip_bytes(tmp_path):
         names = zf.namelist()
         assert "metadata.json" in names
         assert any(n.endswith("readme.txt") for n in names)
+
+
+def test_patch_windows_asyncio_connection_lost():
+    patch_windows_asyncio_connection_lost()
+    if os.name == "nt":
+        from asyncio.proactor_events import _ProactorBasePipeTransport
+        import asyncio
+        assert getattr(_ProactorBasePipeTransport, "_viralcut_patched_10054", False) is True
+        assert getattr(asyncio.BaseEventLoop, "_viralcut_patched_10054", False) is True
+

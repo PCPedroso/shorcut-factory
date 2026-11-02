@@ -21,7 +21,7 @@ from core.publishing.worker import PublishWorker
 from core.publishing.media_preflight import MediaPreflight
 from core.publishing.caption_adapter import CaptionAdapter
 from core.publishing.platform_registry import PlatformRegistry
-from core.ui_theme import render_section_header, render_status_badge
+from core.ui_theme import render_section_header, render_status_badge, render_copyable_code_html
 
 # Singleton para o worker em background
 _BACKGROUND_WORKER: Optional[PublishWorker] = None
@@ -297,7 +297,8 @@ def _render_dispatch_panel(vault: CredentialVault, queue: PublishQueue):
             chosen_cut = available_cuts[selected_cut_idx]
             if chosen_cut.get("cut_code"):
                 st.session_state["active_cut_code"] = chosen_cut["cut_code"]
-                st.caption(f"🔑 **Código Exclusivo do Corte:** `{chosen_cut['cut_code']}`")
+                _c_code_badge = render_copyable_code_html(chosen_cut['cut_code'], label="Código Exclusivo do Corte:", prefix_icon="🔑", tooltip="Clique para copiar o código deste corte")
+                st.markdown(f'<div style="margin-bottom:6px;">{_c_code_badge}</div>', unsafe_allow_html=True)
             chosen_video_path = chosen_cut.get("video_path") or chosen_cut.get("cropped_path")
             default_title = chosen_cut.get("title", "")
             default_desc = chosen_cut.get("description", "")

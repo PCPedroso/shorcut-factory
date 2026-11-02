@@ -208,6 +208,88 @@ div[data-testid="stVideo"] video {
     border-radius: 8px !important;
     object-fit: contain !important;
 }
+
+/* 12. Badges de Código Interativo com Clique para Copiar */
+.viralcut-copyable-code {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(30, 41, 59, 0.75);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.82rem;
+    color: #38bdf8;
+    cursor: pointer !important;
+    user-select: none;
+    transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+    vertical-align: middle;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    outline: none;
+}
+.viralcut-copyable-code * {
+    pointer-events: none !important;
+    cursor: pointer !important;
+}
+.viralcut-copyable-code:hover {
+    background: rgba(56, 189, 248, 0.22);
+    border-color: #38bdf8;
+    color: #bae6fd;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.45);
+    transform: translateY(-1px);
+}
+.viralcut-copyable-code:active {
+    transform: scale(0.96);
+}
+.viralcut-copyable-code code.viralcut-code-text {
+    background: transparent !important;
+    color: inherit !important;
+    padding: 0 !important;
+    font-weight: 700 !important;
+    border: none !important;
+}
+.viralcut-copyable-code .viralcut-copy-hint {
+    font-size: 0.75rem;
+    opacity: 0.7;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.viralcut-copyable-code:hover .viralcut-copy-hint {
+    opacity: 1;
+    transform: scale(1.18);
+}
+.viralcut-copyable-code.copied {
+    background: rgba(16, 185, 129, 0.25) !important;
+    border-color: #10b981 !important;
+    color: #34d399 !important;
+    box-shadow: 0 0 14px rgba(16, 185, 129, 0.55) !important;
+}
+.viralcut-copy-toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: #0f172a;
+    border: 1px solid #10b981;
+    color: #f8fafc;
+    padding: 10px 18px;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(16, 185, 129, 0.3);
+    z-index: 9999999;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transform: translateY(30px);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.22s ease;
+}
+.viralcut-copy-toast.show {
+    transform: translateY(0);
+    opacity: 1;
+}
 </style>
 """
 
@@ -244,6 +326,33 @@ def render_empty_state_html(icon: str, title: str, description: str) -> str:
     </div>
     """
 
+def render_copyable_code_html(
+    code: str,
+    label: str = "",
+    prefix_icon: str = "🔑",
+    tooltip: str = "Clique para copiar o código"
+) -> str:
+    """
+    Retorna o HTML formatado de um badge interativo de código (11 caracteres).
+    Ao clicar neste elemento, o código é copiado instantaneamente para a área de
+    transferência pelo script global com feedback visual e notificação toast.
+    """
+    clean_code = str(code or "").strip()
+    if not clean_code:
+        return ""
+
+    lbl_part = f'<span class="viralcut-code-label" style="opacity:0.85;margin-right:3px;">{label}</span>' if label else ""
+    return (
+        f'<span class="viralcut-copyable-code" data-copy-code="{clean_code}" '
+        f'title="{tooltip} ({clean_code})" role="button" tabindex="0">'
+        f'<span class="viralcut-copy-icon">{prefix_icon}</span> '
+        f'{lbl_part}'
+        f'<code class="viralcut-code-text">{clean_code}</code>'
+        f'<span class="viralcut-copy-hint" title="Copiar">📋</span>'
+        f'</span>'
+    )
+
+
 def render_section_header(number: str, title: str, badge_text: str = None, badge_variant: str = "neutral"):
     """Renderiza um cabeçalho de seção profissional com título, código do vídeo ativo e badge de status inline."""
     code_val = ""
@@ -252,7 +361,7 @@ def render_section_header(number: str, title: str, badge_text: str = None, badge
     except Exception:
         code_val = ""
     code_html = (
-        f'<span class="viral-badge viral-badge-score" title="Código único do vídeo (11 caracteres)" style="margin-right: 6px;">🔑 Código: {code_val}</span>'
+        f'<span style="margin-right: 6px;">{render_copyable_code_html(code_val, label="Código:", prefix_icon="🔑", tooltip="Clique para copiar o código do vídeo")}</span>'
         if code_val else ""
     )
     badge_html = render_status_badge(badge_text, badge_variant) if badge_text else ""

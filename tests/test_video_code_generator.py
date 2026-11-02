@@ -10,7 +10,7 @@ import core.library_manager as lm
 import core.cuts_catalog as cc
 import core.export_kit as ek
 from core.video_code_manager import allocate_cut_code, allocate_project_code
-from core.ui_theme import render_section_header
+from core.ui_theme import render_section_header, render_copyable_code_html
 
 
 def test_generate_youtube_style_id_matches_reference():
@@ -183,3 +183,20 @@ def test_render_section_header_includes_active_video_code(monkeypatch):
 
     render_section_header("3", "Fábrica de Cortes", "Pronto", "success")
     assert any("e4HKbdr7NhI" in h for h in rendered)
+    assert any("data-copy-code=\"e4HKbdr7NhI\"" in h for h in rendered)
+
+
+def test_render_copyable_code_html_attributes():
+    html = render_copyable_code_html("ZeLFAqzfsTY", label="Código do Corte:", prefix_icon="🔑")
+    assert 'data-copy-code="ZeLFAqzfsTY"' in html
+    assert 'class="viralcut-copyable-code"' in html
+    assert 'role="button"' in html
+    assert 'tabindex="0"' in html
+    assert 'ZeLFAqzfsTY' in html
+    assert '🔑' in html
+    assert '📋' in html
+    assert 'Código do Corte:' in html
+
+    # Casos nulos ou vazios retornam string vazia
+    assert render_copyable_code_html("") == ""
+    assert render_copyable_code_html(None) == ""

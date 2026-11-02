@@ -11,6 +11,7 @@ import cv2
 import numpy as np
 import imageio_ffmpeg
 from PIL import Image, ImageDraw, ImageFont
+from core.runtime_env import get_ffmpeg_hwaccel_flags, get_ffmpeg_video_encode_flags, run_ffmpeg_with_fallback
 
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
@@ -657,7 +658,8 @@ def get_formatted_preview_frame(
 def apply_social_overlay_to_video(
     video_path: str,
     output_path: str,
-    config: dict
+    config: dict,
+    device: str = None
 ) -> dict:
     """
     Aplica a barra de redes sociais sobre o arquivo de vídeo via FFmpeg
@@ -702,42 +704,23 @@ def apply_social_overlay_to_video(
         except Exception:
             pass
 
-    # 3. Executa o FFmpeg com aceleração NVENC (GPU)
+    # 3. Executa o FFmpeg respeitando a configuração de GPU/CPU com fallback automático
     filter_complex = "[0:v][1:v]overlay=0:0[outv]"
-    cmd_gpu = [
+    cmd = [
         FFMPEG_EXE, "-y",
+        *get_ffmpeg_hwaccel_flags(device),
         "-i", video_path,
         "-i", temp_overlay_png,
         "-filter_complex", filter_complex,
         "-map", "[outv]",
         "-map", "0:a?",
-        "-c:v", "h264_nvenc",
-        "-preset", "p4",
-        "-b:v", "8M",
+        *get_ffmpeg_video_encode_flags(device=device, crf=18),
         "-c:a", "copy",
         "-movflags", "+faststart",
         tmp_out
     ]
 
-    res = subprocess.run(cmd_gpu, capture_output=True, text=True)
-
-    # Fallback para libx264 se GPU falhar
-    if res.returncode != 0 or not os.path.exists(tmp_out) or os.path.getsize(tmp_out) == 0:
-        cmd_cpu = [
-            FFMPEG_EXE, "-y",
-            "-i", video_path,
-            "-i", temp_overlay_png,
-            "-filter_complex", filter_complex,
-            "-map", "[outv]",
-            "-map", "0:a?",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "18",
-            "-c:a", "copy",
-            "-movflags", "+faststart",
-            tmp_out
-        ]
-        res = subprocess.run(cmd_cpu, capture_output=True, text=True)
+    res = run_ffmpeg_with_fallback(cmd, output_path=tmp_out, crf=18, capture_output=True, text=True)
 
     # Limpeza do PNG temporário
     if os.path.exists(temp_overlay_png):

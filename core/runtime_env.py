@@ -18,6 +18,79 @@ from typing import Dict, Any, List, Optional
 import imageio_ffmpeg
 
 
+def patch_windows_asyncio_connection_lost():
+    """
+    Corrige o bug crônico do asyncio ProactorEventLoop no Windows (WinError 10054 / WSAECONNRESET).
+    Ocorre frequentemente quando o navegador (ex: Google Chrome) é minimizado, a aba é recarregada,
+    ou o socket WebSocket / streaming de mídia é fechado abruptamente pelo cliente remoto.
+    Evita que o terminal fique poluído com tracebacks de ConnectionResetError em _call_connection_lost.
+    """
+    if os.name != "nt":
+        return
+
+    # 1. Corrige o transporte ProactorBasePipeTransport para capturar ConnectionResetError no shutdown do socket
+    try:
+        from asyncio.proactor_events import _ProactorBasePipeTransport
+        import socket
+
+        if not getattr(_ProactorBasePipeTransport, "_viralcut_patched_10054", False):
+            def _safe_call_connection_lost(self, exc):
+                if self._called_connection_lost:
+                    return
+                try:
+                    self._protocol.connection_lost(exc)
+                finally:
+                    if hasattr(self._sock, 'shutdown') and self._sock.fileno() != -1:
+                        try:
+                            self._sock.shutdown(socket.SHUT_RDWR)
+                        except (ConnectionResetError, OSError):
+                            pass
+                    if getattr(self, "_sock", None) is not None:
+                        try:
+                            self._sock.close()
+                        except Exception:
+                            pass
+                        self._sock = None
+                    server = self._server
+                    if server is not None:
+                        try:
+                            server._detach(self)
+                        except Exception:
+                            pass
+                        self._server = None
+                    self._called_connection_lost = True
+
+            _ProactorBasePipeTransport._call_connection_lost = _safe_call_connection_lost
+            _ProactorBasePipeTransport._viralcut_patched_10054 = True
+    except Exception:
+        pass
+
+    # 2. Silencia ConnectionResetError no handler padrão de exceções do BaseEventLoop em todos os loops do processo
+    try:
+        import asyncio
+        if hasattr(asyncio, "BaseEventLoop") and not getattr(asyncio.BaseEventLoop, "_viralcut_patched_10054", False):
+            orig_default_exception_handler = asyncio.BaseEventLoop.default_exception_handler
+
+            def _silent_default_exception_handler(self, context):
+                exc = context.get("exception")
+                if isinstance(exc, (ConnectionResetError, BrokenPipeError)):
+                    return
+                if isinstance(exc, OSError) and getattr(exc, "winerror", None) in (10054, 10053):
+                    return
+                msg = str(context.get("message") or "")
+                if "_call_connection_lost" in msg or "10054" in msg:
+                    return
+                orig_default_exception_handler(self, context)
+
+            asyncio.BaseEventLoop.default_exception_handler = _silent_default_exception_handler
+            asyncio.BaseEventLoop._viralcut_patched_10054 = True
+    except Exception:
+        pass
+
+
+patch_windows_asyncio_connection_lost()
+
+
 def is_colab_env() -> bool:
     """Retorna True se estiver executando dentro do Google Colab."""
     if "google.colab" in sys.modules:
@@ -60,20 +133,212 @@ def is_remote_browser_session() -> bool:
     return False
 
 
+_HAS_CUDA_CACHE: Optional[bool] = None
+_NVENC_AVAILABLE_CACHE: Optional[bool] = None
+
+
+def has_cuda_support() -> bool:
+    """
+    Verifica se o ambiente atual possui GPU NVIDIA com suporte a CUDA ativo,
+    testando ctranslate2 (Faster-Whisper), PyTorch e nvidia-smi.
+    """
+    global _HAS_CUDA_CACHE
+    if _HAS_CUDA_CACHE is not None:
+        return _HAS_CUDA_CACHE
+
+    # 1. CTranslate2 (Faster-Whisper)
+    try:
+        import ctranslate2
+        if int(ctranslate2.get_cuda_device_count()) > 0:
+            _HAS_CUDA_CACHE = True
+            return True
+    except Exception:
+        pass
+
+    # 2. PyTorch (se instalado com CUDA)
+    try:
+        import torch
+        if bool(torch.cuda.is_available()):
+            _HAS_CUDA_CACHE = True
+            return True
+    except Exception:
+        pass
+
+    # 3. Driver NVIDIA via nvidia-smi
+    try:
+        nvsmi = shutil.which("nvidia-smi")
+        if nvsmi:
+            res = subprocess.run([nvsmi, "-L"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=4)
+            if res.returncode == 0 and b"GPU" in (res.stdout or b""):
+                _HAS_CUDA_CACHE = True
+                return True
+    except Exception:
+        pass
+
+    _HAS_CUDA_CACHE = False
+    return False
+
+
 def get_preferred_compute_device(saved_preference: str = "cuda") -> str:
     """
     Detecta automaticamente se a GPU CUDA está disponível no ambiente atual (Local ou Colab).
     Se 'cuda' estiver selecionado mas o runtime atual não tiver GPU ativa, faz fallback transparente para 'cpu'.
     """
-    try:
-        import torch
-        has_cuda = bool(torch.cuda.is_available())
-    except Exception:
-        has_cuda = False
-
+    has_cuda = has_cuda_support()
     if saved_preference == "cuda" and not has_cuda:
         return "cpu"
     return saved_preference if saved_preference in ("cuda", "cpu") else ("cuda" if has_cuda else "cpu")
+
+
+def get_configured_device(device: Optional[str] = None) -> str:
+    """
+    Obtém o dispositivo de processamento ativo ('cuda' ou 'cpu'), respeitando a escolha
+    do usuário em data/app_settings.json quando `device` não é informado explicitamente.
+    """
+    pref = device
+    if not pref or pref not in ("cuda", "cpu"):
+        try:
+            from core.config_manager import load_settings
+            pref = load_settings().get("device_option", "cuda")
+        except Exception:
+            pref = "cuda"
+    return get_preferred_compute_device(pref)
+
+
+def is_nvenc_available() -> bool:
+    """
+    Testa uma única vez por processo se o encoder de hardware `h264_nvenc` da GPU NVIDIA
+    está funcional no FFmpeg atual e armazena o resultado em cache.
+    """
+    global _NVENC_AVAILABLE_CACHE
+    if _NVENC_AVAILABLE_CACHE is not None:
+        return _NVENC_AVAILABLE_CACHE
+
+    if not has_cuda_support():
+        _NVENC_AVAILABLE_CACHE = False
+        return False
+
+    try:
+        ff_exe = ensure_ffmpeg_environment()
+        cmd = [
+            ff_exe, "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", "color=c=black:s=256x256:d=0.04",
+            "-vframes", "1",
+            "-c:v", "h264_nvenc",
+            "-f", "null", "-"
+        ]
+        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=6)
+        _NVENC_AVAILABLE_CACHE = (res.returncode == 0)
+    except Exception:
+        _NVENC_AVAILABLE_CACHE = False
+
+    return _NVENC_AVAILABLE_CACHE
+
+
+def should_use_gpu_video(device: Optional[str] = None) -> bool:
+    """Retorna True se o usuário escolheu 'cuda' e o encoder de hardware NVENC está disponível."""
+    return get_configured_device(device) == "cuda" and is_nvenc_available()
+
+
+def get_ffmpeg_hwaccel_flags(device: Optional[str] = None) -> List[str]:
+    """
+    Retorna as flags de decodificação acelerada por hardware (`-hwaccel cuda`) para colocar antes do `-i` no FFmpeg
+    quando a GPU estiver habilitada, aliviando a CPU na leitura e decodificação do vídeo.
+    """
+    if should_use_gpu_video(device):
+        return ["-hwaccel", "cuda"]
+    return []
+
+
+def get_ffmpeg_video_encode_flags(
+    device: Optional[str] = None,
+    crf: int = 20,
+    maxrate: str = "8M",
+    preset_cpu: str = "veryfast",
+    tune: Optional[str] = None
+) -> List[str]:
+    """
+    Retorna os argumentos de codificação de vídeo do FFmpeg:
+    - Se `device == 'cuda'` e `h264_nvenc` disponível: usa GPU NVIDIA (`h264_nvenc` VBR Constant Quality `-cq`).
+    - Caso contrário: usa CPU (`libx264`).
+    """
+    if should_use_gpu_video(device):
+        return [
+            "-c:v", "h264_nvenc",
+            "-preset", "p4",
+            "-rc", "vbr",
+            "-cq", str(crf),
+            "-b:v", "0",
+            "-maxrate", maxrate,
+            "-bufsize", "16M",
+        ]
+
+    flags = [
+        "-c:v", "libx264",
+        "-preset", preset_cpu,
+        "-crf", str(crf),
+    ]
+    if tune:
+        flags.extend(["-tune", tune])
+    return flags
+
+
+def convert_ffmpeg_cmd_to_cpu(
+    cmd: List[str],
+    crf: int = 20,
+    preset_cpu: str = "veryfast"
+) -> List[str]:
+    """
+    Converte uma lista de comando FFmpeg que utiliza flags de GPU (`-hwaccel cuda` / `h264_nvenc`)
+    para o equivalente em CPU (`libx264`), permitindo fallback automático resiliente.
+    """
+    out: List[str] = []
+    i = 0
+    n = len(cmd)
+    while i < n:
+        tok = str(cmd[i])
+        if tok == "-hwaccel" and i + 1 < n and str(cmd[i + 1]) == "cuda":
+            i += 2
+            continue
+        if tok == "-c:v" and i + 1 < n and str(cmd[i + 1]) == "h264_nvenc":
+            out.extend(["-c:v", "libx264", "-preset", preset_cpu, "-crf", str(crf)])
+            i += 2
+            # Pula parâmetros específicos do h264_nvenc logo a seguir
+            while i < n and str(cmd[i]) in ("-preset", "-rc", "-cq", "-b:v", "-maxrate", "-bufsize"):
+                i += 2
+            continue
+        out.append(cmd[i])
+        i += 1
+    return out
+
+
+def run_ffmpeg_with_fallback(
+    cmd: List[str],
+    output_path: Optional[str] = None,
+    min_size: int = 1,
+    crf: int = 20,
+    preset_cpu: str = "veryfast",
+    **subprocess_kwargs
+) -> subprocess.CompletedProcess:
+    """
+    Executa um comando FFmpeg (potencialmente acelerado por GPU NVENC) e, caso retorne erro
+    ou não gere um arquivo válido, realiza fallback transparente para CPU (`libx264`).
+    """
+    res = subprocess.run(cmd, **subprocess_kwargs)
+    ok = (res.returncode == 0)
+    if ok and output_path:
+        ok = os.path.exists(output_path) and os.path.getsize(output_path) >= min_size
+
+    if not ok and ("h264_nvenc" in cmd or "cuda" in cmd):
+        if output_path and os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+            except Exception:
+                pass
+        cpu_cmd = convert_ffmpeg_cmd_to_cpu(cmd, crf=crf, preset_cpu=preset_cpu)
+        res = subprocess.run(cpu_cmd, **subprocess_kwargs)
+
+    return res
 
 
 def ensure_ffmpeg_environment() -> str:

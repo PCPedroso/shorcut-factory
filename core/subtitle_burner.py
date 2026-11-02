@@ -10,6 +10,7 @@ import json
 import hashlib
 import subprocess
 import imageio_ffmpeg
+from core.runtime_env import get_ffmpeg_hwaccel_flags, get_ffmpeg_video_encode_flags, run_ffmpeg_with_fallback
 
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
@@ -475,6 +476,7 @@ def burn_subtitles(
     callout_enabled: bool = False,
     callout_text: str = "",
     callout_duration: float = 4.5,
+    device: str = None,
 ) -> dict:
     """
     Aplica legendas dinâmicas palavra-a-palavra, headline de retenção superior e/ou
@@ -567,18 +569,17 @@ def burn_subtitles(
 
             cmd = [
                 FFMPEG_EXE, "-y",
+                *get_ffmpeg_hwaccel_flags(device),
                 "-i", input_video_path,
                 "-vf", vf_filter,
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-crf", "20",
+                *get_ffmpeg_video_encode_flags(device=device, crf=20),
                 "-c:a", "copy",
                 "-pix_fmt", "yuv420p",
                 "-movflags", "+faststart",
                 tmp_output
             ]
 
-            result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            result = run_ffmpeg_with_fallback(cmd, output_path=tmp_output, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
             if result.returncode == 0 and os.path.exists(tmp_output) and os.path.getsize(tmp_output) > 0:
                 if os.path.exists(output_video_path):

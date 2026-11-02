@@ -7,6 +7,7 @@ import subprocess
 import cv2
 import numpy as np
 import imageio_ffmpeg
+from core.runtime_env import get_ffmpeg_hwaccel_flags, get_ffmpeg_video_encode_flags, run_ffmpeg_with_fallback
 
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
@@ -138,12 +139,11 @@ def trim_video(video_path: str, start_s: float, end_s: float, output_path: str =
 
     cmd = [
         FFMPEG_EXE, "-y",
+        *get_ffmpeg_hwaccel_flags(),
         "-ss", f"{start_s:.3f}",
         "-t", f"{duration:.3f}",
         "-i", video_path,
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "20",
+        *get_ffmpeg_video_encode_flags(crf=20),
         "-c:a", "aac",
         "-b:a", "192k",
         "-pix_fmt", "yuv420p",
@@ -151,7 +151,7 @@ def trim_video(video_path: str, start_s: float, end_s: float, output_path: str =
         tmp_out
     ]
 
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = run_ffmpeg_with_fallback(cmd, output_path=tmp_out, capture_output=True, text=True)
 
     if res.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
         if is_in_place and os.path.exists(target_out):
@@ -239,13 +239,12 @@ def remove_snippet_and_merge(
         )
         cmd = [
             FFMPEG_EXE, "-y",
+            *get_ffmpeg_hwaccel_flags(),
             "-i", video_path,
             "-filter_complex", filter_complex,
             "-map", "[vout]",
             "-map", "[aout]",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "20",
+            *get_ffmpeg_video_encode_flags(crf=20),
             "-c:a", "aac",
             "-b:a", "192k",
             "-pix_fmt", "yuv420p",
@@ -260,18 +259,17 @@ def remove_snippet_and_merge(
         )
         cmd = [
             FFMPEG_EXE, "-y",
+            *get_ffmpeg_hwaccel_flags(),
             "-i", video_path,
             "-filter_complex", filter_complex,
             "-map", "[vout]",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "20",
+            *get_ffmpeg_video_encode_flags(crf=20),
             "-pix_fmt", "yuv420p",
             "-movflags", "+faststart",
             tmp_out
         ]
 
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = run_ffmpeg_with_fallback(cmd, output_path=tmp_out, capture_output=True, text=True)
 
     if res.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
         if is_in_place and os.path.exists(target_out):
@@ -334,13 +332,12 @@ def change_video_speed(
         filter_complex = f"[0:v]setpts={pts_factor:.6f}*PTS[v];[0:a]atempo={speed:.4f}[a]"
         cmd = [
             FFMPEG_EXE, "-y",
+            *get_ffmpeg_hwaccel_flags(),
             "-i", video_path,
             "-filter_complex", filter_complex,
             "-map", "[v]",
             "-map", "[a]",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "20",
+            *get_ffmpeg_video_encode_flags(crf=20),
             "-c:a", "aac",
             "-b:a", "192k",
             "-pix_fmt", "yuv420p",
@@ -351,18 +348,17 @@ def change_video_speed(
         filter_complex = f"[0:v]setpts={pts_factor:.6f}*PTS[v]"
         cmd = [
             FFMPEG_EXE, "-y",
+            *get_ffmpeg_hwaccel_flags(),
             "-i", video_path,
             "-filter_complex", filter_complex,
             "-map", "[v]",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "20",
+            *get_ffmpeg_video_encode_flags(crf=20),
             "-pix_fmt", "yuv420p",
             "-movflags", "+faststart",
             tmp_out
         ]
 
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = run_ffmpeg_with_fallback(cmd, output_path=tmp_out, capture_output=True, text=True)
 
     if res.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
         if is_in_place and os.path.exists(target_out):
