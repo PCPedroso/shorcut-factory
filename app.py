@@ -39,7 +39,10 @@ from core.runtime_env import (
     is_remote_browser_session,
     get_preferred_compute_device,
     build_directory_zip_bytes,
+    patch_windows_asyncio_connection_lost,
 )
+
+patch_windows_asyncio_connection_lost()
 
 importlib.reload(core.extractor)
 importlib.reload(core.transcriber)
@@ -144,7 +147,8 @@ from core.translator import (
 )
 from core.ui_theme import (
     inject_viralcut_theme, render_workflow_stepper, render_section_header,
-    render_status_badge, render_empty_state_html, navigate_to_step, WORKFLOW_STEPS
+    render_status_badge, render_empty_state_html, render_copyable_code_html,
+    navigate_to_step, WORKFLOW_STEPS
 )
 from core.youtube_heatmap import (
     extract_youtube_video_id, fetch_youtube_heatmap, find_heatmap_hotspots,
@@ -742,6 +746,188 @@ def inject_video_hotkeys_js():
     st.html(hotkeys_script, unsafe_allow_javascript=True)
 
 inject_video_hotkeys_js()
+
+def inject_copy_code_js():
+    """
+    Injeta JavaScript via st.components.v1.html (iframe com allow="clipboard-write")
+    para copiar códigos de corte/vídeo (11 caracteres) ao clicar no badge.
+    O script acessa window.parent.document para encontrar os badges no documento
+    principal e usa navigator.clipboard.writeText() do contexto do iframe, que tem
+    permissão de clipboard garantida pelo Streamlit.
+    """
+    iframe_html = """
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;overflow:hidden;">
+<script>
+(function() {
+    'use strict';
+
+    // Garante execução única mesmo se o componente for re-renderizado
+    if (window.__viralcutCopyInjected) return;
+    window.__viralcutCopyInjected = true;
+
+    var pDoc;
+    try { pDoc = window.parent.document; } catch(e) { return; }
+
+    // ── Feedback visual ──────────────────────────────────────────────────────
+    function showToast(msg) {
+        try {
+            var toast = pDoc.getElementById('viralcut-copy-toast');
+            if (!toast) {
+                toast = pDoc.createElement('div');
+                toast.id = 'viralcut-copy-toast';
+                toast.style.cssText = [
+                    'position:fixed', 'bottom:24px', 'right:24px', 'z-index:2147483647',
+                    'background:linear-gradient(135deg,#1e293b,#0f172a)',
+                    'color:#e2e8f0', 'padding:12px 20px', 'border-radius:12px',
+                    'font-family:monospace', 'font-size:14px', 'font-weight:500',
+                    'box-shadow:0 8px 32px rgba(0,0,0,.6)',
+                    'border:1px solid rgba(99,102,241,.4)',
+                    'opacity:0', 'transform:translateY(16px)',
+                    'transition:opacity .25s ease,transform .25s ease',
+                    'pointer-events:none', 'max-width:360px'
+                ].join(';');
+                pDoc.body.appendChild(toast);
+            }
+            toast.innerHTML = msg;
+            toast.style.opacity = '1';
+            toast.style.transform = 'translateY(0)';
+            if (toast.__hideTimer) clearTimeout(toast.__hideTimer);
+            toast.__hideTimer = setTimeout(function() {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(16px)';
+            }, 2600);
+        } catch(e) {}
+    }
+
+    function triggerFeedback(el, code) {
+        try {
+            el.classList.add('copied');
+            if (!el.dataset.origHtml) el.dataset.origHtml = el.innerHTML;
+            var textEl = el.querySelector('.viralcut-code-text') || el.querySelector('code') || el;
+            var hintEl = el.querySelector('.viralcut-copy-hint');
+            if (hintEl) hintEl.textContent = '\u2705';
+            if (textEl && textEl !== el) {
+                textEl.textContent = code + ' (Copiado!)';
+            } else {
+                el.innerHTML = '<span style="color:#34d399;font-weight:700;">\u2705 ' + code + ' (Copiado!)</span>';
+            }
+            if (el.__resetTimer) clearTimeout(el.__resetTimer);
+            el.__resetTimer = setTimeout(function() {
+                el.classList.remove('copied');
+                if (el.dataset.origHtml) {
+                    el.innerHTML = el.dataset.origHtml;
+                    delete el.dataset.origHtml;
+                }
+            }, 1800);
+        } catch(e) {}
+        showToast('\uD83D\uDCCB C\u00f3digo <code style="background:rgba(255,255,255,.15);padding:2px 6px;border-radius:4px;color:#38bdf8;font-weight:700;">' + code + '</code> copiado!');
+    }
+
+    // ── Copiar texto via Clipboard API do iframe ─────────────────────────────
+    function doCopy(code, badgeEl) {
+        if (!code) return;
+        // Tenta Clipboard API (funciona aqui pois o iframe tem allow="clipboard-write")
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(code).then(function() {
+                triggerFeedback(badgeEl, code);
+            }).catch(function() {
+                fallbackCopy(code, badgeEl);
+            });
+        } else {
+            fallbackCopy(code, badgeEl);
+        }
+    }
+
+    // Fallback: cria textarea visível no documento pai, seleciona, execCommand
+    function fallbackCopy(code, badgeEl) {
+        try {
+            var ta = pDoc.createElement('textarea');
+            ta.value = code;
+            ta.setAttribute('readonly', '');
+            ta.style.cssText = 'position:fixed;top:10px;left:10px;width:120px;height:40px;opacity:0.01;z-index:9999999;font-size:16px;';
+            pDoc.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            ta.setSelectionRange(0, code.length);
+            var ok = pDoc.execCommand('copy');
+            pDoc.body.removeChild(ta);
+            if (ok) triggerFeedback(badgeEl, code);
+        } catch(e) {}
+    }
+
+    // ── Extrair código do elemento badge ─────────────────────────────────────
+    function getCode(el) {
+        var code = (el.getAttribute('data-copy-code') || '').trim();
+        if (!code) {
+            var textEl = el.querySelector('.viralcut-code-text') || el.querySelector('code') || el;
+            code = (textEl.textContent || textEl.innerText || '').trim();
+            // Remove ícones e sufixos
+            code = code.replace(/[\uD800-\uDFFF].|[\u2600-\u27BF]|[🔑✂️📋]/gu, '').replace(/[(]Copiado![)]/g, '').trim();
+        }
+        return code;
+    }
+
+    // ── Anexar listener direto em cada badge ────────────────────────────────
+    function attachToBadge(b) {
+        if (b.__viralcutCopyAttached) return;
+        b.__viralcutCopyAttached = true;
+        b.style.cursor = 'pointer';
+        b.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            doCopy(getCode(b), b);
+        }, true);
+        b.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                doCopy(getCode(b), b);
+            }
+        }, true);
+    }
+
+    function scanAndAttach() {
+        try {
+            pDoc.querySelectorAll('.viralcut-copyable-code, [data-copy-code]').forEach(attachToBadge);
+        } catch(e) {}
+    }
+
+    // Delegação global no documento pai (captura antes do React)
+    if (!pDoc.__viralcutCopyDelegated) {
+        pDoc.__viralcutCopyDelegated = true;
+        pDoc.addEventListener('click', function(e) {
+            var badge = e.target ? e.target.closest('[data-copy-code], .viralcut-copyable-code') : null;
+            if (!badge) return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            doCopy(getCode(badge), badge);
+        }, true);
+    }
+
+    scanAndAttach();
+    setInterval(scanAndAttach, 400);
+})();
+</script>
+</body>
+</html>
+"""
+    components.html(iframe_html, height=0, scrolling=False)
+
+
+def _try_inject_copy_code_js():
+    """Chama inject_copy_code_js() apenas quando há ScriptRunContext ativo (modo Streamlit real)."""
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        if get_script_run_ctx() is None:
+            return
+    except Exception:
+        return
+    inject_copy_code_js()
+
+
+_try_inject_copy_code_js()
 
 def inject_video_snapshot_js():
     """
@@ -4558,13 +4744,17 @@ if _active_tab_vid and (os.path.isdir(os.path.join("data", _active_tab_vid)) or 
     _active_tab_code = ensure_project_video_code(_active_tab_vid, url=video_url)
     st.session_state["active_video_code"] = _active_tab_code
     if _active_tab_code:
+        _v_badge = render_copyable_code_html(_active_tab_code, label="Vídeo Base:", prefix_icon="🔑", tooltip="Clique para copiar o código do projeto")
+        _c_code = st.session_state.get("active_cut_code")
+        _c_badge = (
+            " &nbsp;|&nbsp; " + render_copyable_code_html(_c_code, label="Corte Ativo:", prefix_icon="✂️", tooltip="Clique para copiar o código do corte ativo")
+            if _c_code else ""
+        )
         st.markdown(
             f'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;'
             f'background:rgba(99,102,241,0.10);border:1px solid rgba(99,102,241,0.28);border-radius:10px;'
             f'padding:6px 14px;margin-top:-10px;margin-bottom:14px;font-size:0.85rem;">'
-            f'<div>🔑 <strong>Código do Vídeo Base:</strong> <code style="color:#f472b6;font-weight:700;font-size:0.92rem;">{_active_tab_code}</code>'
-            + (f' &nbsp;|&nbsp; ✂️ <strong>Código do Corte Ativo:</strong> <code style="color:#38bdf8;font-weight:700;font-size:0.92rem;">{st.session_state.get("active_cut_code")}</code>' if st.session_state.get("active_cut_code") else '')
-            + '</div>'
+            f'<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">{_v_badge}{_c_badge}</div>'
             f'<div style="color:#94a3b8;">📌 Projeto: <code>{_active_tab_vid}</code></div>'
             f'</div>',
             unsafe_allow_html=True
@@ -10868,8 +11058,9 @@ if _has_media_ready:
                     _inst_code = existing_inst.get("cut_code", "")
                     if _inst_code:
                         st.session_state["active_cut_code"] = _inst_code
-                    _inst_code_lbl = f" | 🔑 Código do Corte: `{_inst_code}`" if _inst_code else ""
-                    st.success(f"⚡ **Instância Encontrada no Cache ({existing_inst.get('rendered_at')})!**{_inst_code_lbl}")
+                    _inst_code_badge = render_copyable_code_html(_inst_code, label="Código do Corte:", prefix_icon="🔑", tooltip="Clique para copiar o código deste corte") if _inst_code else ""
+                    _inst_code_lbl = f" &nbsp;|&nbsp; {_inst_code_badge}" if _inst_code_badge else ""
+                    st.markdown(f'<div style="background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.35);border-radius:8px;padding:8px 12px;color:#34d399;font-size:0.9rem;display:flex;align-items:center;flex-wrap:wrap;gap:6px;">⚡ <strong>Instância Encontrada no Cache ({existing_inst.get("rendered_at")})!</strong>{_inst_code_lbl}</div>', unsafe_allow_html=True)
                 elif existing_cut:
                     other_formats = list(existing_cut.get("formats", {}).keys())
                     st.info(f"💡 Minutagem já gerada em: `{', '.join(other_formats)}`. Textos reaproveitados!")
@@ -12280,9 +12471,8 @@ if _has_media_ready:
                             )
                             if _rendered_cut_code:
                                 st.session_state["active_cut_code"] = _rendered_cut_code
-                                st.markdown(
-                                    f"🔑 **Código Exclusivo deste Corte:** `{_rendered_cut_code}`"
-                                )
+                                _rend_code_badge = render_copyable_code_html(_rendered_cut_code, label="Código Exclusivo deste Corte:", prefix_icon="🔑", tooltip="Clique para copiar o código deste corte")
+                                st.markdown(f"**Código do Corte:** {_rend_code_badge}", unsafe_allow_html=True)
                             saved_thumb = package_res.get("thumbnail_dest_path")
                             has_saved_thumb = saved_thumb and os.path.exists(saved_thumb)
     
@@ -12974,7 +13164,8 @@ if _has_media_ready:
                                 abs_fol_g = os.path.abspath(_fd.get("folder_path", ""))
                                 link_fol_g = abs_fol_g.replace('\\', '/')
                                 _gal_cut_code = _fd.get("cut_code") or cut_item.get("cut_code") or ""
-                                _gal_code_str = f"🔑 **Código do Corte:** `{_gal_cut_code}` &nbsp;|&nbsp; " if _gal_cut_code else ""
+                                _gal_code_badge = render_copyable_code_html(_gal_cut_code, label="Código do Corte:", prefix_icon="🔑", tooltip="Clique para copiar o código do corte") if _gal_cut_code else ""
+                                _gal_code_str = f"{_gal_code_badge} &nbsp;|&nbsp; " if _gal_code_badge else ""
                                 st.markdown(f"{_gal_code_str}📁 **Pasta Local:** [{_fd.get('folder_name', 'Abrir Pasta')}](file:///{link_fol_g}) &nbsp; `📁 {abs_fol_g}`", unsafe_allow_html=True)
 
                             if num_fmt == 1:
@@ -12992,7 +13183,8 @@ if _has_media_ready:
                                 col_vid, col_side = st.columns([1.4, 2.6])
                                 with col_vid:
                                     _fmt_cc = fmt_data.get("cut_code") or cut_item.get("cut_code") or ""
-                                    st.markdown(f"**{fmt_badge}**" + (f" &nbsp; `🔑 {_fmt_cc}`" if _fmt_cc else ""))
+                                    _fmt_badge_html = render_copyable_code_html(_fmt_cc, prefix_icon="🔑", tooltip="Clique para copiar o código deste corte") if _fmt_cc else ""
+                                    st.markdown(f"**{fmt_badge}**" + (f" &nbsp; {_fmt_badge_html}" if _fmt_badge_html else ""), unsafe_allow_html=True)
                                     if v_file and os.path.exists(v_file):
                                         safe_display_video(v_file)
                                         _render_actions_box(v_file, fmt_key, fmt_data, fmt_badge, f_idx)
@@ -13021,7 +13213,8 @@ if _has_media_ready:
                                             "16:9": "💻 16:9 Original (HOFHD)"
                                         }.get(fmt_key, fmt_key)
                                         _fmt_cc = fmt_data.get("cut_code") or cut_item.get("cut_code") or ""
-                                        st.markdown(f"**{fmt_badge}**" + (f" &nbsp; `🔑 {_fmt_cc}`" if _fmt_cc else ""))
+                                        _fmt_badge_html = render_copyable_code_html(_fmt_cc, prefix_icon="🔑", tooltip="Clique para copiar o código deste corte") if _fmt_cc else ""
+                                        st.markdown(f"**{fmt_badge}**" + (f" &nbsp; {_fmt_badge_html}" if _fmt_badge_html else ""), unsafe_allow_html=True)
                                         v_file = fmt_data.get("video_path")
                                         if v_file and os.path.exists(v_file):
                                             safe_display_video(v_file)
