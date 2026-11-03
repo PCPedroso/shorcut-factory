@@ -25,6 +25,8 @@ def patch_streamlit_drawable_canvas_compat():
     Garante compatibilidade entre streamlit-drawable-canvas e versões modernas do Streamlit (1.60+).
     Nas versões recentes do Streamlit, `image_to_url` foi movido para
     `streamlit.elements.lib.image_utils` e espera `LayoutConfig` como segundo argumento.
+    Também converte o frame em JPEG otimizado (em vez de PNG pesado) para reduzir tráfego e
+    protege a chamada de st_canvas contra falhas de desserialização ou retorno de classe pura.
     """
     try:
         import base64
@@ -52,13 +54,34 @@ def patch_streamlit_drawable_canvas_compat():
                 if not url:
                     if isinstance(image, Image.Image):
                         buf = io.BytesIO()
-                        image.save(buf, format="PNG")
+                        # Usa JPEG com 85% de qualidade para reduzir em ~30x o tamanho da string base64 no DOM
+                        if image.mode in ("RGBA", "LA", "P"):
+                            img_to_save = image.convert("RGB")
+                        else:
+                            img_to_save = image
+                        img_to_save.save(buf, format="JPEG", quality=85)
                         b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-                        return f"data:image/png;base64,{b64}"
+                        return f"data:image/jpeg;base64,{b64}"
                 return url
 
             st_image.image_to_url = _compat_image_to_url
             st_image._is_multicam_patched = True
+
+        import streamlit_drawable_canvas as sdc
+        if not getattr(sdc, "_is_multicam_canvas_patched", False):
+            orig_st_canvas = sdc.st_canvas
+
+            def _safe_st_canvas(*args, **kwargs):
+                try:
+                    res = orig_st_canvas(*args, **kwargs)
+                    if res is sdc.CanvasResult or res is None:
+                        return sdc.CanvasResult(image_data=None, json_data={"version": "4.4.0", "objects": []})
+                    return res
+                except Exception:
+                    return sdc.CanvasResult(image_data=None, json_data={"version": "4.4.0", "objects": []})
+
+            sdc.st_canvas = _safe_st_canvas
+            sdc._is_multicam_canvas_patched = True
     except Exception:
         pass
 
