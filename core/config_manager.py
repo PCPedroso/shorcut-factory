@@ -113,6 +113,8 @@ DEFAULT_SETTINGS = {
     "social_preview_scale": 50,
     "social_overlay_style": "Pílula Glassmorphism (Recomendado)",
     "social_overlay_icon_style": "Cores Oficiais da Marca",
+    "social_overlay_align_x": "Centro",
+    "social_overlay_offset_x": 0,
     "social_youtube_enabled": True,
     "social_youtube_handle": "",
     "social_instagram_enabled": True,

@@ -10530,6 +10530,8 @@ if _has_media_ready:
                 st.session_state["social_preview_scale_slider"] = int(_p_data.get("social_preview_scale", 50))
                 st.session_state["social_style_sel"] = str(_p_data.get("social_overlay_style", "Pílula Glassmorphism (Recomendado)"))
                 st.session_state["social_icon_style_sel"] = str(_p_data.get("social_overlay_icon_style", "Cores Oficiais da Marca"))
+                st.session_state["social_align_x_ctrl"] = str(_p_data.get("social_overlay_align_x", "Centro"))
+                st.session_state["social_offset_x_input"] = int(_p_data.get("social_overlay_offset_x", 0))
                 st.session_state["chk_soc_yt"] = bool(_p_data.get("social_youtube_enabled", True))
                 st.session_state["txt_soc_yt_handle"] = str(_p_data.get("social_youtube_handle", ""))
                 st.session_state["chk_soc_ig"] = bool(_p_data.get("social_instagram_enabled", True))
@@ -10551,6 +10553,8 @@ if _has_media_ready:
         saved_social_preview_scale = max(20, min(100, int(_cur_profile.get("social_preview_scale", 50))))
         saved_social_style = _cur_profile.get("social_overlay_style", "Pílula Glassmorphism (Recomendado)")
         saved_social_icon_style = _cur_profile.get("social_overlay_icon_style", "Cores Oficiais da Marca")
+        saved_social_align_x = _cur_profile.get("social_overlay_align_x", "Centro")
+        saved_social_offset_x = int(_cur_profile.get("social_overlay_offset_x", 0))
         saved_yt_enabled = bool(_cur_profile.get("social_youtube_enabled", True))
         saved_yt_handle = str(_cur_profile.get("social_youtube_handle", ""))
         saved_ig_enabled = bool(_cur_profile.get("social_instagram_enabled", True))
@@ -10598,6 +10602,8 @@ if _has_media_ready:
                         "social_preview_scale": int(st.session_state.get("social_preview_scale_slider", saved_social_preview_scale)),
                         "social_overlay_style": str(st.session_state.get("social_style_sel", saved_social_style)),
                         "social_overlay_icon_style": str(st.session_state.get("social_icon_style_sel", saved_social_icon_style)),
+                        "social_overlay_align_x": str(st.session_state.get("social_align_x_ctrl", saved_social_align_x)),
+                        "social_overlay_offset_x": int(st.session_state.get("social_offset_x_input", saved_social_offset_x)),
                         "social_youtube_enabled": bool(st.session_state.get("chk_soc_yt", saved_yt_enabled)),
                         "social_youtube_handle": str(st.session_state.get("txt_soc_yt_handle", saved_yt_handle)).strip(),
                         "social_instagram_enabled": bool(st.session_state.get("chk_soc_ig", saved_ig_enabled)),
@@ -10711,6 +10717,26 @@ if _has_media_ready:
                     help="O tamanho dos ícones é redimensionado automaticamente de forma proporcional à tipografia."
                 )
 
+            col_sc_align, col_sc_ox = st.columns([1.8, 1.2])
+            with col_sc_align:
+                align_options = ["Esquerda", "Centro", "Direita"]
+                align_idx = align_options.index(saved_social_align_x) if saved_social_align_x in align_options else 1
+                social_overlay_align_x = st.segmented_control(
+                    "↔️ Alinhamento Horizontal:",
+                    options=align_options,
+                    default=align_options[align_idx],
+                    key="social_align_x_ctrl",
+                    help="Posiciona o selo à Esquerda, Centro ou Direita do frame."
+                ) or "Centro"
+            with col_sc_ox:
+                social_overlay_offset_x = st.number_input(
+                    "⬅️➡️ Ajuste Fino Horizontal (px):",
+                    value=int(saved_social_offset_x),
+                    step=1,
+                    key="social_offset_x_input",
+                    help="Desloca o selo horizontalmente após o alinhamento (negativo = esquerda, positivo = direita)."
+                )
+
             col_sc_st1, col_sc_st2 = st.columns([1.5, 1.5])
             with col_sc_st1:
                 style_options = ["Pílula Glassmorphism (Recomendado)", "Pílulas Individuais", "Flutuante (Sem Fundo)"]
@@ -10793,6 +10819,8 @@ if _has_media_ready:
                 "font_size": int(social_overlay_font_size),
                 "style": _style_map.get(social_overlay_style, "pill_glass"),
                 "icon_style": _icon_style_map.get(social_overlay_icon_style, "official"),
+                "align_x": {"Esquerda": "left", "Centro": "center", "Direita": "right"}.get(social_overlay_align_x, "center"),
+                "offset_x": int(social_overlay_offset_x),
                 "text_color": "#FFFFFF",
                 "networks": {
                     "youtube": {"enabled": social_youtube_enabled, "handle": social_youtube_handle.strip()},

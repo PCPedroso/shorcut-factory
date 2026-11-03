@@ -441,6 +441,7 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
     - *Flutuante (Sem Fundo)*: Ícones e tipografia diretamente sobrepostos ao vídeo com sombra projetada suave.
   - **Posicionamento & Safe Zones para Shorts/Reels/TikTok**:
     - Posições **Bottom (Inferior)** e **Top (Superior)** com calibragem vertical de segurança (evitando sobreposição com legendas nativas e botões de interface de Reels/TikTok).
+    - **Alinhamento Horizontal (lign_x) com Ajuste Fino (offset_x)**: Controle preciso de posicionamento esquerda/centro/direita via segmented_control na UI e campo numérico de offset em pixels. O motor _compute_start_x aplica o alinhamento em todos os três estilos visuais (Pílula Glassmorphism, Pílulas Individuais, Flutuante), com clamping automático para evitar extrapolação dos limites do frame.
   - **Modo Monocromático Minimalista**: Opção de converter todos os ícones e tipografia em branco puro com transparência preservada.
   - **Controle de Escala da Prévia Visual (`social_preview_scale`)**:
     - **Redução Padrão Pela Metade (50%)**: A imagem de prévia renderizada no Streamlit agora inicia em 50% da largura máxima (~360px de largura e ~640px de altura para frames 9:16), encaixando ergonomicamente em qualquer monitor sem rolagem forçada.

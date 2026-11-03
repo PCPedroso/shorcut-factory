@@ -31,6 +31,8 @@ DEFAULT_PROFILE_DATA = {
     "social_preview_scale": 50,
     "social_overlay_style": "Pílula Glassmorphism (Recomendado)",
     "social_overlay_icon_style": "Cores Oficiais da Marca",
+    "social_overlay_align_x": "Centro",
+    "social_overlay_offset_x": 0,
     "social_youtube_enabled": True,
     "social_youtube_handle": "@meucanal",
     "social_instagram_enabled": True,
@@ -48,6 +50,8 @@ DEFAULT_SOCIAL_CONFIG = {
     "font_size": 32,            # Tamanho da fonte (20 a 54px)
     "style": "pill_glass",      # 'pill_glass', 'pill_individual', 'floating'
     "icon_style": "official",   # 'official' ou 'monochrome'
+    "align_x": "center",        # 'left', 'center', 'right'
+    "offset_x": 0,              # Ajuste horizontal fino em pixels
     "text_color": "#FFFFFF",
     "networks": {
         "youtube": {"enabled": True, "handle": "@meucanal"},
@@ -359,6 +363,18 @@ def get_active_social_items(config: dict) -> list:
     return items
 
 
+def _compute_start_x(align_x: str, offset_x: int, content_w: int, video_width: int, margin_h: int = 18) -> int:
+    """Calcula a posição X inicial do selo com base em alinhamento e ajuste fino horizontal."""
+    a = str(align_x).lower().strip()
+    if a in ("left", "esquerda"):
+        x = margin_h + offset_x
+    elif a in ("right", "direita"):
+        x = video_width - content_w - margin_h + offset_x
+    else:  # center / centro (padrão)
+        x = (video_width - content_w) // 2 + offset_x
+    return max(10, min(video_width - content_w - 10, x))
+
+
 def render_social_overlay_image(video_width: int, video_height: int, config: dict) -> Image.Image:
     """
     Gera uma imagem RGBA transparente com a camada de assinatura de redes sociais
@@ -414,6 +430,8 @@ def render_social_overlay_image(video_width: int, video_height: int, config: dic
     # Posição Vertical (Safe Zones para 9:16)
     pos_type = str(config.get("position", "bottom")).lower()
     offset_y = int(config.get("offset_y", 0))
+    align_x = str(config.get("align_x", "center")).lower()
+    offset_x = int(config.get("offset_x", 0))
 
     if pos_type == "top":
         # Safe zone topo (abaixo de status bar do mobile / headline)
@@ -432,7 +450,7 @@ def render_social_overlay_image(video_width: int, video_height: int, config: dic
         container_w = total_content_w + (padding_x * 2)
         container_h = max(ri["content_h"] for ri in rendered_items) + (padding_y * 2)
 
-        start_x = max(10, (video_width - container_w) // 2)
+        start_x = _compute_start_x(align_x, offset_x, container_w, video_width)
         start_y = max(10, min(video_height - container_h - 10, final_y))
 
         # Fundo Glassmorphism Dark com cantos totalmente arredondados (pílula)
@@ -467,7 +485,7 @@ def render_social_overlay_image(video_width: int, video_height: int, config: dic
     elif style_mode == "pill_individual":
         # Pílulas separadas para cada rede
         total_pills_w = sum(ri["content_w"] + (padding_x * 2) for ri in rendered_items) + (inter_network_gap * (len(rendered_items) - 1))
-        start_x = max(10, (video_width - total_pills_w) // 2)
+        start_x = _compute_start_x(align_x, offset_x, total_pills_w, video_width)
         cur_x = start_x
 
         for ri in rendered_items:
@@ -500,7 +518,7 @@ def render_social_overlay_image(video_width: int, video_height: int, config: dic
         # Modo 'floating' (Sem caixa de fundo, apenas sombra projetada suave)
         total_content_w = sum(ri["content_w"] for ri in rendered_items) + (inter_network_gap * (len(rendered_items) - 1))
         max_h = max(ri["content_h"] for ri in rendered_items)
-        start_x = max(10, (video_width - total_content_w) // 2)
+        start_x = _compute_start_x(align_x, offset_x, total_content_w, video_width)
         start_y = max(10, min(video_height - max_h - 10, final_y))
         cur_x = start_x
         center_y = start_y + (max_h // 2)

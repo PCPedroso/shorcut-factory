@@ -9,7 +9,8 @@ from core.social_overlay import (
     render_social_overlay_image,
     render_social_overlay_on_frame,
     apply_social_overlay_to_video,
-    DEFAULT_SOCIAL_CONFIG
+    DEFAULT_SOCIAL_CONFIG,
+    _compute_start_x,
 )
 
 
@@ -322,3 +323,145 @@ if __name__ == '__main__':
     unittest.main()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Testes de Alinhamento Horizontal (align_x + offset_x)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _base_config(align_x="center", offset_x=0):
+    """Retorna uma config mínima válida com redes ativas."""
+    return {
+        "enabled": True,
+        "position": "bottom",
+        "offset_y": 0,
+        "font_size": 32,
+        "style": "pill_glass",
+        "icon_style": "official",
+        "align_x": align_x,
+        "offset_x": offset_x,
+        "text_color": "#FFFFFF",
+        "networks": {
+            "youtube": {"enabled": True, "handle": "@teste"},
+            "instagram": {"enabled": False, "handle": ""},
+            "tiktok": {"enabled": False, "handle": ""},
+            "x": {"enabled": False, "handle": ""},
+        },
+    }
+
+
+class TestComputeStartX(unittest.TestCase):
+    """Testes unitários para _compute_start_x."""
+
+    def test_center_alignment(self):
+        # Sem offset, centro deve dar (video_width - content_w) // 2
+        result = _compute_start_x("center", 0, 400, 1080)
+        self.assertEqual(result, (1080 - 400) // 2)
+
+    def test_left_alignment(self):
+        result = _compute_start_x("left", 0, 400, 1080)
+        self.assertEqual(result, 18)  # margin_h padrão
+
+    def test_right_alignment(self):
+        result = _compute_start_x("right", 0, 400, 1080)
+        expected = 1080 - 400 - 18  # video_width - content_w - margin_h
+        self.assertEqual(result, expected)
+
+    def test_portuguese_aliases(self):
+        left = _compute_start_x("esquerda", 0, 300, 1080)
+        self.assertEqual(left, 18)
+        right = _compute_start_x("direita", 0, 300, 1080)
+        self.assertEqual(right, 1080 - 300 - 18)
+        center = _compute_start_x("centro", 0, 300, 1080)
+        self.assertEqual(center, (1080 - 300) // 2)
+
+    def test_positive_offset_x(self):
+        center_no_off = _compute_start_x("center", 0, 400, 1080)
+        center_with_off = _compute_start_x("center", 50, 400, 1080)
+        self.assertEqual(center_with_off, center_no_off + 50)
+
+    def test_negative_offset_x(self):
+        center_no_off = _compute_start_x("center", 0, 400, 1080)
+        center_with_off = _compute_start_x("center", -50, 400, 1080)
+        self.assertEqual(center_with_off, center_no_off - 50)
+
+    def test_clamp_lower_bound(self):
+        # offset enorme para a esquerda deve ser clampado para >= 10
+        result = _compute_start_x("left", -9999, 400, 1080)
+        self.assertGreaterEqual(result, 10)
+
+    def test_clamp_upper_bound(self):
+        # offset enorme para a direita deve ser clampado para <= video_width - content_w - 10
+        result = _compute_start_x("right", 9999, 400, 1080)
+        self.assertLessEqual(result, 1080 - 400 - 10)
+
+    def test_case_insensitive(self):
+        self.assertEqual(
+            _compute_start_x("LEFT", 0, 200, 1080),
+            _compute_start_x("left", 0, 200, 1080),
+        )
+        self.assertEqual(
+            _compute_start_x("RIGHT", 0, 200, 1080),
+            _compute_start_x("right", 0, 200, 1080),
+        )
+
+
+class TestAlignmentInRender(unittest.TestCase):
+    """Testes de integração: verifica posição do selo gerado pelo render."""
+
+    VW, VH = 1080, 1920
+
+    def _get_nonzero_columns(self, img: "Image.Image") -> tuple:
+        """Retorna (col_min, col_max) das colunas com pixels opacos."""
+        arr = np.array(img)
+        alpha = arr[:, :, 3]
+        cols = np.where(alpha.max(axis=0) > 10)[0]
+        self.assertGreater(len(cols), 0, "Imagem gerada não tem pixels visíveis")
+        return int(cols[0]), int(cols[-1])
+
+    def test_center_alignment_is_symmetric(self):
+        img = render_social_overlay_image(self.VW, self.VH, _base_config("center", 0))
+        col_min, col_max = self._get_nonzero_columns(img)
+        center_content = (col_min + col_max) / 2
+        # O centro do conteúdo deve estar próximo ao centro do frame (±5% de tolerância)
+        tolerance = self.VW * 0.05
+        self.assertAlmostEqual(center_content, self.VW / 2, delta=tolerance)
+
+    def test_left_alignment_is_leftward(self):
+        img_left = render_social_overlay_image(self.VW, self.VH, _base_config("left", 0))
+        img_center = render_social_overlay_image(self.VW, self.VH, _base_config("center", 0))
+        col_min_left, _ = self._get_nonzero_columns(img_left)
+        col_min_center, _ = self._get_nonzero_columns(img_center)
+        self.assertLess(col_min_left, col_min_center)
+
+    def test_right_alignment_is_rightward(self):
+        img_right = render_social_overlay_image(self.VW, self.VH, _base_config("right", 0))
+        img_center = render_social_overlay_image(self.VW, self.VH, _base_config("center", 0))
+        _, col_max_right = self._get_nonzero_columns(img_right)
+        _, col_max_center = self._get_nonzero_columns(img_center)
+        self.assertGreater(col_max_right, col_max_center)
+
+    def test_offset_x_shifts_content(self):
+        img_no_off = render_social_overlay_image(self.VW, self.VH, _base_config("center", 0))
+        img_with_off = render_social_overlay_image(self.VW, self.VH, _base_config("center", 80))
+        col_min_no, _ = self._get_nonzero_columns(img_no_off)
+        col_min_with, _ = self._get_nonzero_columns(img_with_off)
+        self.assertGreater(col_min_with, col_min_no)
+
+    def test_pill_individual_left_alignment(self):
+        cfg = _base_config("left", 0)
+        cfg["style"] = "pill_individual"
+        img = render_social_overlay_image(self.VW, self.VH, cfg)
+        col_min, _ = self._get_nonzero_columns(img)
+        # Com alinhamento à esquerda, conteúdo começa perto da borda (< 25% do frame)
+        self.assertLess(col_min, self.VW * 0.25)
+
+    def test_floating_right_alignment(self):
+        cfg = _base_config("right", 0)
+        cfg["style"] = "floating"
+        img = render_social_overlay_image(self.VW, self.VH, cfg)
+        _, col_max = self._get_nonzero_columns(img)
+        # Com alinhamento à direita, conteúdo termina perto da borda direita (> 75% do frame)
+        self.assertGreater(col_max, self.VW * 0.75)
+
+
+if __name__ == '__main__':
+    unittest.main()
