@@ -9086,7 +9086,15 @@ if _has_media_ready:
                 detect_scene_changes_in_range
             )
             patch_streamlit_drawable_canvas_compat()
-            from streamlit_drawable_canvas import st_canvas
+            try:
+                from streamlit_drawable_canvas import st_canvas, CanvasResult
+            except Exception:
+                st_canvas = None
+                from dataclasses import dataclass
+                @dataclass
+                class CanvasResult:
+                    image_data: object = None
+                    json_data: dict = None
             from PIL import Image
 
             with st.expander("🎬 Enquadramento Multicâmera Interativo (2 a 3 Câmeras por Mouse)", expanded=True):
@@ -9467,6 +9475,43 @@ if _has_media_ready:
                                     st.toast("✨ Caixas alinhadas perfeitamente às bordas do cenário!")
                                     st.rerun()
 
+                            col_pre2, col_pre3 = st.columns(2)
+                            with col_pre2:
+                                if st.button("👥 Enquadrar 2 Câmeras (Esquerda + Direita)", key=f"btn_pre2_{sel_sc_idx}", use_container_width=True, help="Divide o frame ao meio em 2 câmeras proporcionais"):
+                                    half_w = (f_w // 2) & ~1
+                                    cur_scene["boxes"] = [
+                                        {"x": 0, "y": 0, "w": half_w, "h": f_h, "order": 0, "label": "Câmera 1 (Esquerda)"},
+                                        {"x": half_w, "y": 0, "w": half_w, "h": f_h, "order": 1, "label": "Câmera 2 (Direita)"}
+                                    ]
+                                    st.session_state["multicam_scenes"] = mc_scenes
+                                    st.session_state[canvas_rev_key] = st.session_state.get(canvas_rev_key, 0) + 1
+                                    canvas_rev = st.session_state[canvas_rev_key]
+                                    canvas_w_eval = min(1080, f_w) if hide_player else 680
+                                    canvas_h_eval = int(round(canvas_w_eval * float(f_h) / float(f_w)))
+                                    st.session_state[f"mc_init_dw_{sel_sc_idx}_{ref_ts_s:.1f}_{canvas_rev}"] = boxes_to_fabric_json(
+                                        cur_scene["boxes"], canvas_w=canvas_w_eval, canvas_h=canvas_h_eval, video_w=f_w, video_h=f_h
+                                    )
+                                    st.toast("👥 2 Câmeras configuradas com sucesso!")
+                                    st.rerun()
+                            with col_pre3:
+                                if st.button("👥 Enquadrar 3 Câmeras (Esquerda + Centro + Direita)", key=f"btn_pre3_{sel_sc_idx}", use_container_width=True, help="Divide o frame em 3 câmeras proporcionais"):
+                                    third_w = (f_w // 3) & ~1
+                                    cur_scene["boxes"] = [
+                                        {"x": 0, "y": 0, "w": third_w, "h": f_h, "order": 0, "label": "Câmera 1 (Esquerda)"},
+                                        {"x": third_w, "y": 0, "w": third_w, "h": f_h, "order": 1, "label": "Câmera 2 (Centro)"},
+                                        {"x": third_w * 2, "y": 0, "w": f_w - (third_w * 2), "h": f_h, "order": 2, "label": "Câmera 3 (Direita)"}
+                                    ]
+                                    st.session_state["multicam_scenes"] = mc_scenes
+                                    st.session_state[canvas_rev_key] = st.session_state.get(canvas_rev_key, 0) + 1
+                                    canvas_rev = st.session_state[canvas_rev_key]
+                                    canvas_w_eval = min(1080, f_w) if hide_player else 680
+                                    canvas_h_eval = int(round(canvas_w_eval * float(f_h) / float(f_w)))
+                                    st.session_state[f"mc_init_dw_{sel_sc_idx}_{ref_ts_s:.1f}_{canvas_rev}"] = boxes_to_fabric_json(
+                                        cur_scene["boxes"], canvas_w=canvas_w_eval, canvas_h=canvas_h_eval, video_w=f_w, video_h=f_h
+                                    )
+                                    st.toast("👥 3 Câmeras configuradas com sucesso!")
+                                    st.rerun()
+
                             col_tip, col_badge = st.columns([3.2, 0.8])
                             with col_tip:
                                 if "Desenhar" in selected_action:
@@ -9496,7 +9541,7 @@ if _has_media_ready:
                             )
                         st.session_state[prev_tool_key] = selected_action
 
-                        drawing_mode = "rect"  # Mover/Selecionar usa o toggle de edição da toolbar (v0.13+)
+                        drawing_mode = "rect" if "Desenhar" in selected_action else "transform"
 
                         # Obtém initial_drawing estável para a revisão ativa
                         # Crítico: NÃO recalcular initial_drawing a cada interação do mouse para não disparar loop no Fabric.js!
@@ -9516,18 +9561,45 @@ if _has_media_ready:
                         if hide_player:
                             canvas_w = min(1080, f_w)
                             canvas_h = int(round(canvas_w * float(f_h) / float(f_w)))
-                            canvas_result = st_canvas(
-                                fill_color="rgba(255, 215, 0, 0.20)",
-                                stroke_width=3,
-                                stroke_color="#FFD700",
-                                background_image=pil_img,
-                                update_streamlit=True,
-                                height=canvas_h,
-                                width=canvas_w,
-                                drawing_mode=drawing_mode,
-                                initial_drawing=stable_initial_drawing,
-                                key=f"mc_canvas_{sel_sc_idx}_{ref_ts_s:.1f}_exp_r{canvas_rev}"
-                            )
+                            canvas_result = None
+
+                            if st_canvas is not None:
+
+                                try:
+
+                                    canvas_result = st_canvas(
+
+                                        fill_color="rgba(255, 215, 0, 0.20)",
+
+                                        stroke_width=3,
+
+                                        stroke_color="#FFD700",
+
+                                        background_image=pil_img,
+
+                                        update_streamlit=True,
+
+                                        height=canvas_h,
+
+                                        width=canvas_w,
+
+                                        drawing_mode=drawing_mode,
+
+                                        initial_drawing=stable_initial_drawing,
+
+                                        key=f"mc_canvas_{sel_sc_idx}_{ref_ts_s:.1f}_exp_r{canvas_rev}",
+
+                                        display_toolbar=True
+
+                                    )
+
+                                except Exception:
+
+                                    canvas_result = None
+
+                            if canvas_result is None or not hasattr(canvas_result, "json_data") or canvas_result is CanvasResult:
+
+                                canvas_result = CanvasResult(image_data=None, json_data={"version": "4.4.0", "objects": []})
 
                             st.markdown("###### ⏱️ Sincronizar Tempos com esta Cena:")
                             col_nav_t, col_nav_b, col_btn_s, col_btn_e = st.columns([1.5, 1, 1, 1])
@@ -9576,18 +9648,45 @@ if _has_media_ready:
                             canvas_h = int(round(canvas_w * float(f_h) / float(f_w)))
                             col_cv, col_pl = st.columns([1.15, 0.85])
                             with col_cv:
-                                canvas_result = st_canvas(
-                                    fill_color="rgba(255, 215, 0, 0.20)",
-                                    stroke_width=3,
-                                    stroke_color="#FFD700",
-                                    background_image=pil_img,
-                                    update_streamlit=True,
-                                    height=canvas_h,
-                                    width=canvas_w,
-                                    drawing_mode=drawing_mode,
-                                    initial_drawing=stable_initial_drawing,
-                                    key=f"mc_canvas_{sel_sc_idx}_{ref_ts_s:.1f}_r{canvas_rev}"
-                                )
+                                canvas_result = None
+
+                                if st_canvas is not None:
+
+                                    try:
+
+                                        canvas_result = st_canvas(
+
+                                            fill_color="rgba(255, 215, 0, 0.20)",
+
+                                            stroke_width=3,
+
+                                            stroke_color="#FFD700",
+
+                                            background_image=pil_img,
+
+                                            update_streamlit=True,
+
+                                            height=canvas_h,
+
+                                            width=canvas_w,
+
+                                            drawing_mode=drawing_mode,
+
+                                            initial_drawing=stable_initial_drawing,
+
+                                            key=f"mc_canvas_{sel_sc_idx}_{ref_ts_s:.1f}_r{canvas_rev}",
+
+                                            display_toolbar=True
+
+                                        )
+
+                                    except Exception:
+
+                                        canvas_result = None
+
+                                if canvas_result is None or not hasattr(canvas_result, "json_data") or canvas_result is CanvasResult:
+
+                                    canvas_result = CanvasResult(image_data=None, json_data={"version": "4.4.0", "objects": []})
                             with col_pl:
                                 st.markdown("##### 📺 Player do Vídeo Original:")
                                 st.caption("Reproduza o vídeo, localize os momentos de troca de orador/câmera e configure os tempos da cena:")
@@ -11129,6 +11228,18 @@ if _has_media_ready:
     
             _model_ind = ollama_model if 'ollama_model' in locals() and ollama_model else "llama3"
     
+            # Inicializa chaves de texto no session_state para evitar conflito de default value com Streamlit policies
+            if "input_cut_title" not in st.session_state:
+                st.session_state["input_cut_title"] = "Corte Selecionado"
+            if "input_cut_headline" not in st.session_state:
+                st.session_state["input_cut_headline"] = st.session_state.get("input_cut_title", "Corte Selecionado")
+            if "input_cut_desc" not in st.session_state:
+                st.session_state["input_cut_desc"] = "Confira a declaração e participe do debate nos comentários!"
+            if "input_cut_hashtags" not in st.session_state:
+                st.session_state["input_cut_hashtags"] = "#shorts #viral #cortes #reels"
+            if "input_cut_tags_seo" not in st.session_state:
+                st.session_state["input_cut_tags_seo"] = "cortes, viral, shorts, podcast, debate"
+    
             # ── Linha 1: Título + Headline ─────────────────────────────────────────
             col_t1, col_t2 = st.columns([1.4, 1.0])
             with col_t1:
@@ -11136,7 +11247,6 @@ if _has_media_ready:
                 with col_t1_field:
                     cut_title_val = st.text_input(
                         f"🏷️ Título do Corte (YouTube/Redes) {badge_title}:",
-                        value=st.session_state.get("input_cut_title", "Corte Selecionado"),
                         key="input_cut_title"
                     )
                 with col_t1_btn:
@@ -11155,7 +11265,6 @@ if _has_media_ready:
                 with col_t2_field:
                     cut_headline_val = st.text_input(
                         f"📌 Headline de Topo 9:16 (Curta) {badge_title}:",
-                        value=st.session_state.get("input_cut_headline", st.session_state.get("input_cut_title", "Corte Selecionado")),
                         key="input_cut_headline",
                         help="Frase de gancho curta e completa (máx 35-40 caracteres) fixada na caixa magnética no topo do vídeo."
                     )
@@ -11192,7 +11301,6 @@ if _has_media_ready:
                 with col_d_field:
                     cut_desc_val = st.text_area(
                         f"📝 Descrição / Legenda {badge_desc}:",
-                        value=st.session_state.get("input_cut_desc", "Confira a declaração e participe do debate nos comentários!"),
                         height=110,
                         key="input_cut_desc"
                     )
@@ -11211,7 +11319,6 @@ if _has_media_ready:
                 with col_h_field:
                     cut_hashtags_val = st.text_input(
                         f"🏷️ Hashtags {badge_tags}:",
-                        value=st.session_state.get("input_cut_hashtags", "#shorts #viral #cortes #reels"),
                         key="input_cut_hashtags"
                     )
                 with col_h_btn:
@@ -11228,7 +11335,6 @@ if _has_media_ready:
                 with col_s_field:
                     cut_tags_seo_val = st.text_input(
                         f"🔍 Tags SEO {badge_tags}:",
-                        value=st.session_state.get("input_cut_tags_seo", "cortes, viral, shorts, podcast, debate"),
                         key="input_cut_tags_seo"
                     )
                 with col_s_btn:

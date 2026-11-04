@@ -22,38 +22,64 @@ FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
 def patch_streamlit_drawable_canvas_compat():
     """
-    Garante compatibilidade com streamlit-drawable-canvas >= 0.13.0.
-    A partir da v0.13, o componente usa st.components.v2 e gerencia a background_image
-    internamente via data-URL — não é mais necessário patchear image_to_url.
-    Este patch apenas protege a chamada de st_canvas contra falhas de desserialização,
-    adaptando o CanvasResult à nova assinatura (json_data, image_data_url, return_image_data).
+    Garante compatibilidade robusta entre streamlit-drawable-canvas e Streamlit moderno (1.60+).
+    1. Nas versões recentes do Streamlit, `image_to_url` foi movido para
+       `streamlit.elements.lib.image_utils` e espera `LayoutConfig`.
+       Este patch fornece uma ponte resiliente com fallback para data-URL JPEG comprimido (75%),
+       evitando transferências pesadas de PNG e sobrecarga de heap no WebSocket/Protobuf.
+    2. Protege a chamada de st_canvas contra retornos de classe pura (<class CanvasResult>),
+       None ou exceções de desserialização, sempre retornando uma instância válida de CanvasResult.
     """
     try:
+        import base64
+        import io
+        from PIL import Image
+        import streamlit.elements.image as st_image
+        import streamlit.elements.lib.image_utils as iu
+        from streamlit.elements.lib.layout_utils import LayoutConfig
+
+        if not hasattr(st_image, "image_to_url") or getattr(st_image, "_is_multicam_patched", False) is False:
+            def _compat_image_to_url(image, width_or_layout=None, clamp=False, channels="RGB", output_format="PNG", image_id=""):
+                if isinstance(width_or_layout, (int, float)):
+                    layout_config = LayoutConfig(width=int(width_or_layout))
+                elif isinstance(width_or_layout, LayoutConfig):
+                    layout_config = width_or_layout
+                else:
+                    layout_config = LayoutConfig()
+
+                url = ""
+                try:
+                    url = iu.image_to_url(image, layout_config, clamp, channels, output_format, image_id)
+                except Exception:
+                    pass
+
+                if not url:
+                    if isinstance(image, Image.Image):
+                        buf = io.BytesIO()
+                        img_to_save = image.convert("RGB") if image.mode in ("RGBA", "LA", "P") else image
+                        img_to_save.save(buf, format="JPEG", quality=75)
+                        b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                        return f"data:image/jpeg;base64,{b64}"
+                return url
+
+            st_image.image_to_url = _compat_image_to_url
+            st_image._is_multicam_patched = True
+
         import streamlit_drawable_canvas as sdc
         if not getattr(sdc, "_is_multicam_canvas_patched", False):
             orig_st_canvas = sdc.st_canvas
 
             def _safe_st_canvas(*args, **kwargs):
-                # Remover parâmetros que foram removidos na v0.13
-                kwargs.pop("display_toolbar", None)
-                # transform foi renomeado para edit na v0.10 e removido na v0.12
+                # Protege contra transform depreciado
                 if kwargs.get("drawing_mode") in ("transform", "edit"):
                     kwargs["drawing_mode"] = "rect"
                 try:
                     res = orig_st_canvas(*args, **kwargs)
-                    if res is None:
-                        return sdc.CanvasResult(
-                            json_data={"version": "4.4.0", "objects": []},
-                            image_data_url=None,
-                            return_image_data=False,
-                        )
+                    if res is sdc.CanvasResult or res is None:
+                        return sdc.CanvasResult(image_data=None, json_data={"version": "4.4.0", "objects": []})
                     return res
                 except Exception:
-                    return sdc.CanvasResult(
-                        json_data={"version": "4.4.0", "objects": []},
-                        image_data_url=None,
-                        return_image_data=False,
-                    )
+                    return sdc.CanvasResult(image_data=None, json_data={"version": "4.4.0", "objects": []})
 
             sdc.st_canvas = _safe_st_canvas
             sdc._is_multicam_canvas_patched = True
