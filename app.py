@@ -9496,7 +9496,7 @@ if _has_media_ready:
                             )
                         st.session_state[prev_tool_key] = selected_action
 
-                        drawing_mode = "rect" if "Desenhar" in selected_action else "transform"
+                        drawing_mode = "rect"  # Mover/Selecionar usa o toggle de edição da toolbar (v0.13+)
 
                         # Obtém initial_drawing estável para a revisão ativa
                         # Crítico: NÃO recalcular initial_drawing a cada interação do mouse para não disparar loop no Fabric.js!
@@ -9526,8 +9526,7 @@ if _has_media_ready:
                                 width=canvas_w,
                                 drawing_mode=drawing_mode,
                                 initial_drawing=stable_initial_drawing,
-                                key=f"mc_canvas_{sel_sc_idx}_{ref_ts_s:.1f}_exp_r{canvas_rev}",
-                                display_toolbar=True
+                                key=f"mc_canvas_{sel_sc_idx}_{ref_ts_s:.1f}_exp_r{canvas_rev}"
                             )
 
                             st.markdown("###### ⏱️ Sincronizar Tempos com esta Cena:")
@@ -9587,8 +9586,7 @@ if _has_media_ready:
                                     width=canvas_w,
                                     drawing_mode=drawing_mode,
                                     initial_drawing=stable_initial_drawing,
-                                    key=f"mc_canvas_{sel_sc_idx}_{ref_ts_s:.1f}_r{canvas_rev}",
-                                    display_toolbar=True
+                                    key=f"mc_canvas_{sel_sc_idx}_{ref_ts_s:.1f}_r{canvas_rev}"
                                 )
                             with col_pl:
                                 st.markdown("##### 📺 Player do Vídeo Original:")

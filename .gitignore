@@ -15,6 +15,7 @@ data/
 # Arquivos temporários
 temp_audio.*
 *.tmp
+*TEMP_MPY*
 
 # Streamlit
 .streamlit/secrets.toml
