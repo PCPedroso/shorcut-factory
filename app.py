@@ -8552,6 +8552,56 @@ if _has_media_ready:
                 unsafe_allow_html=True
             )
 
+        # ── Banner e Navegador de Cortes do Roteiro JSON ──────────────────
+        _sec3_json_parsed = st.session_state.get("_json_cuts_parsed")
+        if st.session_state.get("_json_import_active") and _sec3_json_parsed and _sec3_json_parsed.get("cortes"):
+            _j_cuts_list = _sec3_json_parsed["cortes"]
+            _cur_cut_idx = max(0, min(st.session_state.get("_json_import_cut_idx", 0), len(_j_cuts_list) - 1))
+            _cur_j_cut = _j_cuts_list[_cur_cut_idx]
+
+            _nav_col1, _nav_col2, _nav_col3 = st.columns([1.2, 3.6, 1.2])
+            with _nav_col1:
+                if st.button("◀ Corte Anterior", key="btn_prev_json_cut_s3", disabled=(_cur_cut_idx == 0), use_container_width=True):
+                    _next_i = _cur_cut_idx - 1
+                    st.session_state["_json_import_cut_idx"] = _next_i
+                    _nc = _j_cuts_list[_next_i]
+                    st.session_state["_pending_start_time"] = _nc.get("start_time")
+                    st.session_state["_pending_end_time"] = _nc.get("end_time")
+                    st.session_state["_pending_cut_title"] = _nc.get("title", "")
+                    st.session_state["_pending_cut_headline"] = _nc.get("headline", "")
+                    st.session_state["_pending_cut_desc"] = _nc.get("description", "")
+                    st.session_state["_pending_cut_hashtags"] = " ".join(_nc.get("hashtags", []))
+                    st.session_state.final_corte_title = _nc.get("title", "")
+                    st.session_state["meta_generated"] = False
+                    st.rerun()
+
+            with _nav_col2:
+                _rank_tag = f"🏆 #{_cur_j_cut.get('ranking_posicao')} " if _cur_j_cut.get("ranking_posicao") else ""
+                _nota_tag = f"🔥 {_cur_j_cut.get('potencial_nota')}/10" if _cur_j_cut.get("potencial_nota") is not None else ""
+                st.markdown(
+                    f'<div style="background:linear-gradient(135deg,rgba(16,185,129,0.18),rgba(6,182,212,0.12));border:1.5px solid rgba(16,185,129,0.4);border-radius:8px;padding:8px 14px;text-align:center;">'
+                    f'📋 <strong style="color:#34d399;">Corte do JSON ({_cur_cut_idx + 1} de {len(_j_cuts_list)}):</strong> '
+                    f'<strong>[{_cur_j_cut.get("id")}] {_rank_tag}{_cur_j_cut.get("start_time")} → {_cur_j_cut.get("end_time")}</strong> {_nota_tag}<br>'
+                    f'<span style="font-size:13px;color:#e2e8f0;">{_cur_j_cut.get("title", "")[:75]}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+            with _nav_col3:
+                if st.button("Próximo Corte ▶", key="btn_next_json_cut_s3", disabled=(_cur_cut_idx >= len(_j_cuts_list) - 1), use_container_width=True):
+                    _next_i = _cur_cut_idx + 1
+                    st.session_state["_json_import_cut_idx"] = _next_i
+                    _nc = _j_cuts_list[_next_i]
+                    st.session_state["_pending_start_time"] = _nc.get("start_time")
+                    st.session_state["_pending_end_time"] = _nc.get("end_time")
+                    st.session_state["_pending_cut_title"] = _nc.get("title", "")
+                    st.session_state["_pending_cut_headline"] = _nc.get("headline", "")
+                    st.session_state["_pending_cut_desc"] = _nc.get("description", "")
+                    st.session_state["_pending_cut_hashtags"] = " ".join(_nc.get("hashtags", []))
+                    st.session_state.final_corte_title = _nc.get("title", "")
+                    st.session_state["meta_generated"] = False
+                    st.rerun()
+
         if 'cut_ready_banner' in st.session_state and st.session_state.cut_ready_banner:
             st.success(st.session_state.cut_ready_banner)
         
@@ -11346,6 +11396,11 @@ if _has_media_ready:
             st.session_state["input_cut_desc"] = existing_cut.get("description", "")
             st.session_state["input_cut_hashtags"] = " ".join(existing_cut.get("hashtags", []))
             st.session_state["input_cut_tags_seo"] = existing_cut.get("tags_seo", "")
+            # ── Campos extras do JSON externo (se disponíveis no catálogo) ───
+            if existing_cut.get("headline"):
+                st.session_state["input_cut_headline"] = existing_cut["headline"]
+            if existing_cut.get("alt_titles"):
+                st.session_state["meta_alt_titles"] = existing_cut["alt_titles"]
             st.session_state["meta_generated"] = True
         elif "input_cut_title" not in st.session_state or not st.session_state["input_cut_title"]:
             if st.session_state.get("final_corte_title"):
@@ -11369,6 +11424,60 @@ if _has_media_ready:
             st.session_state["meta_alt_titles"] = st.session_state.pop("_pending_alt_titles")
     
         with st.expander("🚀 Kit de Publicação Viral (Título, Descrição & Tags para Redes)", expanded=True):
+            # ── Painel de Dados do Roteiro JSON (exibido só quando cut veio de JSON) ──
+            if existing_cut and existing_cut.get("json_cut_id"):
+                _jd = existing_cut
+                _nota_jd = _jd.get("potencial_viralizacao", {}) if isinstance(_jd.get("potencial_viralizacao"), dict) else {}
+                _nota_num = _nota_jd.get("nota") if _nota_jd else _jd.get("potencial_nota")
+                _risco = _jd.get("risco_contexto", "")
+                _dep_vis = _jd.get("depende_visual", False)
+                _rank_pos = _jd.get("ranking_posicao")
+                _gancho = _jd.get("headline", "") or _jd.get("gancho", "")
+                _obs_list = _jd.get("observacoes", [])
+                _anchors = _jd.get("textos_ancora", [])
+                _enquete = _jd.get("enquete", {}) if isinstance(_jd.get("enquete"), dict) else {}
+
+                with st.expander("📋 Dados do Roteiro JSON", expanded=False):
+                    _c1_jd, _c2_jd, _c3_jd, _c4_jd = st.columns(4)
+                    with _c1_jd:
+                        st.metric("🏆 Ranking", f"#{_rank_pos}" if _rank_pos else "—")
+                    with _c2_jd:
+                        st.metric("🔥 Viral", f"{_nota_num}/10" if _nota_num is not None else "—")
+                    with _c3_jd:
+                        _risco_label = {"alto": "🔴 Alto", "medio": "🟡 Médio", "baixo": "🟢 Baixo"}.get(str(_risco).lower(), _risco or "—")
+                        st.metric("⚠️ Risco", _risco_label)
+                    with _c4_jd:
+                        st.metric("👁️ Visual", "✅ Sim" if _dep_vis else "🔲 Não")
+
+                    if _gancho:
+                        st.markdown(f"**🎯 Gancho / Headline:** {_gancho}")
+
+                    if _anchors:
+                        st.markdown("**⚓ Textos Âncora:**")
+                        for _anc in _anchors:
+                            if isinstance(_anc, dict):
+                                _anc_tipo = _anc.get("tipo", "")
+                                _anc_txt = _anc.get("texto", "")
+                                st.markdown(f"- `{_anc_tipo}` → {_anc_txt}")
+                            elif isinstance(_anc, str):
+                                st.markdown(f"- {_anc}")
+
+                    if _enquete and _enquete.get("texto"):
+                        st.markdown(f"**📊 Enquete:** {_enquete['texto']}")
+                        _opts = _enquete.get("opcoes", [])
+                        if _opts:
+                            st.markdown("  " + " | ".join(f"`{o}`" for o in _opts))
+
+                    if _obs_list:
+                        st.markdown("**📝 Observações editoriais:**")
+                        for _ob in _obs_list:
+                            if isinstance(_ob, dict):
+                                _ob_tipo = _ob.get("tipo", "")
+                                _ob_txt = _ob.get("texto", "")
+                                st.markdown(f"- **{_ob_tipo}:** {_ob_txt}")
+                            elif isinstance(_ob, str):
+                                st.markdown(f"- {_ob}")
+
             # ── Campo de Orientação Editorial / Tom e Assunto para IA ────────────
             user_guidance_val = st.text_input(
                 "🎯 Guia Editorial para IA (Tom, Assunto e Foco do Corte - Opcional):",
@@ -13628,6 +13737,57 @@ if _has_media_ready:
                             st.markdown(f"**Legenda:**\n```\n{cut_item.get('description', '')}\n```")
                             st.markdown(f"**Hashtags:** `{' '.join(cut_item.get('hashtags', []))}`")
                             st.markdown(f"**Tags SEO:** `{cut_item.get('tags_seo', '')}`")
+
+                            # ── Dados extras do JSON externo (se disponíveis) ───────
+                            if cut_item.get("json_cut_id"):
+                                st.divider()
+                                _gi_nota_jd = cut_item.get("potencial_viralizacao", {}) if isinstance(cut_item.get("potencial_viralizacao"), dict) else {}
+                                _gi_nota = _gi_nota_jd.get("nota") if _gi_nota_jd else cut_item.get("potencial_nota")
+                                _gi_risco = cut_item.get("risco_contexto", "")
+                                _gi_dep_v = cut_item.get("depende_visual", False)
+                                _gi_rank = cut_item.get("ranking_posicao")
+                                _gi_gancho = cut_item.get("headline", "") or cut_item.get("gancho", "")
+                                _gi_obs = cut_item.get("observacoes", [])
+                                _gi_anchors = cut_item.get("textos_ancora", [])
+                                _gi_enquete = cut_item.get("enquete", {}) if isinstance(cut_item.get("enquete"), dict) else {}
+                                _gi_alts = cut_item.get("alt_titles", [])
+
+                                st.markdown("**📋 Dados do Roteiro JSON:**")
+                                _gi_c1, _gi_c2, _gi_c3, _gi_c4 = st.columns(4)
+                                with _gi_c1:
+                                    st.metric("🏆 Ranking", f"#{_gi_rank}" if _gi_rank else "—")
+                                with _gi_c2:
+                                    st.metric("🔥 Viral", f"{_gi_nota}/10" if _gi_nota is not None else "—")
+                                with _gi_c3:
+                                    _gi_risco_label = {"alto": "🔴 Alto", "medio": "🟡 Médio", "baixo": "🟢 Baixo"}.get(str(_gi_risco).lower(), _gi_risco or "—")
+                                    st.metric("⚠️ Risco", _gi_risco_label)
+                                with _gi_c4:
+                                    st.metric("👁️ Visual", "✅ Sim" if _gi_dep_v else "🔲 Não")
+
+                                if _gi_gancho:
+                                    st.markdown(f"**🎯 Gancho:** {_gi_gancho}")
+
+                                if _gi_alts:
+                                    st.markdown("**🏷️ Títulos Alternativos:** " + " | ".join(f"`{t}`" for t in _gi_alts[:3]))
+
+                                if _gi_anchors:
+                                    st.markdown("**⚓ Textos Âncora:**")
+                                    for _gi_anc in _gi_anchors:
+                                        if isinstance(_gi_anc, dict):
+                                            st.markdown(f"- `{_gi_anc.get('tipo','')}` → {_gi_anc.get('texto','')}")
+                                        elif isinstance(_gi_anc, str):
+                                            st.markdown(f"- {_gi_anc}")
+
+                                if _gi_enquete and _gi_enquete.get("texto"):
+                                    _gi_opts = _gi_enquete.get("opcoes", [])
+                                    _gi_opts_str = " | ".join(f"`{o}`" for o in _gi_opts) if _gi_opts else ""
+                                    st.markdown(f"**📊 Enquete:** {_gi_enquete['texto']}" + (f"  ({_gi_opts_str})" if _gi_opts_str else ""))
+
+                                if _gi_obs:
+                                    st.markdown("**📝 Observações:** " + " · ".join(
+                                        (f"**{o.get('tipo','')}:** {o.get('texto','')}" if isinstance(o, dict) else str(o))
+                                        for o in _gi_obs
+                                    ))
     
                         st.divider()
 
