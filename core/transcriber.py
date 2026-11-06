@@ -670,5 +670,107 @@ def append_incremental_transcript(existing_transcript_path: str, new_segments: l
     }
 
 
+# ---------------------------------------------------------------------------
+# Funções de exportação de transcrição (TXT / SRT / VTT / JSON)
+# ---------------------------------------------------------------------------
 
+def _fmt_srt_timestamp(seconds: float) -> str:
+    """Converte segundos (float) para o formato SRT: HH:MM:SS,mmm"""
+    seconds = max(0.0, float(seconds))
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    ms = int(round((seconds - int(seconds)) * 1000))
+    if ms >= 1000:
+        ms = 999
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def _fmt_vtt_timestamp(seconds: float) -> str:
+    """Converte segundos (float) para o formato WebVTT: HH:MM:SS.mmm"""
+    return _fmt_srt_timestamp(seconds).replace(",", ".")
+
+
+def segments_to_txt(segments: list) -> str:
+    """
+    Converte uma lista de segmentos de transcrição para texto puro,
+    sem timestamps. Cada segmento é separado por um espaço.
+
+    Args:
+        segments: lista de dicts com chaves 'start', 'end', 'text'
+
+    Returns:
+        String com o texto puro da transcrição.
+    """
+    if not segments:
+        return ""
+    return " ".join(
+        str(seg.get("text", "")).strip()
+        for seg in segments
+        if str(seg.get("text", "")).strip()
+    )
+
+
+def segments_to_srt(segments: list) -> str:
+    """
+    Converte uma lista de segmentos de transcrição para o formato SRT (SubRip).
+
+    Formato de cada bloco:
+        1
+        00:00:01,500 --> 00:00:03,200
+        Texto do segmento
+
+    Args:
+        segments: lista de dicts com chaves 'start', 'end', 'text'
+
+    Returns:
+        String no formato SRT completo, pronta para salvar como .srt
+    """
+    if not segments:
+        return ""
+    lines = []
+    idx = 1
+    for seg in segments:
+        text = str(seg.get("text", "")).strip()
+        if not text:
+            continue
+        start_ts = _fmt_srt_timestamp(seg.get("start", 0.0))
+        end_ts = _fmt_srt_timestamp(seg.get("end", 0.0))
+        lines.append(f"{idx}")
+        lines.append(f"{start_ts} --> {end_ts}")
+        lines.append(text)
+        lines.append("")
+        idx += 1
+    return "\n".join(lines)
+
+
+def segments_to_vtt(segments: list) -> str:
+    """
+    Converte uma lista de segmentos de transcrição para o formato WebVTT (W3C).
+
+    Formato:
+        WEBVTT
+
+        00:00:01.500 --> 00:00:03.200
+        Texto do segmento
+
+    Args:
+        segments: lista de dicts com chaves 'start', 'end', 'text'
+
+    Returns:
+        String no formato VTT completo, pronta para salvar como .vtt
+    """
+    if not segments:
+        return "WEBVTT\n"
+    lines = ["WEBVTT", ""]
+    for seg in segments:
+        text = str(seg.get("text", "")).strip()
+        if not text:
+            continue
+        start_ts = _fmt_vtt_timestamp(seg.get("start", 0.0))
+        end_ts = _fmt_vtt_timestamp(seg.get("end", 0.0))
+        lines.append(f"{start_ts} --> {end_ts}")
+        lines.append(text)
+        lines.append("")
+    return "\n".join(lines)
 
