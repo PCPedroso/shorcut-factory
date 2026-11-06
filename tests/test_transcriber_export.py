@@ -160,3 +160,4 @@ class TestSegmentsToVtt:
         result = segments_to_vtt(MIXED_EMPTY)
         ts_lines = [l for l in result.split("\n") if "-->" in l]
         assert len(ts_lines) == 2
+

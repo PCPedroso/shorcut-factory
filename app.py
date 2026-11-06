@@ -8582,7 +8582,8 @@ if _has_media_ready:
                     f'<div style="background:linear-gradient(135deg,rgba(16,185,129,0.18),rgba(6,182,212,0.12));border:1.5px solid rgba(16,185,129,0.4);border-radius:8px;padding:8px 14px;text-align:center;">'
                     f'📋 <strong style="color:#34d399;">Corte do JSON ({_cur_cut_idx + 1} de {len(_j_cuts_list)}):</strong> '
                     f'<strong>[{_cur_j_cut.get("id")}] {_rank_tag}{_cur_j_cut.get("start_time")} → {_cur_j_cut.get("end_time")}</strong> {_nota_tag}<br>'
-                    f'<span style="font-size:13px;color:#e2e8f0;">{_cur_j_cut.get("title", "")[:75]}</span>'
+                    f'<span style="font-size:13px;color:#e2e8f0;">{_cur_j_cut.get("title", "")[:75]}</span><br>'
+                    f'<span style="font-size:11.5px;color:#a7f3d0;">💡 Você pode cortar individualmente ou clicar em <b>⚡ Gerar Todos os Cortes do JSON em Sequência</b> ao final da página.</span>'
                     f'</div>',
                     unsafe_allow_html=True
                 )
@@ -12566,6 +12567,77 @@ if _has_media_ready:
                             st.rerun()
 
         st.markdown("")
+
+        # ── Roteiro JSON — Processamento em Massa dos Cortes ──────────────
+        _sec3_json_parsed = st.session_state.get("_json_cuts_parsed")
+        _has_json_cuts = bool(st.session_state.get("_json_import_active") and _sec3_json_parsed and _sec3_json_parsed.get("cortes"))
+        _j_cuts_all = _sec3_json_parsed["cortes"] if _has_json_cuts else []
+
+        _selected_json_cuts = []
+        _trigger_json_batch = False
+
+        if _has_json_cuts and _j_cuts_all:
+            st.markdown("---")
+            with st.expander(
+                f"📋 Roteiro JSON — {len(_j_cuts_all)} cortes disponíveis para processamento em sequência",
+                expanded=st.session_state.get("_json_cuts_expander_open", True)
+            ):
+                st.markdown(
+                    f"<div style='background:linear-gradient(135deg,rgba(16,185,129,0.15),rgba(6,182,212,0.1));border:1px solid rgba(16,185,129,0.35);border-radius:10px;padding:12px 16px;margin-bottom:12px;'>"
+                    f"<b>⚡ Geração em Sequência com as Configurações Atuais da Seção 3:</b><br>"
+                    f"<span style='font-size:13px;color:#cbd5e1;'>Todos os cortes selecionados serão gerados no formato <b>{selected_aspect}</b>, "
+                    f"aplicando as legendas, headlines, enquadramentos e trilhas sonoras configuradas nesta aba.<br>"
+                    f"Cada corte receberá automaticamente seu respectivo <b>título, gancho viral (headline) e metadados próprios do JSON</b>.</span>"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
+
+                _c_sel_all, _c_sel_none = st.columns([1.2, 1.2])
+                with _c_sel_all:
+                    if st.button("☑️ Selecionar Todos", key="btn_json_cuts_select_all", use_container_width=True):
+                        for _jc in _j_cuts_all:
+                            st.session_state[f"_json_sel_{_jc.get('id', '')}_{_jc.get('start_time')}"] = True
+                        st.rerun()
+                with _c_sel_none:
+                    if st.button("🔲 Desmarcar Todos", key="btn_json_cuts_desel_all", use_container_width=True):
+                        for _jc in _j_cuts_all:
+                            st.session_state[f"_json_sel_{_jc.get('id', '')}_{_jc.get('start_time')}"] = False
+                        st.rerun()
+
+                st.caption("**Selecione os cortes do JSON que deseja processar em sequência:**")
+                _cols_jc = 3
+                _rows_jc = [_j_cuts_all[i:i+_cols_jc] for i in range(0, len(_j_cuts_all), _cols_jc)]
+                for _r_jc in _rows_jc:
+                    _row_cols_jc = st.columns(len(_r_jc))
+                    for _ci_jc, _jc in enumerate(_r_jc):
+                        with _row_cols_jc[_ci_jc]:
+                            _k_jc = f"_json_sel_{_jc.get('id', '')}_{_jc.get('start_time')}"
+                            _def_jc = st.session_state.get(_k_jc, True)
+                            _rank_lbl = f"#{_jc.get('ranking_posicao')} " if _jc.get("ranking_posicao") else ""
+                            _nota_lbl = f"🔥{_jc.get('potencial_nota')}/10" if _jc.get("potencial_nota") is not None else ""
+                            _jc_dur = _jc.get("duracao_formatada") or ""
+                            _jc_is_sel = st.checkbox(
+                                f"**[{_jc.get('id')}]** {_rank_lbl}**{_jc.get('start_time')} → {_jc.get('end_time')}** ({_jc_dur}) {_nota_lbl}",
+                                value=_def_jc,
+                                key=_k_jc
+                            )
+                            if _jc_is_sel:
+                                _selected_json_cuts.append(_jc)
+                            st.caption(f"_{_jc.get('title', '')[:55]}_")
+
+                st.markdown("")
+                _n_jc_sel = len(_selected_json_cuts)
+                if _n_jc_sel == 0:
+                    st.info("☝️ Selecione ao menos um corte do JSON acima para habilitar a geração em lote.")
+                else:
+                    if st.button(
+                        f"⚡ Gerar {_n_jc_sel} Cortes Selecionados em Sequência (com as Configurações Atuais)",
+                        key="btn_trigger_json_batch_expander",
+                        type="primary",
+                        use_container_width=True
+                    ):
+                        _trigger_json_batch = True
+
         preserve_folder_transcript = True
         existing_folder_path = None
         if existing_inst and existing_inst.get("folder_path") and os.path.isdir(existing_inst["folder_path"]):
@@ -12602,7 +12674,256 @@ if _has_media_ready:
                     st.caption(f"🗣️ *Transcrição preservada da pasta:* \"{existing_trans_preview}...\"")
 
         render_button_label = "🔄 Forçar Re-renderização no Formato Escolhido" if existing_inst else "✂️ Gerar Corte no Formato Escolhido"
-        if st.button(render_button_label, type="primary" if not existing_inst else "secondary", use_container_width=True):
+        
+        btn_render_single = False
+        btn_render_all_json_bottom = False
+
+        if _has_json_cuts and _j_cuts_all:
+            col_btn_single, col_btn_all_json = st.columns([1.1, 1.4])
+            with col_btn_single:
+                btn_render_single = st.button(render_button_label, type="secondary" if not existing_inst else "secondary", use_container_width=True, key="btn_render_single_cut")
+            with col_btn_all_json:
+                btn_render_all_json_bottom = st.button(
+                    f"⚡ Gerar Todos os {len(_j_cuts_all)} Cortes do JSON em Sequência",
+                    type="primary",
+                    use_container_width=True,
+                    key="btn_render_all_json_bottom",
+                    help="Processa em sequência todos os cortes do JSON importado utilizando as configurações de vídeo, legenda e áudio desta aba."
+                )
+                if btn_render_all_json_bottom:
+                    _selected_json_cuts = list(_j_cuts_all)
+                    _trigger_json_batch = True
+        else:
+            btn_render_single = st.button(render_button_label, type="primary" if not existing_inst else "secondary", use_container_width=True, key="btn_render_single_cut")
+
+        # ── Execução em Sequência de Cortes do JSON ────────────────────────
+        if _trigger_json_batch and _selected_json_cuts:
+            import importlib
+            import core.video_processor
+            importlib.reload(core.video_processor)
+            import core.subtitle_burner
+            importlib.reload(core.subtitle_burner)
+            import core.export_kit
+            importlib.reload(core.export_kit)
+            from core.video_processor import download_full_video, cut_video, get_video_resolution
+
+            active_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+            video_id = get_current_active_video_id(active_url)
+
+            if not video_id:
+                st.error("URL do vídeo do YouTube não identificada. Confirme a URL na Seção 1.")
+            else:
+                data_dir = os.path.join("data", video_id)
+                os.makedirs(data_dir, exist_ok=True)
+                video_full_path = os.path.join(data_dir, "video_full.mp4")
+                safe_aspect_name = selected_aspect.replace(":", "-")
+
+                need_download = not (os.path.exists(video_full_path) and os.path.getsize(video_full_path) > 10240)
+                if need_download:
+                    with st.spinner("Baixando vídeo original na máxima resolução disponível para processar o lote..."):
+                        video_res = download_full_video(active_url, video_full_path)
+                else:
+                    video_res = {"path": video_full_path, "error": None}
+
+                if video_res.get("error"):
+                    st.error(f"Erro ao baixar vídeo: {video_res['error']}")
+                else:
+                    _meta_file = os.path.join(data_dir, "metadata.json")
+                    orig_info = {}
+                    if os.path.exists(_meta_file):
+                        try:
+                            with open(_meta_file, "r", encoding="utf-8") as _mf:
+                                orig_info = json.load(_mf)
+                        except Exception:
+                            pass
+                    if not orig_info:
+                        orig_info = {
+                            "title": f"Vídeo {video_id}",
+                            "channel": "Canal Oficial",
+                            "upload_date": "N/D",
+                            "url": active_url
+                        }
+
+                    _total_batch_cuts = len(_selected_json_cuts)
+                    _batch_json_ok = []
+                    _batch_json_err = []
+                    _batch_pbar = st.progress(0.0, text=f"⚡ Iniciando geração de {_total_batch_cuts} cortes em sequência...")
+
+                    for _idx_b, _jc in enumerate(_selected_json_cuts):
+                        _b_st = _jc.get("start_time")
+                        _b_et = _jc.get("end_time")
+                        _b_title = _jc.get("title") or f"Corte {_jc.get('id', _idx_b+1)}"
+                        _b_hl = _jc.get("headline") or _jc.get("gancho") or _b_title
+                        _b_desc = _jc.get("description") or ""
+                        _b_tags_list = _jc.get("hashtags") or []
+                        if isinstance(_b_tags_list, str):
+                            _b_tags_list = _b_tags_list.split()
+                        _b_seo = f"{_b_title}, {', '.join(_b_tags_list[:5])}" if _b_tags_list else "cortes, viral, shorts"
+
+                        _batch_pbar.progress(
+                            _idx_b / _total_batch_cuts,
+                            text=f"🎬 [{_idx_b + 1}/{_total_batch_cuts}] Renderizando '{_b_title[:42]}' ({_b_st} → {_b_et})..."
+                        )
+
+                        _corte_out_tmp = os.path.join(data_dir, f"corte_batch_{safe_aspect_name}_{_idx_b+1}.mp4")
+
+                        # Transcrição pontual se legendas estiverem ativas
+                        _tr_path_b = os.path.join(data_dir, "transcript.json")
+                        if subtitle_enabled:
+                            from core.transcriber import ensure_cut_transcript
+                            _tr_b_res = ensure_cut_transcript(
+                                video_id=video_id,
+                                start_time_str=_b_st,
+                                end_time_str=_b_et,
+                                media_path=video_res.get("path") or video_full_path,
+                                model_size=model_size,
+                                device=device_option,
+                                language="pt"
+                            )
+                            if _tr_b_res.get("transcript_path"):
+                                _tr_path_b = _tr_b_res["transcript_path"]
+
+                        # Tradução pontual se ativa
+                        _is_cut_tr_active_b = subtitle_enabled and (st.session_state.get("cut_trans_enabled_tgl") or _cfg.get("cut_trans_enabled", False))
+                        if _is_cut_tr_active_b and os.path.exists(_tr_path_b):
+                            _tgt_tr_l = st.session_state.get("sel_cut_sub_trans_lang", "pt-BR")
+                            _tgt_tr_m = st.session_state.get("sel_cut_trans_model", "llama3")
+                            import core.translator
+                            core.translator.translate_cut_subtitles(
+                                video_id=video_id,
+                                start_time_str=_b_st,
+                                end_time_str=_b_et,
+                                target_lang=_tgt_tr_l,
+                                model=_tgt_tr_m,
+                                transcript_path=_tr_path_b
+                            )
+
+                        try:
+                            _cut_b_res = cut_video(
+                                video_res["path"],
+                                _b_st,
+                                _b_et,
+                                _corte_out_tmp,
+                                aspect_ratio_mode=selected_aspect,
+                                horizontal_zoom=horizontal_zoom_val,
+                                blur_zoom=blur_zoom_val,
+                                blur_pan=blur_pan_val,
+                                blur_intensity=blur_int_val,
+                                blur_auto_tracking=(mode_blur_ctrl == "🤖 Auto-Zoom Inteligente no Personagem (Recomendado)"),
+                                face_auto_zoom=face_zoom_active,
+                                face_margin_ratio=face_margin_val,
+                                person_preference=person_pref_val,
+                                split_top_pan=split_top_pan,
+                                split_bottom_pan=split_bottom_pan,
+                                split_top_pan_y=split_top_pan_y,
+                                split_bottom_pan_y=split_bottom_pan_y,
+                                split_zoom=split_zoom_val,
+                                split_divider_color=split_div_color,
+                                split_divider_width=split_div_w,
+                                split_auto_switch=split_auto_switch,
+                                split_source_type=split_source_type,
+                                split_video_path=split_video_path,
+                                split_image_paths=split_image_paths,
+                                split_media_position=split_media_position,
+                                split_blur_margin_pct=split_blur_margin_pct,
+                                subtitle_enabled=subtitle_enabled,
+                                subtitle_transcript_path=_tr_path_b if os.path.exists(_tr_path_b) else None,
+                                subtitle_highlight_color=subtitle_highlight_color,
+                                subtitle_base_color=subtitle_base_color,
+                                subtitle_font_size=subtitle_font_size,
+                                headline_enabled=headline_enabled,
+                                headline_text=_b_hl,
+                                headline_preset=headline_preset,
+                                headline_text_color=headline_text_color,
+                                headline_bg_color=headline_bg_color,
+                                headline_font_size=headline_font_size,
+                                headline_margin_top=headline_margin_top,
+                                emojis_enabled=emojis_enabled,
+                                zoom_punch_enabled=zoom_punch_enabled,
+                                bg_music_enabled=bg_music_enabled,
+                                bg_music_track_path=bg_music_track_path,
+                                bg_music_volume=bg_music_volume,
+                                ducking_preset=ducking_preset,
+                                bg_music_start_offset=parse_time_str_to_seconds(bg_music_start_time),
+                                video_start_offset=parse_time_str_to_seconds(bg_video_start_time),
+                                progress_bar_enabled=progress_bar_enabled,
+                                progress_bar_color=progress_bar_color,
+                                progress_bar_height=progress_bar_height,
+                                callout_enabled=callout_enabled,
+                                callout_text=callout_text,
+                                callout_duration=callout_duration,
+                                climax_zoom_enabled=climax_zoom_enabled,
+                                climax_zoom_factor=climax_zoom_factor,
+                                thumbnail_enabled=thumbnail_enabled,
+                                crop_margins=current_crop_margins,
+                                social_overlay_config=social_overlay_config,
+                                multicam_scenes=multicam_scenes,
+                            )
+
+                            if _cut_b_res.get("error"):
+                                _batch_json_err.append(f"{_jc.get('id', f'#{_idx_b+1}')} ({_b_st}): {_cut_b_res['error']}")
+                            else:
+                                _out_res_b = get_video_resolution(_corte_out_tmp) or "1080p"
+                                _pkg_b = core.export_kit.create_viral_package(
+                                    video_path=_corte_out_tmp,
+                                    title=_b_title,
+                                    description=_b_desc,
+                                    hashtags=_b_tags_list,
+                                    tags_seo=_b_seo,
+                                    aspect_mode=selected_aspect,
+                                    output_base_dir=data_dir,
+                                    orig_video_info=orig_info,
+                                    thumbnail_path=_cut_b_res.get("thumbnail_path"),
+                                    transcript_path=_tr_path_b,
+                                    start_time_str=_b_st,
+                                    end_time_str=_b_et,
+                                    preserve_existing_transcript=False
+                                )
+
+                                register_cut_instance(
+                                    video_id=video_id,
+                                    start_time=_b_st,
+                                    end_time=_b_et,
+                                    title=_b_title,
+                                    description=_b_desc,
+                                    hashtags=_b_tags_list,
+                                    tags_seo=_b_seo,
+                                    aspect_mode=selected_aspect,
+                                    folder_name=_pkg_b["folder_name"],
+                                    folder_path=_pkg_b["package_dir"],
+                                    video_path=_pkg_b["video_dest_path"],
+                                    resolution=_out_res_b,
+                                    thumbnail_path=_pkg_b.get("thumbnail_dest_path")
+                                )
+
+                                # Enriquece o registro do catálogo com os dados completos do JSON
+                                register_cuts_from_parsed(video_id, {"cortes": [_jc]})
+
+                                _batch_json_ok.append({
+                                    "id": _jc.get("id", f"C{_idx_b+1}"),
+                                    "title": _b_title,
+                                    "start_time": _b_st,
+                                    "end_time": _b_et,
+                                    "video_path": _pkg_b["video_dest_path"]
+                                })
+                        except Exception as _exc_b:
+                            _batch_json_err.append(f"{_jc.get('id', f'#{_idx_b+1}')}: {str(_exc_b)}")
+
+                    _batch_pbar.progress(1.0, text="✅ Processamento de todos os cortes concluído!")
+
+                    if _batch_json_ok:
+                        st.success(f"🎉 **{len(_batch_json_ok)} de {_total_batch_cuts} cortes gerados com sucesso** no formato `{selected_aspect}` e catalogados na Galeria!")
+                        _col_ok_gal, _ = st.columns([2.5, 1])
+                        with _col_ok_gal:
+                            if st.button("🎬 Ir para a Galeria de Cortes & Pós (Aba 4) ➔", type="primary", use_container_width=True, key="btn_go_to_gal_after_json_batch"):
+                                navigate_to_step("4")
+                                st.rerun()
+
+                    if _batch_json_err:
+                        st.error("⚠️ Alguns cortes falharam: " + " · ".join(_batch_json_err))
+
+        # ── Renderização Individual de Corte ──────────────────────────────
+        if btn_render_single:
             import importlib
             import core.video_processor
             importlib.reload(core.video_processor)
