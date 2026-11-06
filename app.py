@@ -82,7 +82,8 @@ from core.extractor import (
 )
 from core.transcriber import (
     transcribe_audio, fetch_youtube_transcript, append_incremental_transcript,
-    list_available_youtube_transcripts, format_language_label, extract_youtube_video_id
+    list_available_youtube_transcripts, format_language_label, extract_youtube_video_id,
+    segments_to_txt, segments_to_srt, segments_to_vtt
 )
 from core.analyzer import analyze_transcript, build_suggested_bundles, build_golden_rule_micro_cuts, normalize_time_mask
 from core.video_processor import (
@@ -4717,6 +4718,9 @@ if 'video_url' not in st.session_state:
     st.session_state.video_url = ""
 if 'input_yt_url' not in st.session_state:
     st.session_state.input_yt_url = st.session_state.video_url
+# Inicialização das chaves do painel de download de transcrição
+if "_tr_dl_last_vid" not in st.session_state:
+    st.session_state["_tr_dl_last_vid"] = None
 
 # Restauração automática do último vídeo ativo apenas se explicitamente habilitado
 if _cfg.get("auto_load_last_project", False) and not st.session_state.get("_project_cleared_by_user", False):
@@ -4802,6 +4806,107 @@ if show_sec1:
         )
         if video_url and video_url != st.session_state.get("video_url"):
             st.session_state["video_url"] = video_url
+
+        # ── 📄 Download de Transcrição ─────────────────────────────────────────
+        _tr_dl_vid_id = extract_youtube_video_id(video_url) if video_url else None
+        _tr_dl_is_yt = bool(_tr_dl_vid_id)
+
+        # Detecta troca de vídeo e invalida cache de idiomas/resultado
+        if st.session_state.get("_tr_dl_last_vid") != _tr_dl_vid_id:
+            st.session_state["_tr_dl_last_vid"] = _tr_dl_vid_id
+            st.session_state.pop("_tr_dl_avail_langs", None)
+            st.session_state.pop("_tr_dl_result", None)
+            st.session_state.pop("_tr_dl_last_lang", None)
+
+        with st.expander("📄 Baixar Transcrição do Vídeo", expanded=False):
+            if not video_url:
+                st.info("ℹ️ Cole uma URL de vídeo acima para habilitar o download de transcrição.")
+            elif not _tr_dl_is_yt:
+                st.info("💡 Download de transcrição disponível apenas para URLs do YouTube. Instagram, TikTok e outros não disponibilizam legendas via API pública.")
+            else:
+                # Carrega lista de idiomas disponíveis (com cache por vídeo)
+                if "_tr_dl_avail_langs" not in st.session_state:
+                    with st.spinner("🔍 Buscando legendas disponíveis no YouTube..."):
+                        _langs = list_available_youtube_transcripts(_tr_dl_vid_id)
+                    st.session_state["_tr_dl_avail_langs"] = _langs
+                else:
+                    _langs = st.session_state["_tr_dl_avail_langs"]
+
+                if not _langs:
+                    st.warning("⚠️ Nenhuma legenda disponível para este vídeo no YouTube. Utilize a transcrição via Whisper AI na seção abaixo.")
+                else:
+                    _lang_labels = [l["label"] for l in _langs]
+                    _lang_codes  = [l["code"]  for l in _langs]
+
+                    _tr_col1, _tr_col2 = st.columns([2, 1])
+                    with _tr_col1:
+                        _sel_label = st.selectbox(
+                            "🌐 Idioma da Legenda:",
+                            options=_lang_labels,
+                            key="sel_tr_dl_lang",
+                            help="Idiomas disponíveis no YouTube para este vídeo. 'Automática' = gerada por IA do YouTube."
+                        )
+                    with _tr_col2:
+                        _sel_fmt = st.radio(
+                            "📂 Formato:",
+                            options=["TXT", "SRT", "VTT", "JSON"],
+                            horizontal=True,
+                            key="radio_tr_dl_fmt",
+                            help="TXT = texto puro | SRT = padrão editores (Premiere, DaVinci) | VTT = padrão web | JSON = dados brutos com timestamps"
+                        )
+
+                    _sel_lang_code = _lang_codes[_lang_labels.index(_sel_label)] if _sel_label in _lang_labels else _lang_codes[0]
+
+                    # Botão para buscar/converter
+                    if st.button("🔽 Preparar Download da Transcrição", key="btn_tr_dl_fetch", type="secondary", use_container_width=True):
+                        # Só re-faz o fetch se o idioma mudou
+                        if st.session_state.get("_tr_dl_last_lang") != _sel_lang_code or "_tr_dl_result" not in st.session_state:
+                            with st.spinner(f"⏳ Baixando transcrição em **{_sel_label}**..."):
+                                _tr_res = fetch_youtube_transcript(_tr_dl_vid_id, selected_language=_sel_lang_code)
+                            st.session_state["_tr_dl_result"] = _tr_res
+                            st.session_state["_tr_dl_last_lang"] = _sel_lang_code
+                        else:
+                            _tr_res = st.session_state["_tr_dl_result"]
+
+                        _tr_segs = (_tr_res or {}).get("transcript_segments") or []
+                        _tr_err  = (_tr_res or {}).get("error")
+
+                        if _tr_err and not _tr_segs:
+                            st.error(f"❌ Erro ao obter transcrição: {_tr_err}")
+                        elif not _tr_segs:
+                            st.warning("⚠️ Transcrição obtida mas sem segmentos. Tente outro idioma.")
+                        else:
+                            _fmt = st.session_state.get("radio_tr_dl_fmt", "TXT")
+                            _safe_lang = re.sub(r"[^a-zA-Z0-9_-]", "_", _sel_lang_code)
+                            _fname_base = f"transcript_{_tr_dl_vid_id}_{_safe_lang}"
+                            if _fmt == "TXT":
+                                _content = segments_to_txt(_tr_segs).encode("utf-8")
+                                _fname = f"{_fname_base}.txt"
+                                _mime  = "text/plain"
+                            elif _fmt == "SRT":
+                                _content = segments_to_srt(_tr_segs).encode("utf-8")
+                                _fname = f"{_fname_base}.srt"
+                                _mime  = "text/plain"
+                            elif _fmt == "VTT":
+                                _content = segments_to_vtt(_tr_segs).encode("utf-8")
+                                _fname = f"{_fname_base}.vtt"
+                                _mime  = "text/vtt"
+                            else:  # JSON
+                                _content = json.dumps(_tr_res, ensure_ascii=False, indent=2).encode("utf-8")
+                                _fname = f"{_fname_base}.json"
+                                _mime  = "application/json"
+
+                            st.success(f"✅ Transcrição pronta! **{len(_tr_segs)} segmentos** | Fonte: {(_tr_res or {}).get('source', '?')}")
+                            st.download_button(
+                                label=f"📥 Baixar `{_fname}`",
+                                data=_content,
+                                file_name=_fname,
+                                mime=_mime,
+                                key="btn_tr_dl_download",
+                                use_container_width=True,
+                                type="primary"
+                            )
+        # ── fim do bloco de download de transcrição ────────────────────────────
 
         # Aplica requisições pendentes de reset ou definição de trecho ANTES da instanciação dos widgets
         if st.session_state.get("_pending_slice_reset"):
