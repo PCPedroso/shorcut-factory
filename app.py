@@ -105,7 +105,8 @@ from core.export_kit import build_cut_folder_name, create_viral_package
 from core.cuts_catalog import (
     get_cut_entry, get_format_instance, register_cut_instance, update_cut_texts_only,
     delete_entire_cut, delete_format_instance, delete_entire_carrossel, load_cuts_catalog, set_active_thumbnail_variation,
-    update_cut_thumbnail_in_catalog, sync_carrossel_parts_to_catalog
+    update_cut_thumbnail_in_catalog, sync_carrossel_parts_to_catalog,
+    parse_json_cuts, register_cuts_from_parsed
 )
 from core.batch_processor import process_batch_cuts
 from core.headline_drawer import (
@@ -4718,9 +4719,13 @@ if 'video_url' not in st.session_state:
     st.session_state.video_url = ""
 if 'input_yt_url' not in st.session_state:
     st.session_state.input_yt_url = st.session_state.video_url
-# Inicialização das chaves do painel de download de transcrição
+# Inicialização das chaves do painel de download de transcrição e importação JSON
 if "_tr_dl_last_vid" not in st.session_state:
     st.session_state["_tr_dl_last_vid"] = None
+if "_json_import_active" not in st.session_state:
+    st.session_state["_json_import_active"] = False
+if "_json_import_cut_idx" not in st.session_state:
+    st.session_state["_json_import_cut_idx"] = 0
 
 # Restauração automática do último vídeo ativo apenas se explicitamente habilitado
 if _cfg.get("auto_load_last_project", False) and not st.session_state.get("_project_cleared_by_user", False):
@@ -4907,6 +4912,158 @@ if show_sec1:
                                 type="primary"
                             )
         # ── fim do bloco de download de transcrição ────────────────────────────
+
+        # ── 📂 Importar Cortes por JSON Externo ────────────────────────────────
+        with st.expander("📂 Importar Cortes por JSON Externo (IA / Roteiro de Cortes)", expanded=bool(st.session_state.get("_json_cuts_parsed"))):
+            st.caption("💡 Importe um arquivo `.json` gerado por IA ou roteirista contendo tempos de cortes, títulos virais, ganchos e descrições pré-definidas.")
+            
+            uploaded_cuts_file = st.file_uploader(
+                "Selecione o arquivo de cortes (.json):",
+                type=["json"],
+                key="uploader_cuts_json",
+                help="Carregue o arquivo JSON com a lista de cortes, títulos e minutagens."
+            )
+
+            if uploaded_cuts_file is not None:
+                _f_bytes = uploaded_cuts_file.getvalue()
+                _f_hash = hash(_f_bytes)
+                if st.session_state.get("_last_uploaded_cuts_hash") != _f_hash:
+                    try:
+                        _raw_j = json.loads(_f_bytes.decode("utf-8"))
+                        _parsed_j = parse_json_cuts(_raw_j)
+                        st.session_state["_json_cuts_parsed"] = _parsed_j
+                        st.session_state["_last_uploaded_cuts_hash"] = _f_hash
+                        st.toast(f"✅ Roteiro carregado com {len(_parsed_j.get('cortes', []))} cortes!")
+                    except Exception as _e_json:
+                        st.error(f"❌ Erro ao processar arquivo JSON: {_e_json}")
+
+            _active_parsed = st.session_state.get("_json_cuts_parsed")
+            if _active_parsed and _active_parsed.get("cortes"):
+                _j_cortes = _active_parsed.get("cortes", [])
+                _j_vid_url = _active_parsed.get("video_url", "")
+                _j_vid_id = _active_parsed.get("video_id", "")
+                _cur_vid_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+
+                if _j_vid_url and _cur_vid_url != _j_vid_url:
+                    col_u_warn, col_u_btn = st.columns([2.8, 1.2])
+                    with col_u_warn:
+                        st.warning(f"⚠️ O JSON aponta para o vídeo: `{_j_vid_url}`")
+                    with col_u_btn:
+                        if st.button("🔗 Usar URL do JSON", key="btn_apply_json_url_to_input", use_container_width=True):
+                            st.session_state["video_url"] = _j_vid_url
+                            st.session_state["input_yt_url"] = _j_vid_url
+                            if _j_vid_id:
+                                st.session_state["active_video_id"] = _j_vid_id
+                                save_setting("last_active_video_id", _j_vid_id)
+                            st.rerun()
+
+                if _active_parsed.get("alertas_gerais"):
+                    with st.expander("⚠️ Alertas Gerais do Roteiro", expanded=False):
+                        for _al in _active_parsed["alertas_gerais"]:
+                            st.markdown(f"- {_al}")
+
+                st.markdown(f"##### 📋 **{len(_j_cortes)} cortes prontos no roteiro:**")
+                st.caption("Semelhante à Divisão em Partes, você pode inspecionar cada corte abaixo e enviá-los em lote ou individualmente para a Fábrica de Enquadramento:")
+
+                for _c_i, _c_data in enumerate(_j_cortes):
+                    _c_id = _c_data.get("id", f"C{_c_i+1}")
+                    _c_s = _c_data.get("start_time", "00:00:00.00")
+                    _c_e = _c_data.get("end_time", "00:00:00.00")
+                    _c_dur_lbl = _c_data.get("duracao_formatada") or (f"{_c_data.get('duracao_segundos', 0):.0f}s" if _c_data.get("duracao_segundos") else "")
+                    _c_rank = _c_data.get("ranking_posicao")
+                    _c_rank_badge = f"🏆 #{_c_rank} " if _c_rank else ""
+                    _c_nota = _c_data.get("potencial_nota")
+                    _c_nota_badge = f"🔥 {int(_c_nota)}/10 " if _c_nota is not None else ""
+                    _c_title = _c_data.get("title", f"Corte {_c_id}")
+
+                    _exp_label = f"▶ {_c_rank_badge}[{_c_id}] {_c_s} → {_c_e} ({_c_dur_lbl}) — {_c_nota_badge}{_c_title[:55]}"
+                    with st.expander(_exp_label, expanded=(_c_i == 0 and len(_j_cortes) <= 3)):
+                        st.markdown(f"**Título:** {_c_data.get('title')}")
+                        if _c_data.get("headline"):
+                            st.markdown(f"🎣 **Gancho / Headline:** `{_c_data.get('headline')}`")
+                        if _c_data.get("description"):
+                            st.caption(f"📝 **Descrição:** {_c_data.get('description')}")
+                        if _c_data.get("hashtags"):
+                            st.caption(f"🏷️ **Hashtags:** `{' '.join(_c_data.get('hashtags', []))}`")
+
+                        _b_cols = st.columns(3)
+                        with _b_cols[0]:
+                            _risco = _c_data.get("risco_contexto", "baixo")
+                            _r_color = "#ef4444" if _risco == "alto" else ("#f59e0b" if _risco == "medio" else "#10b981")
+                            st.markdown(f"<span style='font-size:12px;color:{_r_color};font-weight:bold;'>🛡️ Risco: {_risco.upper()}</span>", unsafe_allow_html=True)
+                        with _b_cols[1]:
+                            _dep = "Sim" if _c_data.get("depende_visual") else "Não"
+                            st.markdown(f"<span style='font-size:12px;color:#94a3b8;'>👁️ Depende Visual: <b>{_dep}</b></span>", unsafe_allow_html=True)
+                        with _b_cols[2]:
+                            if _c_data.get("potencial_justificativa"):
+                                st.markdown(f"<span style='font-size:12px;color:#a78bfa;'>💡 {_c_data.get('potencial_justificativa')[:45]}...</span>", unsafe_allow_html=True)
+
+                        if _c_data.get("observacoes"):
+                            with st.expander("🔍 Observações e Checagens Editoriais", expanded=False):
+                                for _obs in _c_data["observacoes"]:
+                                    _tipo_obs = _obs.get("tipo", "geral").upper()
+                                    st.markdown(f"- **[{_tipo_obs}]** {_obs.get('texto')}")
+
+                        if st.button(f"🎯 Selecionar Trecho [{_c_s} → {_c_e}] no Studio", key=f"btn_set_slice_json_{_c_i}", use_container_width=True):
+                            st.session_state["input_yt_slice_start"] = _c_s
+                            st.session_state["input_yt_slice_end"] = _c_e
+                            st.session_state["input_yt_slice_label"] = _c_title[:35]
+                            st.session_state["_pending_start_time"] = _c_s
+                            st.session_state["_pending_end_time"] = _c_e
+                            st.session_state["_pending_cut_title"] = _c_title
+                            st.session_state["_pending_cut_headline"] = _c_data.get("headline", "")
+                            st.session_state["_pending_cut_desc"] = _c_data.get("description", "")
+                            st.session_state["_pending_cut_hashtags"] = " ".join(_c_data.get("hashtags", []))
+                            st.session_state["final_corte_title"] = _c_title
+                            st.session_state["meta_generated"] = False
+                            st.toast(f"⏱️ Trecho {_c_id} [{_c_s} → {_c_e}] selecionado!")
+                            st.rerun()
+
+                st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+
+                col_j_save, col_j_go = st.columns([1.5, 2.5])
+                with col_j_save:
+                    if st.button("📥 Importar e Salvar Metadados no Catálogo", key="btn_save_all_json_cuts", use_container_width=True, help="Grava todos os cortes, títulos e ganchos no catálogo cuts_catalog.json do vídeo ativo"):
+                        _eff_vid = _j_vid_id or get_current_active_video_id(_cur_vid_url) or st.session_state.get("active_video_id") or ""
+                        if not _eff_vid:
+                            st.error("⚠️ Identifique a URL do vídeo acima antes de salvar no catálogo.")
+                        else:
+                            _n_reg = register_cuts_from_parsed(_eff_vid, _active_parsed)
+                            st.session_state["_json_import_active"] = True
+                            st.session_state["active_video_id"] = _eff_vid
+                            st.success(f"🎉 {_n_reg} cortes registrados no catálogo do vídeo `{_eff_vid}`!")
+
+                with col_j_go:
+                    if st.button(
+                        "✂️ Ir para Fábrica de Enquadramento 9:16 (Processar Cortes do JSON) ➔",
+                        key="btn_nav_json_cuts_to_s3",
+                        type="primary",
+                        use_container_width=True,
+                        help="Abre a Fábrica de Enquadramento já com o primeiro corte do ranking carregado e todos os metadados prontos para gravação e renderização"
+                    ):
+                        _eff_vid = _j_vid_id or get_current_active_video_id(_cur_vid_url) or st.session_state.get("active_video_id") or ""
+                        if _eff_vid:
+                            register_cuts_from_parsed(_eff_vid, _active_parsed)
+                            st.session_state["active_video_id"] = _eff_vid
+                            save_setting("last_active_video_id", _eff_vid)
+
+                        st.session_state["_json_import_active"] = True
+                        st.session_state["_json_import_cut_idx"] = 0
+
+                        if _j_cortes:
+                            _first_c = _j_cortes[0]
+                            st.session_state["_pending_start_time"] = _first_c.get("start_time")
+                            st.session_state["_pending_end_time"] = _first_c.get("end_time")
+                            st.session_state["_pending_cut_title"] = _first_c.get("title", "")
+                            st.session_state["_pending_cut_headline"] = _first_c.get("headline", "")
+                            st.session_state["_pending_cut_desc"] = _first_c.get("description", "")
+                            st.session_state["_pending_cut_hashtags"] = " ".join(_first_c.get("hashtags", []))
+                            st.session_state.final_corte_title = _first_c.get("title", "")
+                            st.session_state["meta_generated"] = False
+
+                        navigate_to_step('3')
+                        st.rerun()
+        # ── fim do bloco de importação JSON ────────────────────────────────────
 
         # Aplica requisições pendentes de reset ou definição de trecho ANTES da instanciação dos widgets
         if st.session_state.get("_pending_slice_reset"):
