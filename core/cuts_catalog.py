@@ -727,3 +727,303 @@ def delete_entire_carrossel(
 
     return {"success": True, "error": None}
 
+
+# ---------------------------------------------------------------------------
+# Importação e Parse de Cortes via JSON Externo
+# ---------------------------------------------------------------------------
+
+def parse_json_cuts(json_data: dict) -> dict:
+    """
+    Valida e normaliza o JSON de cortes externo para o formato estruturado do ViralCut.
+    Ordena os cortes de acordo com a lista de 'ranking' (se presente).
+    """
+    if not isinstance(json_data, dict):
+        return {
+            "video_url": "",
+            "video_id": "",
+            "schema_version": "1.0",
+            "resumo": "",
+            "alertas_gerais": [],
+            "ranking": [],
+            "cortes": []
+        }
+
+    # Extrai informações do vídeo
+    video_info = json_data.get("video") or {}
+    video_url = ""
+    if isinstance(video_info, dict):
+        video_url = str(video_info.get("url") or "").strip()
+    elif isinstance(video_info, str):
+        video_url = video_info.strip()
+
+    if not video_url:
+        video_url = str(json_data.get("video_url") or "").strip()
+
+    video_id = ""
+    if video_url:
+        try:
+            from core.transcriber import extract_youtube_video_id
+            video_id = extract_youtube_video_id(video_url)
+        except Exception:
+            pass
+        if not video_id:
+            # Fallback simples de regex para YouTube
+            m = re.search(r"(?:v=|\/|youtu\.be\/|embed\/|live\/)([0-9A-Za-z_-]{11})", video_url)
+            if m:
+                video_id = m.group(1)
+
+    schema_version = str(json_data.get("schema_version", "1.0"))
+    resumo = str(json_data.get("resumo", "")).strip()
+    alertas_gerais = json_data.get("alertas_gerais") or []
+    if not isinstance(alertas_gerais, list):
+        alertas_gerais = [str(alertas_gerais)]
+
+    ranking = json_data.get("ranking") or []
+    if not isinstance(ranking, list):
+        ranking = []
+
+    # Mapa de posição no ranking para ordenação rápida
+    rank_pos_map = {}
+    rank_desc_map = {}
+    for r in ranking:
+        if isinstance(r, dict):
+            r_id = str(r.get("id", "")).strip()
+            if r_id:
+                rank_pos_map[r_id] = r.get("posicao", 999)
+                rank_desc_map[r_id] = str(r.get("ponderacao", "")).strip()
+
+    raw_cortes = json_data.get("cortes") or []
+    if not isinstance(raw_cortes, list):
+        raw_cortes = []
+
+    parsed_cortes = []
+    for idx, c in enumerate(raw_cortes):
+        if not isinstance(c, dict):
+            continue
+
+        c_id = str(c.get("id") or f"C{idx + 1}").strip()
+        start_time = str(c.get("inicio") or c.get("start_time") or "00:00:00.00").strip()
+        end_time = str(c.get("fim") or c.get("end_time") or "00:00:00.00").strip()
+
+        # Duração
+        dur_sec = c.get("duracao_segundos")
+        if dur_sec is not None:
+            try:
+                dur_sec = float(dur_sec)
+            except Exception:
+                dur_sec = 0.0
+        dur_fmt = str(c.get("duracao_formatada") or "").strip()
+
+        frase_inicio = str(c.get("frase_inicio") or "").strip()
+        frase_fim = str(c.get("frase_fim") or "").strip()
+        descricao_corte = str(c.get("descricao") or "").strip()
+        gancho = str(c.get("gancho") or "").strip()
+
+        # Potencial de viralização
+        pot_raw = c.get("potencial_viralizacao") or {}
+        if isinstance(pot_raw, dict):
+            pot_nota = pot_raw.get("nota")
+            pot_just = str(pot_raw.get("justificativa") or "").strip()
+        elif isinstance(pot_raw, (int, float)):
+            pot_nota = int(pot_raw)
+            pot_just = ""
+        else:
+            pot_nota = None
+            pot_just = ""
+
+        depende_visual = bool(c.get("depende_visual", False))
+        risco_contexto = str(c.get("risco_contexto") or "baixo").strip().lower()
+
+        # Observações
+        raw_obs = c.get("observacoes") or []
+        observacoes = []
+        if isinstance(raw_obs, list):
+            for obs in raw_obs:
+                if isinstance(obs, dict):
+                    observacoes.append({
+                        "tipo": str(obs.get("tipo", "geral")),
+                        "texto": str(obs.get("texto", "")).strip()
+                    })
+                elif isinstance(obs, str):
+                    observacoes.append({"tipo": "geral", "texto": obs.strip()})
+
+        # Textos e títulos
+        textos = c.get("textos") or {}
+        if not isinstance(textos, dict):
+            textos = {}
+
+        raw_titulos = textos.get("titulos") or []
+        title_list = []
+        if isinstance(raw_titulos, list):
+            for t in raw_titulos:
+                if isinstance(t, dict):
+                    txt_val = str(t.get("texto", "")).strip()
+                    if txt_val:
+                        title_list.append(txt_val)
+                elif isinstance(t, str) and t.strip():
+                    title_list.append(t.strip())
+
+        primary_title = title_list[0] if title_list else (str(c.get("titulo") or c.get("title") or f"Corte {c_id}")).strip()
+        alt_titles = title_list[1:] if len(title_list) > 1 else []
+
+        # Descrição e hashtags
+        desc_obj = textos.get("descricao") or {}
+        if isinstance(desc_obj, dict):
+            final_desc = str(desc_obj.get("texto") or descricao_corte).strip()
+            raw_tags = desc_obj.get("hashtags") or []
+            credito = str(desc_obj.get("credito") or "").strip()
+        else:
+            final_desc = str(desc_obj).strip() if str(desc_obj).strip() else descricao_corte
+            raw_tags = textos.get("hashtags") or []
+            credito = ""
+
+        clean_hashtags = []
+        if isinstance(raw_tags, list):
+            for h in raw_tags:
+                hs = str(h).strip()
+                if hs:
+                    if not hs.startswith("#"):
+                        hs = f"#{hs}"
+                    clean_hashtags.append(hs)
+
+        # Textos âncora
+        raw_ancora = textos.get("textos_ancora") or []
+        textos_ancora = []
+        if isinstance(raw_ancora, list):
+            for a in raw_ancora:
+                if isinstance(a, dict):
+                    textos_ancora.append({
+                        "texto": str(a.get("texto", "")).strip(),
+                        "tipo": str(a.get("tipo", "padrao")).strip()
+                    })
+                elif isinstance(a, str) and a.strip():
+                    textos_ancora.append({"texto": a.strip(), "tipo": "padrao"})
+
+        # Enquete
+        enquete = textos.get("enquete") or {}
+        if not isinstance(enquete, dict):
+            enquete = {}
+
+        # Posição no ranking
+        rank_pos = rank_pos_map.get(c_id, 999)
+        rank_ponderacao = rank_desc_map.get(c_id, "")
+
+        parsed_cortes.append({
+            "id": c_id,
+            "start_time": start_time,
+            "end_time": end_time,
+            "duracao_segundos": dur_sec,
+            "duracao_formatada": dur_fmt,
+            "title": primary_title,
+            "alt_titles": alt_titles,
+            "description": final_desc,
+            "hashtags": clean_hashtags,
+            "headline": gancho,
+            "credito": credito,
+            "textos_ancora": textos_ancora,
+            "enquete": enquete,
+            "observacoes": observacoes,
+            "potencial_nota": pot_nota,
+            "potencial_justificativa": pot_just,
+            "risco_contexto": risco_contexto,
+            "depende_visual": depende_visual,
+            "frase_inicio": frase_inicio,
+            "frase_fim": frase_fim,
+            "ranking_posicao": rank_pos if rank_pos != 999 else None,
+            "ranking_ponderacao": rank_ponderacao,
+        })
+
+    # Ordena pelo ranking se houver algum ranking configurado
+    if rank_pos_map:
+        parsed_cortes.sort(key=lambda item: (item["ranking_posicao"] if item["ranking_posicao"] is not None else 999))
+
+    return {
+        "video_url": video_url,
+        "video_id": video_id,
+        "schema_version": schema_version,
+        "resumo": resumo,
+        "alertas_gerais": alertas_gerais,
+        "ranking": ranking,
+        "cortes": parsed_cortes
+    }
+
+
+def register_cuts_from_parsed(video_id: str, parsed: dict) -> int:
+    """
+    Registra os metadados dos cortes importados no cuts_catalog.json do vídeo.
+    Preserva instâncias de vídeo já renderizadas caso existam na mesma minutagem.
+    Retorna a quantidade de cortes registrados/atualizados.
+    """
+    if not video_id or not parsed or not isinstance(parsed, dict):
+        return 0
+
+    cortes = parsed.get("cortes") or []
+    if not cortes:
+        return 0
+
+    catalog = _raw_load_cuts_catalog(video_id)
+    count = 0
+
+    for cut in cortes:
+        s_t = cut.get("start_time")
+        e_t = cut.get("end_time")
+        if not s_t or not e_t:
+            continue
+
+        key = make_time_key(s_t, e_t)
+        now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+        if key not in catalog:
+            catalog[key] = {
+                "start_time": s_t,
+                "end_time": e_t,
+                "title": cut.get("title", ""),
+                "description": cut.get("description", ""),
+                "hashtags": cut.get("hashtags", []),
+                "tags_seo": "",
+                "created_at": now_str,
+                "updated_at": now_str,
+                "formats": {}
+            }
+        else:
+            if cut.get("title"):
+                catalog[key]["title"] = cut.get("title")
+            if cut.get("description"):
+                catalog[key]["description"] = cut.get("description")
+            if cut.get("hashtags"):
+                catalog[key]["hashtags"] = cut.get("hashtags")
+            catalog[key]["updated_at"] = now_str
+
+        # Armazena metadados avançados do JSON de cortes no catálogo
+        if cut.get("headline"):
+            catalog[key]["headline"] = cut.get("headline")
+        if cut.get("alt_titles"):
+            catalog[key]["alt_titles"] = cut.get("alt_titles")
+        if cut.get("textos_ancora"):
+            catalog[key]["textos_ancora"] = cut.get("textos_ancora")
+        if cut.get("enquete"):
+            catalog[key]["enquete"] = cut.get("enquete")
+        if cut.get("observacoes"):
+            catalog[key]["observacoes"] = cut.get("observacoes")
+        if cut.get("potencial_nota") is not None:
+            catalog[key]["potencial_viralizacao"] = {
+                "nota": cut.get("potencial_nota"),
+                "justificativa": cut.get("potencial_justificativa", "")
+            }
+        if cut.get("risco_contexto"):
+            catalog[key]["risco_contexto"] = cut.get("risco_contexto")
+        if cut.get("depende_visual") is not None:
+            catalog[key]["depende_visual"] = cut.get("depende_visual")
+        if cut.get("id"):
+            catalog[key]["json_cut_id"] = cut.get("id")
+        if cut.get("ranking_posicao") is not None:
+            catalog[key]["ranking_posicao"] = cut.get("ranking_posicao")
+        if cut.get("ranking_ponderacao"):
+            catalog[key]["ranking_ponderacao"] = cut.get("ranking_ponderacao")
+
+        count += 1
+
+    save_cuts_catalog(video_id, catalog)
+    return count
+
+
