@@ -20,6 +20,7 @@ from core.quick_editor import get_video_duration
 from core.runtime_env import (
     ensure_ffmpeg_environment,
     get_js_runtimes_config,
+    get_yt_dlp_remote_components,
     get_youtube_client_Strategies,
     get_youtube_extractor_args_list,
     download_youtube_via_public_mirrors,
@@ -416,6 +417,7 @@ def get_optimal_video_format(url: str) -> str:
         'bestvideo[width<=1920][height<=1920][vcodec^=avc1]+bestaudio/'
         'bestvideo[width<=1920][height<=1920]+bestaudio/'
         'bestvideo+bestaudio/'
+        'best[height>=720]/'
         'best'
     )
 
@@ -919,6 +921,48 @@ def download_live_video_snapshot(
 
 
 
+def validate_downloaded_video_quality(video_path: str, min_height: int = 720) -> dict:
+    """
+    Inspeciona a resolução real do vídeo baixado via OpenCV/ffprobe.
+    Retorna métricas de resolução e validação contra degradação de qualidade:
+    - 'valid': bool (True se o arquivo existe e tem dimensões válidas)
+    - 'width': int
+    - 'height': int
+    - 'fps': float
+    - 'is_high_quality': bool (True se max(w,h) >= 1280 ou min(w,h) >= min_height)
+    - 'warning': Optional[str] com diagnóstico caso a resolução seja < min_height
+    """
+    if not video_path or not os.path.exists(video_path) or os.path.getsize(video_path) == 0:
+        return {"valid": False, "width": 0, "height": 0, "fps": 0.0, "is_high_quality": False, "warning": "Arquivo inexistente ou vazio."}
+
+    w, h, fps = 0, 0, 0.0
+    try:
+        import cv2
+        cap = cv2.VideoCapture(video_path)
+        if cap.isOpened():
+            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+            cap.release()
+    except Exception:
+        pass
+
+    # Vídeos horizontais (1920x1080 / 1280x720) ou verticais (1080x1920 / 720x1280)
+    is_hq = (min(w, h) >= min_height) or (max(w, h) >= 1280)
+    warning = None
+    if not is_hq and (w > 0 and h > 0):
+        warning = f"Resolução obtida ({w}x{h}) está abaixo do padrão recomendado ({min_height}p)."
+
+    return {
+        "valid": bool(w > 0 and h > 0),
+        "width": w,
+        "height": h,
+        "fps": fps,
+        "is_high_quality": is_hq,
+        "warning": warning
+    }
+
+
 def download_full_video(
     url: str,
     output_path: str = "temp_video.mp4",
@@ -987,8 +1031,15 @@ def download_full_video(
             'quiet': False,
             'no_warnings': True,
             'js_runtimes': js_runtimes_cfg,
-            'extractor_args': extractor_args_list[0],
+            'remote_components': get_yt_dlp_remote_components(),
         }
+
+        if extractor_args_list and extractor_args_list[0]:
+            base_opts['extractor_args'] = extractor_args_list[0]
+
+        # Para artigos/páginas web genéricas com múltiplos embeds (ex: G1, UOL), ignora erros de sub-recursos
+        if not any(d in str(url).lower() for d in ("youtube.com", "youtu.be")):
+            base_opts['ignoreerrors'] = True
 
         if cookie_file:
             base_opts['cookiefile'] = cookie_file
@@ -1007,18 +1058,20 @@ def download_full_video(
 
         attempts = [dict(base_opts)]
         for ext_args in extractor_args_list[1:]:
-            attempts.append(
-                dict(
-                    base_opts,
-                    format='bestvideo[width<=1920][height<=1920]+bestaudio/best[ext=mp4]/bestvideo+bestaudio/best',
-                    extractor_args=ext_args,
-                )
+            att_entry = dict(
+                base_opts,
+                format='bestvideo[width<=1920][height<=1920]+bestaudio/bestvideo+bestaudio/best[height>=720]/best',
             )
+            if ext_args:
+                att_entry['extractor_args'] = ext_args
+            elif 'extractor_args' in att_entry:
+                del att_entry['extractor_args']
+            attempts.append(att_entry)
         attempts.append(
             dict(
                 base_opts,
-                format='best[ext=mp4]/best',
-                extractor_args={'youtube': {'player_client': ['ios', 'tv_embedded', 'mweb', 'android']}},
+                format='bestvideo[height<=1080]+bestaudio/bestvideo+bestaudio/best[height>=720]/best',
+                extractor_args={'youtube': {'player_client': ['tv', 'android_vr', 'ios', 'android']}},
             )
         )
         attempts.append(
@@ -1055,18 +1108,24 @@ def download_full_video(
             return False
 
         last_err = None
-        for ydl_opts in attempts:
+        for idx_att, ydl_opts in enumerate(attempts):
+            is_last_attempt = (idx_att == len(attempts) - 1)
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ret_code = ydl.download([url])
                 if _recover_alternate_ext_if_needed(output_path):
-                    return {"path": output_path, "error": None}
+                    q_chk = validate_downloaded_video_quality(output_path, min_height=720)
+                    if q_chk.get("is_high_quality") or is_last_attempt:
+                        return {"path": output_path, "error": None}
+                    # Se foi baixado em baixa resolução (<720p) mas ainda restam tentativas, tenta a próxima
                 if ret_code and not last_err:
                     last_err = f"yt-dlp code {ret_code}"
             except Exception as exc_attempt:
                 last_err = str(exc_attempt)
                 if _recover_alternate_ext_if_needed(output_path) and os.path.getsize(output_path) > 102400:
-                    return {"path": output_path, "error": None}
+                    q_chk = validate_downloaded_video_quality(output_path, min_height=720)
+                    if q_chk.get("is_high_quality") or is_last_attempt:
+                        return {"path": output_path, "error": None}
                 continue
 
         if _recover_alternate_ext_if_needed(output_path):

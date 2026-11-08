@@ -418,6 +418,15 @@ def get_js_runtimes_config() -> Dict[str, Dict[str, str]]:
     return runtimes
 
 
+def get_yt_dlp_remote_components() -> List[str]:
+    """
+    Retorna a lista de componentes remotos necessários para o yt-dlp resolver
+    desafios JavaScript modernos do YouTube (n-challenge / signature cipher)
+    usando o solver EJS oficial com runtime Deno/Node.
+    """
+    return ["ejs:github"]
+
+
 def get_youtube_client_Strategies() -> List[List[str]]:
     """
     Retorna a ordem de perfis de cliente (player_client) do YouTube conforme o ambiente:
@@ -460,6 +469,10 @@ def get_youtube_extractor_args_list(is_live: bool = False) -> List[Dict[str, Any
                 "player_skip": ["webpage", "configs"],
             }
         })
+    else:
+        # No Desktop Local residencial, prioriza os clientes nativos modernos do yt-dlp (tv_samsung, visionos, web) sem restrições
+        out.append({})
+
     for strat in strategies:
         out.append({"youtube": {"player_client": strat}})
     if not is_linux_or_cloud_env():
