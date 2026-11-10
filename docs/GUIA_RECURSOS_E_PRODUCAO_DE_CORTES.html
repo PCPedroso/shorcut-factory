@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ViralCut — Guia Oficial de Recursos & Produção de Cortes</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+  :root {
+    --primary: #4f46e5;
+    --primary-dark: #3730a3;
+    --primary-light: #eef2ff;
+    --success: #059669;
+    --success-light: #ecfdf5;
+    --accent: #0284c7;
+    --accent-light: #f0f9ff;
+    --dark: #0f172a;
+    --text: #1e293b;
+    --text-muted: #64748b;
+    --border: #e2e8f0;
+    --bg-card: #ffffff;
+    --bg-page: #f8fafc;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: var(--bg-page);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 14px;
+    padding: 30px 20px;
+  }
+
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
+    background: #ffffff;
+    border-radius: 14px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+    padding: 40px 50px;
+    border: 1px solid var(--border);
+  }
+
+  /* Header */
+  .header {
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 24px;
+    margin-bottom: 30px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .header-left h1 {
+    font-size: 26px;
+    font-weight: 800;
+    color: var(--dark);
+    letter-spacing: -0.5px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .header-left h1 span {
+    color: var(--primary);
+  }
+  .header-left p {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin-top: 4px;
+  }
+  .header-badge {
+    background: var(--primary-light);
+    color: var(--primary-dark);
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 12px;
+    border: 1px solid #c7d2fe;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* Section Titles */
+  h2 {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--dark);
+    margin: 28px 0 14px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-left: 4px solid var(--primary);
+    padding-left: 10px;
+  }
+
+  h3 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--dark);
+    margin: 18px 0 8px 0;
+  }
+
+  p {
+    margin-bottom: 12px;
+    color: #334155;
+  }
+
+  /* Cards Grid */
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+
+  .grid-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    transition: all 0.2s;
+  }
+  .card:hover {
+    border-color: #cbd5e1;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+  }
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--dark);
+    margin-bottom: 6px;
+  }
+  .card p {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    margin-bottom: 0;
+    line-height: 1.5;
+  }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0 20px 0;
+    font-size: 12.5px;
+  }
+  th, td {
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    background-color: #f1f5f9;
+    color: var(--dark);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+  }
+  tr:hover td {
+    background-color: #f8fafc;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge-success { background: #dcfce7; color: #15803d; }
+  .badge-primary { background: #e0e7ff; color: #4338ca; }
+  .badge-info { background: #e0f2fe; color: #0369a1; }
+
+  /* Tree Diagram */
+  .tree-box {
+    background: #0f172a;
+    color: #e2e8f0;
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    margin: 12px 0 20px 0;
+  }
+  .tree-comment { color: #94a3b8; }
+  .tree-folder { color: #38bdf8; font-weight: 600; }
+  .tree-file { color: #a7f3d0; }
+
+  /* Feature Callout */
+  .callout {
+    background: linear-gradient(135deg, rgba(79, 70, 229, 0.08), rgba(2, 132, 199, 0.05));
+    border: 1px solid #c7d2fe;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin: 16px 0;
+  }
+  .callout-title {
+    font-weight: 700;
+    color: var(--primary-dark);
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .callout p {
+    font-size: 13px;
+    color: #334155;
+    margin-bottom: 0;
+  }
+
+  /* Footer */
+  .footer {
+    border-top: 1px solid var(--border);
+    margin-top: 36px;
+    padding-top: 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+
+  /* Print Styles for PDF */
+  @media print {
+    body {
+      background: #ffffff;
+      padding: 0;
+      font-size: 11.5px;
+    }
+    .container {
+      border: none;
+      box-shadow: none;
+      padding: 15px 25px;
+      max-width: 100%;
+    }
+    .card, tr, .tree-box, .callout {
+      page-break-inside: avoid;
+    }
+    h2 {
+      page-break-after: avoid;
+      margin-top: 20px;
+    }
+    @page {
+      size: A4;
+      margin: 15mm 12mm 15mm 12mm;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <h1>✂️ <span>ViralCut</span> Fábrica de Cortes</h1>
+      <p>Manual Executivo de Recursos, Efeitos & Especificações de Publicação</p>
+    </div>
+    <div class="header-badge">Versão 2026.11 Oficial</div>
+  </div>
+
+  <!-- Intro Callout -->
+  <div class="callout">
+    <div class="callout-title">⚡ Sobre a Plataforma</div>
+    <p>O <b>ViralCut</b> é uma solução integrada de ponta a ponta para automação e enriquecimento de vídeos curtos verticais (9:16) e horizontais (16:9), cobrindo desde a captura em Full HD (1080p), inteligência artificial de fatiamento e retenção, até a entrega do kit viral completo pronto para publicação multi-rede.</p>
+  </div>
+
+  <!-- 1. Métodos de Ingestão -->
+  <h2>1. Métodos de Ingestão e Criação de Cortes</h2>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header">📋 Roteiro JSON Externo</div>
+      <p>Importa arquivo JSON com tabela de cortes, minutagens precisas, notas de viralidade (1-10), riscos, ganchos e enquetes. Possui botão exclusivo para gerar todos os cortes em sequência com 1 clique.</p>
+    </div>
+    <div class="card">
+      <div class="card-header">🤖 Mineração por IA (Ollama / Llama 3)</div>
+      <p>A IA analisa a transcrição completa do áudio, identifica os picos de retenção e polêmica e sugere automaticamente minutagens, títulos atrativos e estimativas de viralidade.</p>
+    </div>
+    <div class="card">
+      <div class="card-header">🎞️ Carrossel Inteligente</div>
+      <p>Fatia automaticamente vídeos longos em partes equilibradas contínuas (Parte 1, Parte 2...) sem cortar frases no meio, ideal para podcasts e séries de conteúdo.</p>
+    </div>
+    <div class="card">
+      <div class="card-header">✂️ Corte Manual Cirúrgico</div>
+      <p>Definição livre de tempo inicial e final (com precisão de centésimos de segundo) auxiliada pelo gráfico de momentos mais assistidos (Heatmap Hotspots do YouTube).</p>
+    </div>
+  </div>
+
+  <!-- 2. Recursos Aplicáveis -->
+  <h2>2. Arsenal de Efeitos e Recursos Aplicáveis ao Corte</h2>
+
+  <h3>📐 Enquadramento e Proporção de Tela</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Formato / Modo</th>
+        <th>Resolução</th>
+        <th>Descrição e Benefício</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>9:16 Vertical Nativo</b></td>
+        <td><span class="badge badge-primary">1080x1920</span></td>
+        <td>Corte vertical padrão otimizado para preenchimento total de tela em smartphones.</td>
+      </tr>
+      <tr>
+        <td><b>16:9 Horizontal HD</b></td>
+        <td><span class="badge badge-info">1920x1080</span></td>
+        <td>Formato widescreen tradicional com controles de zoom e remoção de bordas pretas (ROI).</td>
+      </tr>
+      <tr>
+        <td><b>9:16 Smart Blur</b></td>
+        <td><span class="badge badge-primary">1080x1920</span></td>
+        <td>Mantém o vídeo centralizado e preenche as barras superior/inferior com desfoque gaussiano suave.</td>
+      </tr>
+      <tr>
+        <td><b>Auto-Zoom Facial (BlazeFace)</b></td>
+        <td><span class="badge badge-success">Dinâmico</span></td>
+        <td>Rastreamento contínuo por visão computacional com margem ajustável que mantém o orador no centro.</td>
+      </tr>
+      <tr>
+        <td><b>Split Screen (Câmera Dupla)</b></td>
+        <td><span class="badge badge-primary">1080x1920</span></td>
+        <td>Divide a tela ao meio para exibir simultaneamente dois interlocutores de um debate ou podcast.</td>
+      </tr>
+      <tr>
+        <td><b>Multicam Auto-Switch</b></td>
+        <td><span class="badge badge-success">Dinâmico</span></td>
+        <td>Alterna a câmera ativa automaticamente para o participante que está com a palavra.</td>
+      </tr>
+      <tr>
+        <td><b>Split com Mídia / Slideshow</b></td>
+        <td><span class="badge badge-info">Misto</span></td>
+        <td>Adiciona vídeo secundário de retenção (gameplay) ou carrossel de fotos na metade da tela.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="grid-2">
+    <!-- Legendas & Retenção -->
+    <div>
+      <h3>📝 Legendas & Retenção</h3>
+      <div class="card" style="margin-bottom: 10px;">
+        <div class="card-header">✨ Legenda Dinâmica Karaokê</div>
+        <p>Sincronização palavra por palavra. A palavra ativa acende em cor de destaque (amarelo, ciano, verde neon) sobre contorno preto de alta legibilidade.</p>
+      </div>
+      <div class="card" style="margin-bottom: 10px;">
+        <div class="card-header">🌐 Tradução Automática Multi-idioma</div>
+        <p>Traduz o conteúdo das falas para inglês, espanhol e outros idiomas antes de queimar as legendas no clipe.</p>
+      </div>
+      <div class="card">
+        <div class="card-header">📌 Headline Magnética de Topo</div>
+        <p>Caixa de gancho visual no topo 9:16 com presets de estilo (Connected Bubble, caixa sólida, texto livre) e animações de entrada (Slide, Explosão).</p>
+      </div>
+    </div>
+
+    <!-- Áudio & Branding -->
+    <div>
+      <h3>🎵 Engenharia de Áudio & Branding</h3>
+      <div class="card" style="margin-bottom: 10px;">
+        <div class="card-header">🎧 Sidechain Audio Ducking</div>
+        <p>Mixagem de trilha sonora de fundo inteligente: o volume da música é atenuado automaticamente quando o orador fala e volta a subir nas pausas.</p>
+      </div>
+      <div class="card" style="margin-bottom: 10px;">
+        <div class="card-header">🏷️ Selo Social (@Handle Overlay)</div>
+        <p>Pílula gráfica flutuante com o ícone da rede social (Instagram, TikTok, YouTube, X, Kwai) e o @arroba do criador de conteúdo.</p>
+      </div>
+      <div class="card">
+        <div class="card-header">🖼️ Thumbnails Automáticas por Nitidez</div>
+        <p>Algoritmo de visão computacional varre os frames e seleciona a imagem mais nítida para gerar a capa oficial (thumbnail.jpg) do vídeo.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Pacote Viral -->
+  <h2>3. O Que Vem no Pacote Final do Corte</h2>
+  <p>Ao concluir o corte, o sistema compila uma pasta isolada autossuficiente contendo todos os arquivos e insumos necessários para distribuição:</p>
+
+  <div class="tree-box">
+<span class="tree-folder">data/[video_id]/[pasta_do_corte]/</span>
+├── <span class="tree-file">video.mp4</span>               <span class="tree-comment"># Vídeo renderizado Full HD (1080p) com aceleração NVENC/FFmpeg</span>
+├── <span class="tree-file">thumbnail.jpg</span>           <span class="tree-comment"># Capa principal em alta nitidez gerada para o corte</span>
+├── <span class="tree-file">legendas.srt</span>            <span class="tree-comment"># Arquivo de legendas sincronizadas para upload em separado</span>
+├── <span class="tree-file">transcricao_corte.txt</span>   <span class="tree-comment"># Transcrição integral das falas do corte em texto puro</span>
+├── <span class="tree-file">transcricao_corte.json</span>  <span class="tree-comment"># Transcrição estruturada com timestamps milimétricos</span>
+└── <span class="tree-file">metadados.json</span>          <span class="tree-comment"># Registro técnico com resolução, minutagens e configurações</span>
+  </div>
+
+  <div class="grid-3">
+    <div class="card">
+      <div class="card-header">🏷️ Título & Alternativas</div>
+      <p>Título principal de alto CTR e 3 títulos alternativos para testes A/B nas plataformas.</p>
+    </div>
+    <div class="card">
+      <div class="card-header">📝 Descrição & Hashtags</div>
+      <p>Texto de legenda pronto com chamada para ação (CTA) e conjunto de hashtags balanceadas.</p>
+    </div>
+    <div class="card">
+      <div class="card-header">📊 Enquete de Engajamento</div>
+      <p>Pergunta de debate pronta para fixar no primeiro comentário ou na aba comunidade.</p>
+    </div>
+  </div>
+
+  <!-- 4. Publicação & Integrações -->
+  <h2>4. Canais de Publicação e Automações</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Destino</th>
+        <th>Tipo de Envio</th>
+        <th>Funcionalidades</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>Galeria Local (Aba 4)</b></td>
+        <td>Visualização & Download</td>
+        <td>Player integrado, download direto com 1 clique de vídeos e capas, e botão de abrir pasta no Explorer.</td>
+      </tr>
+      <tr>
+        <td><b>YouTube Shorts</b></td>
+        <td>API Oficial do YouTube</td>
+        <td>Upload direto com definição de privacidade (Público, Não Listado, Rascunho Privado).</td>
+      </tr>
+      <tr>
+        <td><b>X (Twitter)</b></td>
+        <td>API Oficial do X</td>
+        <td>Postagem de vídeo nativo acompanhado do texto formatado e hashtags.</td>
+      </tr>
+      <tr>
+        <td><b>Webhooks de Automação</b></td>
+        <td>HTTP POST (n8n / Make / Zapier)</td>
+        <td>Despacha payload completo com caminhos de arquivos e textos para fluxos de postagem no Instagram Reels e TikTok.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div>ViralCut — Fábrica de Cortes Inteligente</div>
+    <div>Documento Gerado para Distribuição Técnica & Comercial</div>
+  </div>
+
+</div>
+
+</body>
+</html>
+

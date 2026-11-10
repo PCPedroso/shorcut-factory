@@ -248,6 +248,7 @@ def _render_dispatch_panel(vault: CredentialVault, queue: PublishQueue):
                 available_cuts = cat_data.get("cuts", [])
             elif isinstance(cat_data, dict):
                 from core.cuts_catalog import load_cuts_catalog
+                from core.licensing import check_publishable, STATUS_LABELS, AVISO_DECLARACAO_USUARIO
                 ensured_cat = load_cuts_catalog(active_vid)
                 idx_counter = 1
                 for t_key, c_entry in ensured_cat.items():
@@ -258,6 +259,8 @@ def _render_dispatch_panel(vault: CredentialVault, queue: PublishQueue):
                         for fmt_k, fmt_v in fmts.items():
                             if not isinstance(fmt_v, dict):
                                 continue
+                            vp = fmt_v.get("video_path")
+                            l_chk = check_publishable(video_id=active_vid, cut_key=t_key, video_path=vp)
                             available_cuts.append({
                                 "index": idx_counter,
                                 "title": c_entry.get("title", "Sem Título"),
@@ -266,10 +269,17 @@ def _render_dispatch_panel(vault: CredentialVault, queue: PublishQueue):
                                 "tags_seo": c_entry.get("tags_seo", ""),
                                 "aspect_mode": fmt_k,
                                 "cut_code": fmt_v.get("cut_code") or c_entry.get("cut_code", ""),
-                                "video_path": fmt_v.get("video_path"),
+                                "video_path": vp,
+                                "is_publishable": l_chk.get("ok", False),
+                                "license_status": l_chk.get("licenca", {}).get("status", "nao_verificado"),
+                                "license_label": STATUS_LABELS.get(l_chk.get("licenca", {}).get("status"), "Não verificado"),
+                                "license_origin": l_chk.get("origem_regra", "padrao"),
+                                "license_motivo": l_chk.get("motivo", ""),
                             })
                             idx_counter += 1
                     else:
+                        vp = c_entry.get("video_path") or c_entry.get("cropped_path")
+                        l_chk = check_publishable(video_id=active_vid, cut_key=t_key, video_path=vp)
                         available_cuts.append({
                             "index": idx_counter,
                             "title": c_entry.get("title", "Sem Título"),
@@ -277,7 +287,12 @@ def _render_dispatch_panel(vault: CredentialVault, queue: PublishQueue):
                             "hashtags": c_entry.get("hashtags", []),
                             "tags_seo": c_entry.get("tags_seo", ""),
                             "cut_code": c_entry.get("cut_code", ""),
-                            "video_path": c_entry.get("video_path") or c_entry.get("cropped_path"),
+                            "video_path": vp,
+                            "is_publishable": l_chk.get("ok", False),
+                            "license_status": l_chk.get("licenca", {}).get("status", "nao_verificado"),
+                            "license_label": STATUS_LABELS.get(l_chk.get("licenca", {}).get("status"), "Não verificado"),
+                            "license_origin": l_chk.get("origem_regra", "padrao"),
+                            "license_motivo": l_chk.get("motivo", ""),
                         })
                         idx_counter += 1
         except Exception:
@@ -291,7 +306,9 @@ def _render_dispatch_panel(vault: CredentialVault, queue: PublishQueue):
                 c = available_cuts[idx_val]
                 code_part = f" [{c['cut_code']}]" if c.get("cut_code") else ""
                 fmt_part = f" ({c['aspect_mode']})" if c.get("aspect_mode") else ""
-                return f"Corte #{c.get('index', idx_val)}{code_part}{fmt_part}: {c.get('title', 'Sem Título')}"
+                lic_emoji = "🟢" if c.get("is_publishable") else "🔴"
+                lic_part = f" [{lic_emoji} {c.get('license_label', 'Licença')}]"
+                return f"Corte #{c.get('index', idx_val)}{code_part}{fmt_part}{lic_part}: {c.get('title', 'Sem Título')}"
 
             selected_cut_idx = st.selectbox("Selecione um Corte do Catálogo:", range(len(available_cuts)), format_func=_fmt_cut_opt, key="pub_cut_select")
             chosen_cut = available_cuts[selected_cut_idx]
@@ -299,6 +316,15 @@ def _render_dispatch_panel(vault: CredentialVault, queue: PublishQueue):
                 st.session_state["active_cut_code"] = chosen_cut["cut_code"]
                 _c_code_badge = render_copyable_code_html(chosen_cut['cut_code'], label="Código Exclusivo do Corte:", prefix_icon="🔑", tooltip="Clique para copiar o código deste corte")
                 st.markdown(f'<div style="margin-bottom:6px;">{_c_code_badge}</div>', unsafe_allow_html=True)
+
+            from core.licensing import AVISO_DECLARACAO_USUARIO
+            if not chosen_cut.get("is_publishable"):
+                orig_label = "herdado do vídeo" if chosen_cut.get("license_origin") == "video" else ("definido no corte" if chosen_cut.get("license_origin") == "corte" else "padrão")
+                st.error(f"🛑 **Publicação Bloqueada:** {chosen_cut.get('license_motivo')}\n\n*Status declarado:* **{chosen_cut.get('license_label')}** ({orig_label}).\n\n_{AVISO_DECLARACAO_USUARIO}_")
+            else:
+                orig_label = "herdado do vídeo" if chosen_cut.get("license_origin") == "video" else "definido no corte"
+                st.info(f"✅ **Autorização Declarada:** **{chosen_cut.get('license_label')}** ({orig_label}). _{AVISO_DECLARACAO_USUARIO}_")
+
             chosen_video_path = chosen_cut.get("video_path") or chosen_cut.get("cropped_path")
             default_title = chosen_cut.get("title", "")
             default_desc = chosen_cut.get("description", "")
@@ -386,6 +412,12 @@ def _render_dispatch_panel(vault: CredentialVault, queue: PublishQueue):
         st.caption(f"Será disparado em: `{scheduled_dt_iso}`")
 
     if st.button("🚀 Enfileirar para Publicação Multiplataforma", type="primary", use_container_width=True, key="btn_enqueue_multi"):
+        from core.licensing import check_publishable
+        guard_chk = check_publishable(video_path=chosen_video_path)
+        if not guard_chk.get("ok"):
+            st.error(f"🛑 **Publicação Recusada:** {guard_chk.get('motivo')}")
+            return
+
         if not selected_platforms:
             st.warning("Selecione pelo menos uma plataforma de destino.")
             return

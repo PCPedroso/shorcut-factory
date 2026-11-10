@@ -9,6 +9,7 @@ import json
 import shutil
 import re
 from datetime import datetime
+from typing import Optional, Tuple
 from core.export_kit import build_cut_folder_name
 from core.video_code_manager import allocate_cut_code
 
@@ -1025,5 +1026,59 @@ def register_cuts_from_parsed(video_id: str, parsed: dict) -> int:
 
     save_cuts_catalog(video_id, catalog)
     return count
+
+
+def get_cut_license(video_id: str, cut_key: str) -> Optional[dict]:
+    """Retorna a licença explícita definida na raiz do corte, ou None se herdada do vídeo."""
+    if not video_id or not cut_key:
+        return None
+    from core.licensing import normalize_license
+    catalog = _raw_load_cuts_catalog(video_id)
+    entry = catalog.get(cut_key)
+    if not entry or not isinstance(entry, dict):
+        return None
+    if "licenca" in entry and isinstance(entry["licenca"], dict):
+        return normalize_license(entry["licenca"])
+    return None
+
+
+def set_cut_license(video_id: str, cut_key: str, license_dict: Optional[dict]) -> dict:
+    """Define, atualiza ou remove a licença explícita de um corte no catálogo.
+
+    Se license_dict for None, remove a chave 'licenca' da raiz do corte para que herde do vídeo.
+    Se license_dict for um dicionário, grava na raiz do corte (fora de 'formats').
+    Retorna o dicionário da entrada do corte atualizada.
+    """
+    if not video_id or not cut_key:
+        return {}
+    from core.licensing import normalize_license
+    catalog = _raw_load_cuts_catalog(video_id)
+    entry = catalog.get(cut_key)
+    if not entry or not isinstance(entry, dict):
+        return {}
+
+    if license_dict is None:
+        entry.pop("licenca", None)
+    else:
+        entry["licenca"] = normalize_license(license_dict)
+
+    entry["updated_at"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+    save_cuts_catalog(video_id, catalog)
+    return entry
+
+
+def get_effective_license_for_cut(video_id: str, cut_key: Optional[str]) -> Tuple[dict, str]:
+    """Retorna a licença efetiva de um corte combinando corte e vídeo com regra de herança.
+
+    Retorna:
+        Tuple[licenca_normalizada (dict), origem ("corte" | "video" | "padrao")]
+    """
+    from core.licensing import resolve_effective_license
+    from core.library_manager import get_video_license
+
+    vid_lic = get_video_license(video_id) if video_id else None
+    cut_lic = get_cut_license(video_id, cut_key) if (video_id and cut_key) else None
+    return resolve_effective_license(vid_lic, cut_lic)
+
 
 

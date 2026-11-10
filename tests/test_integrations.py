@@ -5,8 +5,9 @@ from core.integrations import send_to_webhook
 
 class TestIntegrations(unittest.TestCase):
 
+    @patch("core.integrations.check_publishable", return_value={"ok": True, "motivo": "", "licenca": {"status": "proprio"}, "origem_regra": "video", "video_id": "v_test", "cut_key": "k_test"})
     @patch("requests.post")
-    def test_send_to_webhook_success(self, mock_post):
+    def test_send_to_webhook_success(self, mock_post, mock_guard):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.text = '{"status": "ok"}'

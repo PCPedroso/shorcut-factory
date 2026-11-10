@@ -10,6 +10,7 @@ from typing import Optional, Dict
 from .base import Platform, JobStatus
 from .publish_queue import PublishQueue
 from .platform_registry import PlatformRegistry
+from core.licensing import check_publishable
 
 # Intervalo mínimo de segurança (segundos) entre uploads consecutivos na mesma plataforma
 MIN_PLATFORM_INTERVALS = {
@@ -105,6 +106,17 @@ class PublishWorker:
                 job_id,
                 JobStatus.FAILED,
                 error_message=f"Publicador para {plat_enum.display_name} ainda não está registrado ou configurado."
+            )
+            return
+
+        # Revalidação defensiva do guard de Fonte e Licença
+        v_target = payload.get("video_path") or job.get("cut_folder")
+        guard_res = check_publishable(video_path=v_target)
+        if not guard_res.get("ok"):
+            self.queue.update_job_status(
+                job_id,
+                JobStatus.FAILED,
+                error_message="Bloqueado: fonte/licença não verificada"
             )
             return
 

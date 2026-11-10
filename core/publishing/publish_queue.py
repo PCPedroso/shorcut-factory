@@ -10,6 +10,7 @@ import sqlite3
 import datetime
 from typing import Dict, Any, Optional, List, Tuple
 from .base import Platform, JobStatus
+from core.licensing import check_publishable
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
@@ -84,6 +85,16 @@ class PublishQueue:
         """
         plat_val = platform.value if isinstance(platform, Platform) else str(platform)
         
+        # Guard de Fonte e Licença
+        v_target = (payload.get("video_path") if isinstance(payload, dict) else None) or cut_folder
+        guard_res = check_publishable(video_path=v_target)
+        if not guard_res.get("ok"):
+            return {
+                "success": False,
+                "job_id": None,
+                "error": guard_res.get("motivo") or "Bloqueado: fonte/licença não verificada."
+            }
+
         # Deduplicação
         if not force_duplicate and self.is_already_active(cut_folder, plat_val):
             return {

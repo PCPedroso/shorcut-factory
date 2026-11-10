@@ -1932,6 +1932,284 @@ def get_current_active_video_id(url: str = None) -> str:
     return base_vid
 
 
+def render_video_license_form_ui(video_id: str, default_origin_url: str = "", key_prefix: str = "v_lic"):
+    """Renderiza o formulário expansível de Fonte e Licença de Uso para um vídeo de origem."""
+    if not video_id:
+        return
+
+    from core.library_manager import get_video_license, set_video_license
+    from core.licensing import (
+        STATUS_LABELS, STATUS_VALIDOS, validate_license,
+        format_license_for_saving, is_publishable, AVISO_DECLARACAO_USUARIO
+    )
+
+    curr_lic = get_video_license(video_id)
+    cur_status = curr_lic.get("status", "nao_verificado")
+    cur_label = STATUS_LABELS.get(cur_status, "Não verificado")
+    is_pub = is_publishable(curr_lic)
+
+    exp_badge = f"{'🟢' if is_pub else '🔴'} {cur_label}"
+    with st.expander(f"⚖️ Fonte e Licença de Uso: {exp_badge}", expanded=(not is_pub)):
+        st.markdown(f"**Declaração de Origem e Direitos:** `{exp_badge}`")
+        st.caption(f"ℹ️ _{AVISO_DECLARACAO_USUARIO}_")
+
+        cur_idx = STATUS_VALIDOS.index(cur_status) if cur_status in STATUS_VALIDOS else 0
+        sel_status = st.selectbox(
+            "Status da Autorização:",
+            options=STATUS_VALIDOS,
+            index=cur_idx,
+            format_func=lambda s: STATUS_LABELS[s],
+            key=f"{key_prefix}_status_{video_id}",
+            help="Defina se o conteúdo é próprio, de campanha autorizada, licença livre ou autorização direta."
+        )
+
+        origem_default = curr_lic.get("origem") or (default_origin_url if str(default_origin_url).startswith("http") else "")
+        origem_val = st.text_input(
+            "Origem do Material (texto livre ou URL):",
+            value=origem_default,
+            key=f"{key_prefix}_origem_{video_id}",
+            help="Opcional. Link ou identificação da fonte original de onde veio o material."
+        )
+
+        campanha_val = st.text_input(
+            "Nome da Campanha:",
+            value=curr_lic.get("campanha", ""),
+            key=f"{key_prefix}_camp_{video_id}",
+            help="Obrigatório para 'Campanha autorizada'. Ex.: Lançamento Verão 2026."
+        )
+
+        link_val = st.text_input(
+            "Link do Briefing, Licença ou Comprovação:",
+            value=curr_lic.get("link_briefing", ""),
+            key=f"{key_prefix}_link_{video_id}",
+            help="Obrigatório para 'Campanha autorizada' e 'Licença livre'. Deve começar com http:// ou https://."
+        )
+
+        obs_val = st.text_area(
+            "Observação / Declaração:",
+            value=curr_lic.get("observacao", ""),
+            key=f"{key_prefix}_obs_{video_id}",
+            help="Obrigatório para 'Autorização direta do criador' (especifique quem autorizou e como). Opcional para os demais."
+        )
+
+        if st.button("💾 Salvar Declaração de Licença", key=f"{key_prefix}_btn_save_{video_id}", type="primary", use_container_width=True):
+            new_lic = format_license_for_saving(
+                status=sel_status,
+                origem=origem_val,
+                campanha=campanha_val,
+                link_briefing=link_val,
+                observacao=obs_val
+            )
+            errs = validate_license(new_lic)
+            if errs:
+                for err in errs:
+                    st.error(f"❌ {err}")
+            else:
+                set_video_license(video_id, new_lic)
+                st.toast("✅ Declaração de licença salva com sucesso!", icon="⚖️")
+                st.rerun()
+
+
+def render_batch_video_licensing_ui():
+    """Renderiza a ferramenta para regularizar vários vídeos com status não verificado em lote."""
+    from core.library_manager import get_library, get_video_license, set_video_license
+    from core.licensing import (
+        STATUS_LABELS, STATUS_VALIDOS, validate_license,
+        format_license_for_saving, is_publishable, AVISO_DECLARACAO_USUARIO
+    )
+
+    all_lib = get_library()
+    if not all_lib:
+        return
+
+    unverified_vids = []
+    title_map = {}
+    for v in all_lib:
+        vid = v.get("video_id")
+        if not vid:
+            continue
+        v_title = v.get("title") or vid
+        title_map[vid] = v_title
+        v_lic = get_video_license(vid)
+        if not is_publishable(v_lic):
+            unverified_vids.append(vid)
+
+    with st.sidebar.expander(f"⚖️ Regularizar Vídeos em Lote ({len(unverified_vids)} pendentes)", expanded=False):
+        if not unverified_vids:
+            st.success("🎉 Todos os vídeos registrados já possuem declaração de licença!")
+            return
+
+        st.caption("Selecione vídeos com status **Não verificado** para declarar a autorização em lote. Os cortes herdarão automaticamente.")
+        st.caption(f"ℹ️ _{AVISO_DECLARACAO_USUARIO}_")
+
+        selected_vids = st.multiselect(
+            "Vídeos Não Verificados:",
+            options=unverified_vids,
+            default=unverified_vids,
+            format_func=lambda vid: f"🎬 {title_map.get(vid, vid)[:30]}...",
+            key="batch_lic_selected_vids"
+        )
+
+        allowed_status_batch = [s for s in STATUS_VALIDOS if s != "nao_verificado"]
+        sel_status_batch = st.selectbox(
+            "Novo Status para os Selecionados:",
+            options=allowed_status_batch,
+            index=0,
+            format_func=lambda s: STATUS_LABELS[s],
+            key="batch_lic_status"
+        )
+
+        origem_batch = st.text_input(
+            "Origem:",
+            key="batch_lic_origem",
+            help="Opcional. Ex.: Canal oficial, banco de dados interno."
+        )
+
+        campanha_batch = st.text_input(
+            "Nome da Campanha:",
+            key="batch_lic_campanha",
+            help="Obrigatório para 'Campanha autorizada'."
+        )
+
+        link_batch = st.text_input(
+            "Link do Briefing / Licença:",
+            key="batch_lic_link",
+            help="Obrigatório para 'Campanha autorizada' e 'Licença livre'. Deve começar com http:// ou https://."
+        )
+
+        obs_batch = st.text_area(
+            "Observação / Declaração:",
+            key="batch_lic_obs",
+            help="Obrigatório para 'Autorização direta do criador'."
+        )
+
+        if st.button("💾 Aplicar aos Selecionados", key="btn_apply_batch_lic", type="primary", use_container_width=True):
+            if not selected_vids:
+                st.warning("Selecione pelo menos um vídeo para aplicar.")
+                return
+
+            new_lic = format_license_for_saving(
+                status=sel_status_batch,
+                origem=origem_batch,
+                campanha=campanha_batch,
+                link_briefing=link_batch,
+                observacao=obs_batch
+            )
+            errs = validate_license(new_lic)
+            if errs:
+                for err in errs:
+                    st.error(f"❌ {err}")
+            else:
+                for vid in selected_vids:
+                    set_video_license(vid, new_lic)
+                st.toast(f"✅ Declaração de licença aplicada a {len(selected_vids)} vídeo(s)!", icon="⚖️")
+                st.rerun()
+
+
+def render_cut_license_editor_ui(video_id: str, cut_key: str, key_prefix: str = "cut_lic"):
+    """Renderiza a seção de edição de Fonte e Licença de um corte individual na Galeria."""
+    from core.cuts_catalog import get_cut_license, set_cut_license, get_effective_license_for_cut
+    from core.library_manager import get_video_license
+    from core.licensing import (
+        STATUS_LABELS, STATUS_VALIDOS, validate_license,
+        format_license_for_saving, AVISO_DECLARACAO_USUARIO
+    )
+
+    cut_explicit_lic = get_cut_license(video_id, cut_key)
+    vid_lic = get_video_license(video_id)
+    eff_lic, rule_src = get_effective_license_for_cut(video_id, cut_key)
+
+    has_override = (cut_explicit_lic is not None)
+    v_status_label = STATUS_LABELS.get(vid_lic.get("status"), "Não verificado")
+
+    st.markdown("#### ⚖️ Declaração de Fonte e Licença do Corte")
+    st.caption(f"ℹ️ _{AVISO_DECLARACAO_USUARIO}_")
+
+    mode_choice = st.radio(
+        "Modo de Autorização para este Corte:",
+        [
+            f"🔗 Herdar do vídeo de origem ({v_status_label})",
+            "✏️ Definir licença própria deste corte (sobrescrever)"
+        ],
+        index=1 if has_override else 0,
+        key=f"{key_prefix}_mode_{cut_key}"
+    )
+
+    if "Herdar" in mode_choice:
+        st.info(f"Este corte herdará a licença do vídeo de origem: **{v_status_label}**.")
+        if has_override:
+            if st.button("🔄 Remover Sobrescrita (Voltar a Herdar do Vídeo)", key=f"{key_prefix}_btn_remove_override_{cut_key}", type="primary"):
+                set_cut_license(video_id, cut_key, None)
+                st.toast("✅ Sobrescrita removida! O corte agora herda a licença do vídeo.", icon="🔗")
+                st.rerun()
+    else:
+        current_status = (cut_explicit_lic or {}).get("status") or eff_lic.get("status") or "nao_verificado"
+        cur_idx = STATUS_VALIDOS.index(current_status) if current_status in STATUS_VALIDOS else 0
+
+        sel_status = st.selectbox(
+            "Status da Autorização do Corte:",
+            options=STATUS_VALIDOS,
+            index=cur_idx,
+            format_func=lambda s: STATUS_LABELS[s],
+            key=f"{key_prefix}_status_{cut_key}",
+            help="Permite definir uma licença específica para este corte."
+        )
+
+        origem_val = st.text_input(
+            "Origem deste Trecho:",
+            value=(cut_explicit_lic or {}).get("origem", ""),
+            key=f"{key_prefix}_origem_{cut_key}",
+            help="Opcional. Fonte específica de onde veio este corte."
+        )
+
+        campanha_val = st.text_input(
+            "Nome da Campanha:",
+            value=(cut_explicit_lic or {}).get("campanha", ""),
+            key=f"{key_prefix}_camp_{cut_key}",
+            help="Obrigatório para 'Campanha autorizada'."
+        )
+
+        link_val = st.text_input(
+            "Link do Briefing / Licença:",
+            value=(cut_explicit_lic or {}).get("link_briefing", ""),
+            key=f"{key_prefix}_link_{cut_key}",
+            help="Obrigatório para 'Campanha autorizada' e 'Licença livre'. Deve começar com http:// ou https://."
+        )
+
+        obs_val = st.text_area(
+            "Observação / Declaração:",
+            value=(cut_explicit_lic or {}).get("observacao", ""),
+            key=f"{key_prefix}_obs_{cut_key}",
+            help="Obrigatório para 'Autorização direta do criador'."
+        )
+
+        col_cs1, col_cs2 = st.columns(2)
+        with col_cs1:
+            if st.button("💾 Salvar Licença Própria do Corte", key=f"{key_prefix}_btn_save_{cut_key}", type="primary", use_container_width=True):
+                new_lic = format_license_for_saving(
+                    status=sel_status,
+                    origem=origem_val,
+                    campanha=campanha_val,
+                    link_briefing=link_val,
+                    observacao=obs_val
+                )
+                errs = validate_license(new_lic)
+                if errs:
+                    for err in errs:
+                        st.error(f"❌ {err}")
+                else:
+                    set_cut_license(video_id, cut_key, new_lic)
+                    st.toast("✅ Licença do corte salva com sucesso!", icon="⚖️")
+                    st.rerun()
+
+        with col_cs2:
+            if has_override:
+                if st.button("🗑️ Descartar Sobrescrita", key=f"{key_prefix}_btn_discard_{cut_key}", use_container_width=True):
+                    set_cut_license(video_id, cut_key, None)
+                    st.toast("✅ Sobrescrita removida! O corte voltou a herdar do vídeo.", icon="🔗")
+                    st.rerun()
+
+
 @st.fragment
 def render_batch_quick_editor_component(parts_list: list, video_id: str):
     """
@@ -4567,7 +4845,14 @@ if library_videos:
         v_date = v.get("upload_date", "Data N/D")
         v_id = v.get("video_id")
         
-        with st.sidebar.expander(f"🎬 {v_title[:35]}...", expanded=False):
+        from core.library_manager import get_video_license
+        from core.licensing import STATUS_LABELS, is_publishable
+        _v_lic = get_video_license(v_id)
+        _v_is_pub = is_publishable(_v_lic)
+        _v_lic_lbl = STATUS_LABELS.get(_v_lic.get("status"), "Não verificado")
+        _v_icon = "🟢" if _v_is_pub else "🔴"
+
+        with st.sidebar.expander(f"{_v_icon} 🎬 {v_title[:30]}...", expanded=False):
             # Thumbnail sempre servida a partir de copia local: CDNs como pbs.twimg.com (X)
             # bloqueiam hotlink com Referer localhost, deixando a imagem quebrada.
             from core.library_manager import ensure_local_thumbnail
@@ -4578,6 +4863,7 @@ if library_videos:
                 st.image(v["thumbnail"], use_container_width=True)
             _v_code_lib = v.get("video_code") or ensure_project_video_code(v_id, v_title, v.get("url"))
             st.markdown(f"**Título:** {v_title}")
+            st.markdown(f"⚖️ **Licença:** `{_v_icon} {_v_lic_lbl}`")
             if _v_code_lib:
                 st.markdown(f"🔑 **Código:** `{_v_code_lib}`")
             st.markdown(f"📅 **Data:** `{v_date}`")
@@ -4609,6 +4895,9 @@ if library_videos:
                         st.session_state.video_url = ""
                         st.session_state.input_yt_url = ""
                     st.rerun()
+
+    # Ferramenta para regularizar múltiplos vídeos em lote
+    render_batch_video_licensing_ui()
 else:
     st.sidebar.info("Nenhum vídeo registrado ainda. Insira uma URL abaixo para começar!")
 
@@ -5693,6 +5982,10 @@ if show_sec1:
                             st.session_state.transcription_done = False
                             st.rerun()
                 st.divider()
+
+        # ⚖️ Fonte e Licença de Uso do Vídeo Carregado
+        if target_check_id and comp_status.get("has_video"):
+            render_video_license_form_ui(target_check_id, default_origin_url=video_url or "", key_prefix="top_vlic")
 
         # 🌐 Seleção de Legenda Oficial do YouTube (Pré-processamento / Download Avulso)
         selected_yt_sub_lang = None
@@ -7232,6 +7525,9 @@ if _has_media_ready:
                     if s_cur or e_cur:
                         st.caption(f"🎯 **Configurado na Seção 3**: `[{s_cur or '00:00:00.00'} → {e_cur or '...'}]`")
 
+                # ⚖️ Fonte e Licença de Uso do Vídeo Principal
+                if v_id_main:
+                    render_video_license_form_ui(v_id_main, default_origin_url=active_u_main or "", key_prefix="s1_main_vlic")
 
             else:
                 _is_live_s1 = False
@@ -8527,6 +8823,21 @@ if _has_media_ready:
         sec3_b_var = 'score' if st.session_state.get('final_start_time') else 'neutral'
         render_section_header('3', 'Fábrica de Cortes (Recorte Final)', sec3_b_text, sec3_b_var)
         st.markdown("Baixe o vídeo real usando o trecho selecionado.")
+
+        # ⚖️ Aviso Discreto de Fonte e Licença
+        _sec3_url_chk = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
+        _sec3_vid_lic_chk = get_current_active_video_id(_sec3_url_chk) or get_video_id(_sec3_url_chk) or st.session_state.get("active_video_id") or ""
+        if _sec3_vid_lic_chk:
+            from core.library_manager import get_video_license
+            from core.licensing import is_publishable
+            _s3_vlic = get_video_license(_sec3_vid_lic_chk)
+            if not is_publishable(_s3_vlic):
+                st.warning(
+                    "⚖️ **Fonte e Licença: Não verificado.** Este vídeo ainda não possui autorização declarada. "
+                    "Você pode gerar, renderizar e baixar cortes normalmente, mas a publicação externa (YouTube, redes e webhooks) estará bloqueada "
+                    "até que a declaração seja feita na Aba 1 ou na Galeria.",
+                    icon="ℹ️"
+                )
         
         # ── Banner de Carrossel Inteligente no topo da Seção 3 ──────────
         _sec3_url = video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or ""
@@ -13334,46 +13645,56 @@ if _has_media_ready:
                                         key="yt_priv_single"
                                     )
                                     if st.button("Confirmar Upload", key="btn_conf_yt_single", type="primary", use_container_width=True):
-                                        with st.spinner("Enviando vídeo para o canal do YouTube..."):
-                                            yt_res = upload_to_youtube_shorts(
-                                                video_path=package_res["video_dest_path"],
-                                                title=cut_title_val,
-                                                description=cut_desc_val,
-                                                tags=cut_hashtags_val.split(),
-                                                privacy_status=yt_priv,
-                                                client_secrets_path=_cfg.get("youtube_client_secrets_path")
-                                            )
-                                            if yt_res.get("success"):
-                                                st.success(f"🎉 Publicado com sucesso! [Ver no Shorts]({yt_res.get('url')})")
-                                            else:
-                                                st.error(f"Erro no upload: {yt_res.get('error')}")
+                                        from core.licensing import check_publishable
+                                        _chk_s = check_publishable(video_path=package_res["video_dest_path"])
+                                        if not _chk_s.get("ok"):
+                                            st.error(f"🛑 Publicação bloqueada: {_chk_s.get('motivo')}")
+                                        else:
+                                            with st.spinner("Enviando vídeo para o canal do YouTube..."):
+                                                yt_res = upload_to_youtube_shorts(
+                                                    video_path=package_res["video_dest_path"],
+                                                    title=cut_title_val,
+                                                    description=cut_desc_val,
+                                                    tags=cut_hashtags_val.split(),
+                                                    privacy_status=yt_priv,
+                                                    client_secrets_path=_cfg.get("youtube_client_secrets_path")
+                                                )
+                                                if yt_res.get("success"):
+                                                    st.success(f"🎉 Publicado com sucesso! [Ver no Shorts]({yt_res.get('url')})")
+                                                else:
+                                                    st.error(f"Erro no upload: {yt_res.get('error')}")
                             with col_b3:
                                 if st.button("📡 Disparar Webhook", key="btn_send_wh_single", use_container_width=True, help="Envia o pacote com vídeo e metadados para seu webhook configurado (n8n, Make, Zapier)"):
-                                    wh_url = _cfg.get("webhook_url", "")
-                                    if not wh_url:
-                                        st.warning("Configure a URL do Webhook na barra lateral primeiro.")
+                                    from core.licensing import check_publishable
+                                    _chk_w = check_publishable(video_path=package_res["video_dest_path"])
+                                    if not _chk_w.get("ok"):
+                                        st.error(f"🛑 Disparo bloqueado: {_chk_w.get('motivo')}")
                                     else:
-                                        with st.spinner("Despachando para o Webhook..."):
-                                            wh_payload = {
-                                                "event": "cut_ready",
-                                                "video_id": video_id,
-                                                "title": cut_title_val,
-                                                "description": cut_desc_val,
-                                                "hashtags": cut_hashtags_val.split(),
-                                                "tags_seo": cut_tags_seo_val,
-                                                "start_time": start_time,
-                                                "end_time": end_time,
-                                                "aspect_mode": selected_aspect,
-                                                "video_path": package_res["video_dest_path"],
-                                                "video_filename": package_res["video_filename"],
-                                                "folder_path": package_res["package_dir"],
-                                                "original_video": orig_info
-                                            }
-                                            wh_res = send_to_webhook(wh_url, wh_payload, auth_header=_cfg.get("webhook_auth_header", ""))
-                                            if wh_res.get("success"):
-                                                st.success(f"✅ Webhook acionado! HTTP {wh_res.get('status_code')}")
-                                            else:
-                                                st.error(f"Falha no webhook: {wh_res.get('error')}")
+                                        wh_url = _cfg.get("webhook_url", "")
+                                        if not wh_url:
+                                            st.warning("Configure a URL do Webhook na barra lateral primeiro.")
+                                        else:
+                                            with st.spinner("Despachando para o Webhook..."):
+                                                wh_payload = {
+                                                    "event": "cut_ready",
+                                                    "video_id": video_id,
+                                                    "title": cut_title_val,
+                                                    "description": cut_desc_val,
+                                                    "hashtags": cut_hashtags_val.split(),
+                                                    "tags_seo": cut_tags_seo_val,
+                                                    "start_time": start_time,
+                                                    "end_time": end_time,
+                                                    "aspect_mode": selected_aspect,
+                                                    "video_path": package_res["video_dest_path"],
+                                                    "video_filename": package_res["video_filename"],
+                                                    "folder_path": package_res["package_dir"],
+                                                    "original_video": orig_info
+                                                }
+                                                wh_res = send_to_webhook(wh_url, wh_payload, auth_header=_cfg.get("webhook_auth_header", ""))
+                                                if wh_res.get("success"):
+                                                    st.success(f"✅ Webhook acionado! HTTP {wh_res.get('status_code')}")
+                                                else:
+                                                    st.error(f"Falha no webhook: {wh_res.get('error')}")
     
                             # Ferramenta de Edição Rápida / Ajuste Fino
                             render_quick_editor_component(package_res["video_dest_path"], f"newly_rendered_{video_id}_{start_time}_{end_time}_{selected_aspect}")
@@ -13451,9 +13772,19 @@ if _has_media_ready:
                     st.caption(f"📁 Total de **{len(catalog_gal)}** minutagens e instâncias registradas no catálogo.")
                 for c_idx, (t_key, cut_item) in enumerate(catalog_gal.items()):
                     with st.container():
+                        # Resolve licença efetiva do corte para exibição de selo
+                        from core.cuts_catalog import get_effective_license_for_cut
+                        from core.licensing import STATUS_LABELS, is_publishable
+                        _gal_eff_lic, _gal_rule_src = get_effective_license_for_cut(_vid_id_gal, t_key)
+                        _gal_eff_stat = _gal_eff_lic.get("status", "nao_verificado")
+                        _gal_eff_label = STATUS_LABELS.get(_gal_eff_stat, "Não verificado")
+                        _gal_is_pub = is_publishable(_gal_eff_lic)
+                        _gal_src_txt = "herdado do vídeo" if _gal_rule_src == "video" else ("definido no corte" if _gal_rule_src == "corte" else "padrão")
+                        _gal_lic_icon = "🟢" if _gal_is_pub else "🔴"
+
                         # Cabeçalho do corte com controle de trecho compacto na própria linha
                         st.subheader(f"📌 {cut_item.get('title', 'Corte sem título')}")
-                        col_tr1, col_tr_proj, col_tr2 = st.columns([0.28, 0.32, 0.40])
+                        col_tr1, col_tr_proj, col_tr2 = st.columns([0.25, 0.30, 0.45])
                         with col_tr1:
                             if st.button(f"⏱️ [{cut_item.get('start_time')} → {cut_item.get('end_time')}]", key=f"btn_load_trecho_gal_{c_idx}", help="Clique para carregar este intervalo na Fábrica (Seção 3) e rolar a página até os campos de tempo."):
                                 st.session_state["_pending_start_time"] = cut_item.get('start_time')
@@ -13587,7 +13918,14 @@ if _has_media_ready:
                                         else:
                                             st.error(f"Erro ao criar novo projeto: {proj_res.get('error')}")
                         with col_tr2:
-                            st.markdown(f"<div style='padding-top: 6px; font-size: 0.88rem; color: #a0a0a0;'>• Atualizado em: <code>{cut_item.get('updated_at', 'N/D')}</code></div>", unsafe_allow_html=True)
+                            st.markdown(
+                                f"<div style='padding-top: 6px; font-size: 0.88rem; color: #a0a0a0;'>"
+                                f"• Atualizado: <code>{cut_item.get('updated_at', 'N/D')}</code> &nbsp;|&nbsp; "
+                                f"⚖️ <b>Licença:</b> {_gal_lic_icon} <b>{_gal_eff_label}</b> "
+                                f"<span style='color:#8c8c8c;'>({_gal_src_txt})</span>"
+                                f"</div>",
+                                unsafe_allow_html=True
+                            )
                         
                         # Instâncias de formatos renderizadas para esta minutagem
                         formats_dict = cut_item.get("formats", {})
@@ -13801,6 +14139,13 @@ if _has_media_ready:
                                                 )
 
                             def _render_actions_box(_vf, _fk, _fd, _fb, _fi):
+                                if not _gal_is_pub:
+                                    st.warning(
+                                        f"⚖️ **Status de Publicação: Não verificado** ({_gal_src_txt}). "
+                                        "O download do vídeo está liberado para você conferir localmente, mas postagens automáticas "
+                                        "(YouTube Shorts e Webhooks) estão bloqueadas até a declaração de autorização.",
+                                        icon="ℹ️"
+                                    )
                                 col_b_dl, col_b_newp, col_b_fol, col_b_yt, col_b_wh, col_b_del = st.columns([1.3, 1.4, 1.1, 0.9, 0.9, 0.5])
                                 with col_b_dl:
                                     st.download_button(
@@ -13914,45 +14259,51 @@ if _has_media_ready:
                                             key=f"yt_priv_gal_{c_idx}_{_fi}"
                                         )
                                         if st.button("Enviar", key=f"btn_send_yt_gal_{c_idx}_{_fi}", type="primary", use_container_width=True):
-                                            with st.spinner("Enviando vídeo para o YouTube..."):
-                                                yt_res = upload_to_youtube_shorts(
-                                                    video_path=_vf,
-                                                    title=cut_item.get('title', 'Corte'),
-                                                    description=cut_item.get('description', ''),
-                                                    tags=cut_item.get('hashtags', []),
-                                                    privacy_status=g_yt_priv,
-                                                    client_secrets_path=_cfg.get("youtube_client_secrets_path")
-                                                )
-                                                if yt_res.get("success"):
-                                                    st.success(f"🎉 Publicado! [Ver Shorts]({yt_res.get('url')})")
-                                                else:
-                                                    st.error(f"Erro: {yt_res.get('error')}")
+                                            if not _gal_is_pub:
+                                                st.error(f"🛑 Publicação bloqueada: fonte/licença não verificada ({_gal_eff_label}). Declare a autorização no editor de metadados para liberar.")
+                                            else:
+                                                with st.spinner("Enviando vídeo para o YouTube..."):
+                                                    yt_res = upload_to_youtube_shorts(
+                                                        video_path=_vf,
+                                                        title=cut_item.get('title', 'Corte'),
+                                                        description=cut_item.get('description', ''),
+                                                        tags=cut_item.get('hashtags', []),
+                                                        privacy_status=g_yt_priv,
+                                                        client_secrets_path=_cfg.get("youtube_client_secrets_path")
+                                                    )
+                                                    if yt_res.get("success"):
+                                                        st.success(f"🎉 Publicado! [Ver Shorts]({yt_res.get('url')})")
+                                                    else:
+                                                        st.error(f"Erro: {yt_res.get('error')}")
                                 with col_b_wh:
                                     if st.button("📡 Webhook", key=f"btn_wh_gal_{c_idx}_{_fi}", use_container_width=True, help="Disparar para Webhook (n8n/Make)"):
-                                        wh_url = _cfg.get("webhook_url", "")
-                                        if not wh_url:
-                                            st.warning("Configure o Webhook na barra lateral.")
+                                        if not _gal_is_pub:
+                                            st.error(f"🛑 Disparo bloqueado: fonte/licença não verificada ({_gal_eff_label}). Declare a autorização no editor de metadados para liberar.")
                                         else:
-                                            with st.spinner("Enviando..."):
-                                                wh_payload = {
-                                                    "event": "cut_ready",
-                                                    "video_id": _vid_id_gal,
-                                                    "title": cut_item.get('title', 'Corte'),
-                                                    "description": cut_item.get('description', ''),
-                                                    "hashtags": cut_item.get('hashtags', []),
-                                                    "tags_seo": cut_item.get('tags_seo', ''),
-                                                    "start_time": cut_item.get('start_time'),
-                                                    "end_time": cut_item.get('end_time'),
-                                                    "aspect_mode": _fk,
-                                                    "video_path": _vf,
-                                                    "video_filename": _fd.get("video_filename"),
-                                                    "folder_path": _fd.get("folder_path")
-                                                }
-                                                wh_res = send_to_webhook(wh_url, wh_payload, auth_header=_cfg.get("webhook_auth_header", ""))
-                                                if wh_res.get("success"):
-                                                    st.success(f"✅ OK! HTTP {wh_res.get('status_code')}")
-                                                else:
-                                                    st.error(f"Falha: {wh_res.get('error')}")
+                                            wh_url = _cfg.get("webhook_url", "")
+                                            if not wh_url:
+                                                st.warning("Configure o Webhook na barra lateral.")
+                                            else:
+                                                with st.spinner("Enviando..."):
+                                                    wh_payload = {
+                                                        "event": "cut_ready",
+                                                        "video_id": _vid_id_gal,
+                                                        "title": cut_item.get('title', 'Corte'),
+                                                        "description": cut_item.get('description', ''),
+                                                        "hashtags": cut_item.get('hashtags', []),
+                                                        "tags_seo": cut_item.get('tags_seo', ''),
+                                                        "start_time": cut_item.get('start_time'),
+                                                        "end_time": cut_item.get('end_time'),
+                                                        "aspect_mode": _fk,
+                                                        "video_path": _vf,
+                                                        "video_filename": _fd.get("video_filename"),
+                                                        "folder_path": _fd.get("folder_path")
+                                                    }
+                                                    wh_res = send_to_webhook(wh_url, wh_payload, auth_header=_cfg.get("webhook_auth_header", ""))
+                                                    if wh_res.get("success"):
+                                                        st.success(f"✅ OK! HTTP {wh_res.get('status_code')}")
+                                                    else:
+                                                        st.error(f"Falha: {wh_res.get('error')}")
                                 with col_b_del:
                                     with st.popover("🗑️", use_container_width=True, help=f"Excluir este vídeo ({_fk})"):
                                         st.markdown(f"⚠️ **Excluir {_fb}?**")
@@ -14054,6 +14405,27 @@ if _has_media_ready:
                                             else:
                                                 st.warning("Vídeo não encontrado.")
     
+                        with st.expander("✏️ Editar Metadados, Textos & Licença do Corte"):
+                            _inp_t = st.text_input("Título do Corte:", value=cut_item.get("title", ""), key=f"inp_t_gal_{c_idx}")
+                            _inp_d = st.text_area("Descrição / Legenda:", value=cut_item.get("description", ""), height=100, key=f"inp_d_gal_{c_idx}")
+                            _inp_h = st.text_input("Hashtags:", value=" ".join(cut_item.get("hashtags", [])) if isinstance(cut_item.get("hashtags"), list) else str(cut_item.get("hashtags", "")), key=f"inp_h_gal_{c_idx}")
+                            _inp_s = st.text_input("Tags SEO:", value=cut_item.get("tags_seo", ""), key=f"inp_s_gal_{c_idx}")
+                            if st.button("💾 Salvar Textos e Tags", key=f"btn_save_texts_gal_{c_idx}", use_container_width=True):
+                                update_cut_texts_only(
+                                    video_id=_vid_id_gal,
+                                    start_time=cut_item.get("start_time"),
+                                    end_time=cut_item.get("end_time"),
+                                    title=_inp_t,
+                                    description=_inp_d,
+                                    hashtags=_inp_h.split(),
+                                    tags_seo=_inp_s
+                                )
+                                st.toast("✅ Textos atualizados no catálogo e arquivos do corte!", icon="📝")
+                                st.rerun()
+
+                            st.markdown("---")
+                            render_cut_license_editor_ui(_vid_id_gal, t_key, key_prefix=f"gal_cutlic_{c_idx}")
+
                         with st.expander("📝 Visualizar Textos e Tags de Publicação"):
                             st.markdown(f"**Legenda:**\n```\n{cut_item.get('description', '')}\n```")
                             st.markdown(f"**Hashtags:** `{' '.join(cut_item.get('hashtags', []))}`")

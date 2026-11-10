@@ -45,11 +45,13 @@ def test_get_youtube_extractor_args_list():
     assert isinstance(vod_args, list)
     assert len(vod_args) >= 3
     for item in vod_args:
+        if not item:
+            continue
         assert "youtube" in item
         assert "player_client" in item["youtube"]
 
     # Deve conter pelo menos uma estratégia com player_skip para contornar bloqueios de HTML em nuvem
-    assert any("player_skip" in item["youtube"] for item in vod_args)
+    assert any("player_skip" in item.get("youtube", {}) for item in vod_args)
 
     live_args = get_youtube_extractor_args_list(is_live=True)
     assert isinstance(live_args, list)

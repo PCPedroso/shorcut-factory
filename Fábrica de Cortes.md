@@ -18,7 +18,7 @@ Automatizar a esteira completa de criação, inteligência editorial, recorte e 
 | **Inteligência Editorial** | `Ollama` (Llama 3 local / Qwen) | Análise semântica, detecção Q&A e Kit Viral de Publicação |
 | **Processamento de Vídeo** | `FFmpeg` (com `libass` e NVENC) | Recorte, filtros complexos, sidechain compress, equalização e queima de legendas/overlays |
 | **Configurações & Cache** | JSON local estruturado | Persistência contínua de preferências e catálogo multi-formato |
-| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (284 testes) |
+| **Testes Unitários** | `pytest` | Validação contínua de integridade dos módulos centrais (438 testes) |
 
 ---
 
@@ -516,8 +516,78 @@ A esteira de inteligência artificial segue estritamente as seguintes 6 diretriz
   - **Resolução Cross-Platform de FFmpeg e Runtimes JS (`ensure_ffmpeg_environment`, `get_js_runtimes_config`)**: No Linux/Colab, prioriza `/usr/bin/ffmpeg` (com `ffprobe` integrado para muxing MP4 no `yt-dlp`) e cria automaticamente o link simbólico/alias POSIX `ffmpeg` (sem `.exe`) no diretório do `imageio_ffmpeg`, além de detectar automaticamente `/usr/bin/node` e `deno`.
   - **Estratégia Multi-Cliente Anti-Bloqueio para IPs de Nuvem (`get_youtube_extractor_args_list`, `download_youtube_via_public_mirrors`)**: Em ambientes de datacenter (Google Colab), prioriza clientes `['android_vr', 'tv_embedded', 'ios', 'mweb']` combinados com `player_skip=['webpage', 'configs']` para evitar bloqueios de captcha na página HTML do YouTube, recupera extensões intermediárias (`.mkv`/`.webm` $\to$ `.mp4`) e inclui fallback automático via instâncias espelho públicas (Piped/Invidious).
   - **Streaming & Download de Pastas Adaptativos (`safe_display_video`, `safe_display_audio`, `open_in_file_explorer`, `build_directory_zip_bytes`)**: Em sessões remotas/Colab, desativa automaticamente o redirecionamento para `http://127.0.0.1:<porta>` (transmitindo mídia pelo túnel ativo do Streamlit) e converte os botões de "Abrir Pasta Local" (Windows Explorer) em botões de download imediato do pacote `.zip` da pasta ou arquivo diretamente no navegador, além de adaptar o cofre de credenciais (`CredentialVault`) e a seleção `cuda`/`cpu` (`get_preferred_compute_device`).
-- **🧪 Suíte de 361 Testes Unitários Automatizados (`tests/`)**:
-  - 100% de aprovação e validação contínua via `pytest` (359 aprovados, 2 skipped). Cobertura completa de todos os módulos do pipeline: esteira de publicação multiplataforma (YouTube, Instagram, TikTok, X, Kwai, queue, worker, preflight, caption adapter, vault DPAPI, UI), códigos exclusivos anti-colisão de 11 caracteres para vídeos e cortes (`video_code_manager`), radar shopee (resolução, anti-bloqueio, catálogo, diagnósticos), servidor de streaming HTTP, canvas multicâmera, hotkeys de vídeo, kick.com live stream HLS download & recent_minutes slicing, cadastro e alternância de perfis de canais/redes sociais, time mask, dynamic ingestion rule, carrossel sync, headline drawer, transitions, audio mixer, translator, face tracker, ui theme e export kit.
+- **🧪 Suíte de 438 Testes Unitários Automatizados (`tests/`)**:
+  - 100% de aprovação e validação contínua via `pytest` (436 aprovados, 2 skipped, 0 falhas). Cobertura completa de todos os módulos do pipeline: esteira de publicação multiplataforma (YouTube, Instagram, TikTok, X, Kwai, queue, worker, preflight, caption adapter, vault DPAPI, UI), **licenciamento e fonte/licença** (`test_licensing.py` — 25 testes), códigos exclusivos anti-colisão de 11 caracteres para vídeos e cortes (`video_code_manager`), radar shopee (resolução, anti-bloqueio, catálogo, diagnósticos), servidor de streaming HTTP, canvas multicâmera, hotkeys de vídeo, kick.com live stream HLS download & recent_minutes slicing, cadastro e alternância de perfis de canais/redes sociais, time mask, dynamic ingestion rule, carrossel sync, headline drawer, transitions, audio mixer, translator, face tracker, ui theme e export kit.
+
+---
+
+## 🔐 Recurso: Fonte e Licença
+
+> **Branch:** `feature/fonte-licenca` — implementado a partir da Fase 4.
+
+### Objetivo
+Garantir rastreabilidade e conformidade de direitos autorais: todo vídeo de origem e todo corte possui uma declaração de fonte/licença, e cortes com status "Não verificado" ficam **bloqueados de publicação** em qualquer canal (fila, YouTube, Webhook), podendo apenas ser gerados, visualizados e baixados (com aviso).
+
+---
+
+### Estrutura de Dados
+
+#### Status disponíveis (`core/licensing.py`)
+| Constante | Valor | Rótulo |
+|---|---|---|
+| `STATUS_NAO_VERIFICADO` | `nao_verificado` | 🔴 Não verificado (padrão) |
+| `STATUS_PROPRIO` | `proprio` | 🟢 Conteúdo próprio |
+| `STATUS_CAMPANHA` | `campanha_autorizada` | 🟢 Campanha autorizada |
+| `STATUS_LICENCA_LIVRE` | `licenca_livre` | 🟢 Licença livre (CC / domínio público) |
+| `STATUS_AUTORIZACAO_DIRETA` | `autorizacao_direta` | 🟢 Autorização direta do criador |
+
+#### Armazenamento
+- **Vídeo de origem:** chave `"licenca"` em `data/<video_id>/metadata.json`
+- **Corte:** chave `"licenca"` na raiz do corte em `data/<video_id>/cuts_catalog.json` (fora de `"formats"`)
+
+#### Regra de herança (prioridade decrescente)
+1. Licença do corte (se definida e não `nao_verificado` por sobrescrita explícita)
+2. Licença do vídeo de origem
+3. Padrão: `nao_verificado`
+
+**Ausência da chave** no corte = herdar do vídeo (nunca bloqueia por falta da chave).
+
+#### Fail-safe / Fail-closed
+Qualquer erro de leitura, tipo incorreto ou status desconhecido é normalizado para `nao_verificado` — nunca publica na dúvida.
+
+---
+
+### Módulos Implementados
+
+| Arquivo | Funções adicionadas |
+|---|---|
+| `core/licensing.py` *(novo)* | `normalize_license`, `validate_license`, `is_publishable`, `resolve_effective_license`, `format_license_for_saving`, `resolve_cut_reference_from_path`, `check_publishable` |
+| `core/library_manager.py` | `get_video_license`, `set_video_license`; `add_or_update_video_in_library` preserva `"licenca"` |
+| `core/cuts_catalog.py` | `get_cut_license`, `set_cut_license`, `get_effective_license_for_cut`; `register_cut_instance`, `update_cut_texts_only`, `sync_carrossel_parts_to_catalog` preservam `"licenca"` |
+| `core/publishing/publish_queue.py` | Guard em `enqueue()` — bloqueia antes de salvar job no SQLite |
+| `core/publishing/worker.py` | Guard em `_process_single_job()` — revalida no momento do disparo e marca `FAILED` |
+| `core/integrations.py` | Guard em `upload_to_youtube_shorts()` e `send_to_webhook()` |
+| `core/publishing/ui_tab.py` | Badge de licença nos seletores, banner de status, botão de fila bloqueado com `st.error` |
+| `app.py` | `render_video_license_form_ui`, `render_batch_video_licensing_ui`, `render_cut_license_editor_ui`; badge na sidebar, aviso na Aba 3, proteção na Aba 4 |
+| `tests/test_licensing.py` *(novo)* | 25 testes: validação, fail-safe, herança, persistência, guards de publicação |
+
+---
+
+### Disclaimers exibidos ao usuário
+- **Declaração pessoal:** `"Declaração feita por você. O app não verifica direitos autorais."`
+- **Aviso de bloqueio:** `"⚠️ Este corte não pode ser publicado enquanto a fonte/licença não for verificada."`
+
+---
+
+### Checklist de Validação Manual
+1. Carregar vídeo → verificar badge `🔴 Não verificado` na sidebar.
+2. Aba 1 → preencher formulário de licença → salvar → badge muda para `🟢`.
+3. Aba 3 → renderizar corte com vídeo não verificado → aviso amarelo exibido.
+4. Aba 4 → corte não verificado → botão YouTube/Webhook bloqueado com mensagem de erro.
+5. Aba 4 → `✏️ Editar Metadados... & Licença do Corte` → definir licença do corte → salvar → badge atualiza.
+6. Aba 5 → Fila → tentar enfileirar corte não verificado → erro retornado imediatamente.
+7. Worker → enfileirar corte verificado → alterar para não verificado antes do disparo → job marcado `FAILED`.
+8. `send_to_webhook` com `event != "test_ping"` e vídeo não verificado → retorno `{"success": False}`.
 
 ---
 

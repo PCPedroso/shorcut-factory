@@ -10,6 +10,7 @@ import re
 import hashlib
 import base64
 from datetime import datetime
+from typing import Optional
 
 DATA_DIR = "data"
 LIBRARY_FILE = os.path.join(DATA_DIR, "library.json")
@@ -310,13 +311,24 @@ def add_or_update_video_in_library(
     lib.insert(0, video_entry)
     save_library_list(lib)
 
-    # Salva também dentro da pasta do próprio vídeo
+    # Salva também dentro da pasta do próprio vídeo, mesclando com metadata.json existente
     v_dir = os.path.join(DATA_DIR, video_id)
     os.makedirs(v_dir, exist_ok=True)
-    with open(os.path.join(v_dir, "metadata.json"), "w", encoding="utf-8") as f:
-        json.dump(video_entry, f, ensure_ascii=False, indent=4)
+    meta_path = os.path.join(v_dir, "metadata.json")
+    merged_meta = {}
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    merged_meta.update(loaded)
+        except Exception:
+            pass
+    merged_meta.update(video_entry)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(merged_meta, f, ensure_ascii=False, indent=4)
 
-    return video_entry
+    return merged_meta
 
 
 def remove_video_from_library(video_id: str, delete_folder: bool = True) -> bool:
@@ -618,4 +630,63 @@ def create_project_from_cut_video(
         "video_path": dest_video,
         "url": f"local://{new_video_id}"
     }
+
+
+def get_video_license(video_id: str) -> dict:
+    """Retorna a licença do vídeo de origem normalizada (data/<video_id>/metadata.json).
+
+    Se não houver licença gravada ou se o arquivo não existir, retorna a licença padrão
+    normalizada (status: 'nao_verificado').
+    """
+    from core.licensing import normalize_license, get_default_license
+    if not video_id:
+        return get_default_license()
+    meta_path = os.path.join(DATA_DIR, video_id, "metadata.json")
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            if isinstance(meta, dict) and "licenca" in meta:
+                return normalize_license(meta.get("licenca"))
+        except Exception:
+            pass
+    return get_default_license()
+
+
+def set_video_license(video_id: str, license_dict: Optional[dict]) -> dict:
+    """Define ou atualiza a licença de um vídeo de origem em data/<video_id>/metadata.json.
+
+    Preserva todos os metadados existentes e grava a chave 'licenca' com a estrutura normalizada.
+    Se license_dict for None, remove a chave 'licenca'.
+    Retorna o dicionário de metadados completo do vídeo.
+    """
+    from core.licensing import normalize_license
+    if not video_id:
+        return {}
+    v_dir = os.path.join(DATA_DIR, video_id)
+    os.makedirs(v_dir, exist_ok=True)
+    meta_path = os.path.join(v_dir, "metadata.json")
+    meta = {}
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    meta = loaded
+        except Exception:
+            meta = {}
+
+    if license_dict is None:
+        meta.pop("licenca", None)
+    else:
+        meta["licenca"] = normalize_license(license_dict)
+
+    try:
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=4, ensure_ascii=False)
+    except Exception:
+        pass
+
+    return meta
+
 

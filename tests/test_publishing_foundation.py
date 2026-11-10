@@ -18,15 +18,21 @@ from core.publishing import (
     PublishWorker,
     PlatformRegistry
 )
+import core.publishing.platform_registry as _pr_module
 
 
 class TestPublishingFoundation(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
+        # Limpa o registry global entre testes para evitar contaminação
+        _pr_module._REGISTRY.clear()
+        _pr_module._PUBLISHER_CLASSES.clear()
 
     def tearDown(self):
         self.temp_dir.cleanup()
+        _pr_module._REGISTRY.clear()
+        _pr_module._PUBLISHER_CLASSES.clear()
 
     # ── 1. Enums e Dataclasses ───────────────────────────────────────────────
     def test_platform_enum_properties(self):
@@ -140,7 +146,8 @@ class TestPublishingFoundation(unittest.TestCase):
             self.assertFalse(res_yt.needs_transcode)
 
     # ── 5. PublishQueue ──────────────────────────────────────────────────────
-    def test_publish_queue_lifecycle(self):
+    @patch("core.publishing.publish_queue.check_publishable", return_value={"ok": True, "motivo": "", "licenca": {"status": "proprio"}, "origem_regra": "video", "video_id": "v1", "cut_key": "c1"})
+    def test_publish_queue_lifecycle(self, mock_guard):
         db_path = os.path.join(self.temp_dir.name, "test_queue.db")
         queue = PublishQueue(db_path=db_path)
 
@@ -198,7 +205,8 @@ class TestPublishingFoundation(unittest.TestCase):
         self.assertEqual(stats["published"], 1)
         self.assertEqual(stats["queued"], 0)
 
-    def test_publish_queue_retry_and_cancel(self):
+    @patch("core.publishing.publish_queue.check_publishable", return_value={"ok": True, "motivo": "", "licenca": {"status": "proprio"}, "origem_regra": "video", "video_id": "v1", "cut_key": "c1"})
+    def test_publish_queue_retry_and_cancel(self, mock_guard):
         db_path = os.path.join(self.temp_dir.name, "test_retry.db")
         queue = PublishQueue(db_path=db_path)
 
@@ -225,7 +233,9 @@ class TestPublishingFoundation(unittest.TestCase):
         self.assertEqual(j2["status"], JobStatus.FAILED.value)
 
     # ── 6. PlatformRegistry & Worker ─────────────────────────────────────────
-    def test_platform_registry_and_worker(self):
+    @patch("core.publishing.worker.check_publishable", return_value={"ok": True, "motivo": "", "licenca": {"status": "proprio"}, "origem_regra": "video", "video_id": "v1", "cut_key": "c1"})
+    @patch("core.publishing.publish_queue.check_publishable", return_value={"ok": True, "motivo": "", "licenca": {"status": "proprio"}, "origem_regra": "video", "video_id": "v1", "cut_key": "c1"})
+    def test_platform_registry_and_worker(self, mock_queue_guard, mock_worker_guard):
         # Cria um mock publisher
         mock_publisher = MagicMock(spec=BasePublisher)
         mock_publisher.publish.return_value = PublishResult(

@@ -12,6 +12,7 @@ from googleapiclient.http import MediaFileUpload
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from core.licensing import check_publishable
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -85,6 +86,15 @@ def upload_to_youtube_shorts(
     Faz o upload do vídeo para o canal do YouTube como Shorts através do YouTubePublisher.
     Mantém 100% de compatibilidade retroativa com app.py e scripts existentes.
     """
+    guard_res = check_publishable(video_path=video_path)
+    if not guard_res.get("ok"):
+        return {
+            "success": False,
+            "video_id": None,
+            "url": None,
+            "error": guard_res.get("motivo") or "Bloqueado: fonte/licença não verificada."
+        }
+
     from core.publishing.youtube import YouTubePublisher
     publisher = YouTubePublisher()
     pub_res = publisher.publish(
@@ -126,6 +136,19 @@ def send_to_webhook(
     """
     if not webhook_url or not webhook_url.startswith("http"):
         return {"success": False, "error": "URL de Webhook inválida."}
+
+    # Guard de Fonte e Licença (aplica para payloads de cortes/vídeos)
+    if isinstance(payload, dict) and payload.get("event") != "test_ping":
+        v_target = payload.get("video_path") or payload.get("folder_path")
+        v_id = payload.get("video_id")
+        guard_res = check_publishable(video_id=v_id, video_path=v_target)
+        if not guard_res.get("ok"):
+            return {
+                "success": False,
+                "status_code": None,
+                "response": None,
+                "error": guard_res.get("motivo") or "Bloqueado: fonte/licença não verificada."
+            }
 
     headers = {"Content-Type": "application/json"}
     if auth_header:
