@@ -401,6 +401,181 @@ class TestPublishGuard(unittest.TestCase):
             self.assertFalse(res["success"])
             self.assertIn("Bloqueado", res["error"])
 
+    def test_enqueue_blocks_unverified_records_nothing_in_sqlite(self):
+        """Ajuste 2: Confirma que quando o enqueue recusa, nada é gravado no SQLite."""
+        db_path = os.path.join(self.temp_dir.name, "queue_empty.db")
+        q = PublishQueue(db_path=db_path)
+
+        with patch("core.publishing.publish_queue.check_publishable", return_value={"ok": False, "motivo": "Bloqueado: não verificado"}):
+            res = q.enqueue(
+                cut_folder="VFDBS_cut",
+                platform=Platform.YOUTUBE,
+                cut_title="Teste Bloqueio Sem Gravação",
+                payload={"video_path": "video.mp4"}
+            )
+            self.assertFalse(res["success"])
+            self.assertIsNone(res["job_id"])
+
+        # Confirma no SQLite que zero registros foram gravados
+        with q._get_connection() as conn:
+            cnt = conn.execute("SELECT count(*) as total FROM publishing_jobs;").fetchone()["total"]
+            self.assertEqual(cnt, 0)
+
+    def test_worker_blocked_job_fails_definitively_without_retry(self):
+        """Ajuste 2: Confirma que job bloqueado no worker vai para FAILED definitivo, sem retry e sem reagendar."""
+        db_path = os.path.join(self.temp_dir.name, "queue_worker_definitivo.db")
+        q = PublishQueue(db_path=db_path)
+
+        # 1. Enfileira com licença ok
+        with patch("core.publishing.publish_queue.check_publishable", return_value={"ok": True, "motivo": ""}):
+            res = q.enqueue(
+                cut_folder="VFDBS_cut_definitivo",
+                platform=Platform.YOUTUBE,
+                cut_title="Job Worker Definitivo",
+                payload={"video_path": "video.mp4"}
+            )
+        job_id = res["job_id"]
+        job_before = q.get_job(job_id)
+        sched_before = job_before["scheduled_at"]
+        self.assertEqual(job_before["retry_count"], 0)
+
+        mock_publisher = MagicMock(spec=BasePublisher)
+        PlatformRegistry.register(Platform.YOUTUBE, lambda p: mock_publisher)
+
+        worker = PublishWorker(queue=q, poll_interval_sec=0.1)
+        pending = q.get_pending_jobs(limit=1)
+        self.assertEqual(len(pending), 1)
+
+        # 2. Worker processa sob bloqueio
+        with patch("core.publishing.worker.check_publishable", return_value={"ok": False, "motivo": "Bloqueado: não verificado"}):
+            worker._process_single_job(pending[0])
+
+        # Publisher NUNCA foi chamado
+        mock_publisher.publish.assert_not_called()
+
+        # Job foi para FAILED definitivo
+        job_after = q.get_job(job_id)
+        self.assertEqual(job_after["status"], JobStatus.FAILED.value)
+        # retry_count NÃO foi incrementado
+        self.assertEqual(job_after["retry_count"], 0)
+        # scheduled_at NÃO foi alterado (sem reagendamento)
+        self.assertEqual(job_after["scheduled_at"], sched_before)
+        # Mensagem de bloqueio registrada
+        self.assertIn("Bloqueado: fonte/licença não verificada", job_after["error_message"])
+
+        # Fila de pendentes agora está vazia (worker nunca re-processará este job)
+        pending_after = q.get_pending_jobs(limit=10)
+        self.assertEqual(len(pending_after), 0)
+
+
+class TestCheckPublishableIntegration(unittest.TestCase):
+    """Ajuste 1: Testes de integração do guard check_publishable com resolução de arquivo e catálogo."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.vid = "test_vid_ajuste1"
+        self.data_dir = os.path.join(self.temp_dir.name, "data")
+        self.v_dir = os.path.join(self.data_dir, self.vid)
+        os.makedirs(self.v_dir, exist_ok=True)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_corte_nao_catalogado_is_blocked_fail_closed(self):
+        """Ajuste 1: Caminho em data/<video_id>/ que NÃO casa com nenhum corte é bloqueado com motivo específico."""
+        cat_file = os.path.join(self.v_dir, "cuts_catalog.json")
+        with open(cat_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "00:00:10.00_00:00:20.00": {
+                    "title": "Corte Real",
+                    "formats": {
+                        "9:16_blur": {"video_path": os.path.join(self.v_dir, "VFDBS_cut_real", "video.mp4")}
+                    }
+                }
+            }, f)
+
+        # Vídeo tem licença própria autorizada
+        with patch("core.library_manager.DATA_DIR", self.data_dir), \
+             patch("core.cuts_catalog._get_catalog_path", return_value=cat_file):
+            set_video_license(self.vid, format_license_for_saving(STATUS_PROPRIO))
+
+            # Caminho de arquivo que NÃO está no catálogo
+            unregistered_path = os.path.join(self.v_dir, "VFDBS_cut_fantasma", "arquivo_inexistente.mp4")
+            res = check_publishable(video_path=unregistered_path)
+
+            self.assertFalse(res["ok"])
+            self.assertEqual(res["motivo"], "Corte não encontrado no catálogo do vídeo")
+            self.assertEqual(res["licenca"]["status"], STATUS_NAO_VERIFICADO)
+            self.assertEqual(res["origem_regra"], "padrao")
+            self.assertIsNone(res["cut_key"])
+
+    def test_caminho_fora_de_data_is_blocked(self):
+        """Ajuste 1: Caminho fora da estrutura data/<video_id>/ continua bloqueado."""
+        res = check_publishable(video_path="C:/Temp/video_avulso.mp4")
+        self.assertFalse(res["ok"])
+        self.assertIn("não foi possível identificar a origem do vídeo", res["motivo"])
+        self.assertEqual(res["licenca"]["status"], STATUS_NAO_VERIFICADO)
+
+    def test_caminho_que_casa_com_corte_herda_normalmente(self):
+        """Ajuste 1: Caminho que casa com um corte do catálogo herda a licença do vídeo se o corte não tiver sobrescrita."""
+        target_video_path = os.path.join(self.v_dir, "VFDBS_cut_real", "video.mp4")
+        cat_file = os.path.join(self.v_dir, "cuts_catalog.json")
+        cut_key = "00:00:10.00_00:00:20.00"
+
+        with open(cat_file, "w", encoding="utf-8") as f:
+            json.dump({
+                cut_key: {
+                    "title": "Corte Real",
+                    "formats": {
+                        "9:16_blur": {"video_path": target_video_path}
+                    }
+                }
+            }, f)
+
+        with patch("core.library_manager.DATA_DIR", self.data_dir), \
+             patch("core.cuts_catalog._get_catalog_path", return_value=cat_file):
+            # Vídeo autorizado
+            set_video_license(self.vid, format_license_for_saving(STATUS_PROPRIO, origem="Canal Próprio"))
+
+            res = check_publishable(video_path=target_video_path)
+
+            self.assertTrue(res["ok"])
+            self.assertEqual(res["motivo"], "")
+            self.assertEqual(res["licenca"]["status"], STATUS_PROPRIO)
+            self.assertEqual(res["origem_regra"], "video")
+            self.assertEqual(res["video_id"], self.vid)
+            self.assertEqual(res["cut_key"], cut_key)
+
+    def test_sobrescrita_nao_verificado_no_corte_bloqueia_mesmo_com_video_liberado(self):
+        """Ajuste 1: Corte com sobrescrita nao_verificado continua bloqueado mesmo se o vídeo tiver status próprio."""
+        target_video_path = os.path.join(self.v_dir, "VFDBS_cut_bloqueado", "video.mp4")
+        cat_file = os.path.join(self.v_dir, "cuts_catalog.json")
+        cut_key = "00:00:30.00_00:00:45.00"
+
+        with open(cat_file, "w", encoding="utf-8") as f:
+            json.dump({
+                cut_key: {
+                    "title": "Corte Com Copyright",
+                    "licenca": {"status": STATUS_NAO_VERIFICADO, "observacao": "Música protegida"},
+                    "formats": {
+                        "9:16_blur": {"video_path": target_video_path}
+                    }
+                }
+            }, f)
+
+        with patch("core.library_manager.DATA_DIR", self.data_dir), \
+             patch("core.cuts_catalog._get_catalog_path", return_value=cat_file):
+            # Vídeo liberado
+            set_video_license(self.vid, format_license_for_saving(STATUS_PROPRIO))
+
+            res = check_publishable(video_path=target_video_path)
+
+            self.assertFalse(res["ok"])
+            self.assertEqual(res["licenca"]["status"], STATUS_NAO_VERIFICADO)
+            self.assertEqual(res["origem_regra"], "corte")
+            self.assertEqual(res["video_id"], self.vid)
+            self.assertEqual(res["cut_key"], cut_key)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -237,44 +237,42 @@ def resolve_cut_reference_from_path(video_or_folder_path: str) -> Tuple[Optional
 
     # Tenta resolver o cut_key correspondente no cuts_catalog.json do vídeo
     cut_key: Optional[str] = None
-    catalog_path = os.path.join("data", video_id, "cuts_catalog.json")
-    if os.path.exists(catalog_path):
-        try:
-            with open(catalog_path, "r", encoding="utf-8") as f:
-                catalog = json.load(f)
-            if isinstance(catalog, dict):
-                norm_lower = norm_path.lower()
-                base_name = os.path.basename(norm_lower)
+    try:
+        from core.cuts_catalog import _raw_load_cuts_catalog
+        catalog = _raw_load_cuts_catalog(video_id)
+        if isinstance(catalog, dict):
+            norm_lower = norm_path.lower()
+            base_name = os.path.basename(norm_lower)
 
-                for t_key, entry in catalog.items():
-                    if not isinstance(entry, dict):
-                        continue
+            for t_key, entry in catalog.items():
+                if not isinstance(entry, dict):
+                    continue
 
-                    # 1. Checa formatos renderizados
-                    formats = entry.get("formats", {})
-                    if isinstance(formats, dict):
-                        for fmt_k, fmt_v in formats.items():
-                            if not isinstance(fmt_v, dict):
-                                continue
-                            vp = fmt_v.get("video_path")
-                            fp = fmt_v.get("folder_path")
-                            fn = fmt_v.get("folder_name")
-                            vfn = fmt_v.get("video_filename")
+                # 1. Checa formatos renderizados
+                formats = entry.get("formats", {})
+                if isinstance(formats, dict):
+                    for fmt_k, fmt_v in formats.items():
+                        if not isinstance(fmt_v, dict):
+                            continue
+                        vp = fmt_v.get("video_path")
+                        fp = fmt_v.get("folder_path")
+                        fn = fmt_v.get("folder_name")
+                        vfn = fmt_v.get("video_filename")
 
-                            if vp and os.path.normpath(vp).lower() == norm_lower:
-                                return video_id, t_key
-                            if fp and os.path.normpath(fp).lower() in norm_lower:
-                                return video_id, t_key
-                            if fn and fn.lower() in norm_lower:
-                                return video_id, t_key
-                            if vfn and vfn.lower() == base_name:
-                                return video_id, t_key
+                        if vp and os.path.normpath(vp).lower() == norm_lower:
+                            return video_id, t_key
+                        if fp and os.path.normpath(fp).lower() in norm_lower:
+                            return video_id, t_key
+                        if fn and fn.lower() in norm_lower:
+                            return video_id, t_key
+                        if vfn and vfn.lower() == base_name:
+                            return video_id, t_key
 
-                    # 2. Checa chave direta no caminho
-                    if t_key.lower() in norm_lower:
-                        return video_id, t_key
-        except Exception:
-            pass
+                # 2. Checa chave direta no caminho
+                if t_key.lower() in norm_lower:
+                    return video_id, t_key
+    except Exception:
+        pass
 
     return video_id, cut_key
 
@@ -288,6 +286,7 @@ def check_publishable(
 
     Se video_id ou cut_key não forem informados, deduz a partir de video_path.
     Se não for possível identificar a origem do vídeo, trata como fail-closed (bloqueado).
+    Se o corte não for encontrado no catálogo do vídeo, trata como fail-closed (bloqueado).
 
     Retorna:
     {
@@ -320,7 +319,30 @@ def check_publishable(
             "cut_key": None,
         }
 
-    from core.cuts_catalog import get_effective_license_for_cut
+    # Se o corte não foi resolvido a partir do caminho ou catálogo: fail-closed
+    if not resolved_key:
+        return {
+            "ok": False,
+            "motivo": "Corte não encontrado no catálogo do vídeo",
+            "licenca": get_default_license(),
+            "origem_regra": "padrao",
+            "video_id": resolved_vid,
+            "cut_key": None,
+        }
+
+    from core.cuts_catalog import _raw_load_cuts_catalog, get_effective_license_for_cut
+
+    # Verifica se o corte realmente existe no catálogo do vídeo
+    catalog = _raw_load_cuts_catalog(resolved_vid)
+    if not catalog or resolved_key not in catalog:
+        return {
+            "ok": False,
+            "motivo": "Corte não encontrado no catálogo do vídeo",
+            "licenca": get_default_license(),
+            "origem_regra": "padrao",
+            "video_id": resolved_vid,
+            "cut_key": None,
+        }
 
     effective_lic, rule_source = get_effective_license_for_cut(resolved_vid, resolved_key)
     ok = is_publishable(effective_lic)
