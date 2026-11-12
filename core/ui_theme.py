@@ -299,6 +299,7 @@ WORKFLOW_STEPS = [
     "3. ✂️ Fábrica de Enquadramento 9:16",
     "4. 🎬 Galeria de Cortes & Pós",
     "5. 🚀 Central de Publicação",
+    "6. 📊 Campanhas & Métricas",
     "🛍️ Radar Shopee",
     "🌐 Fluxo Completo (Todas as Seções)"
 ]

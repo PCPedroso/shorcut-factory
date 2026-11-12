@@ -12,6 +12,9 @@ __pycache__/
 
 # Dados locais (áudios, vídeos e transcrições cacheadas)
 data/
+*.db
+*.db-wal
+*.db-shm
 
 # Arquivos temporários
 temp_audio.*

@@ -5056,6 +5056,7 @@ show_sec2 = workflow_step.startswith('2.') or workflow_step.startswith('🌐')
 show_sec3 = workflow_step.startswith('3.') or workflow_step.startswith('🌐')
 show_sec4 = workflow_step.startswith('4.') or workflow_step.startswith('🌐')
 show_sec5 = workflow_step.startswith('5.') or workflow_step.startswith('🌐')
+show_sec6 = workflow_step.startswith('6.') or workflow_step.startswith('🌐')
 show_radar = workflow_step.startswith('🛍️')
 
 # Seção 1
@@ -14492,6 +14493,11 @@ if show_radar:
 # ── SEÇÃO 5: CENTRAL DE PUBLICAÇÃO MULTIPLATAFORMA ─────────────────────────
 if show_sec5:
     render_publishing_tab()
+
+# ── SEÇÃO 6: CAMPANHAS & MÉTRICAS ────────────────────────────────────────────
+if show_sec6:
+    from core.campaigns.ui_tab import render_campaigns_tab
+    render_campaigns_tab()
 
 # ── EMPTY STATE QUANDO NENHUM VÍDEO FOI CARREGADO OU BAIXADO ───────────
 _active_chk_id = get_current_active_video_id(video_url or st.session_state.get("video_url") or st.session_state.get("input_yt_url") or "") or st.session_state.get("active_video_id") or ""

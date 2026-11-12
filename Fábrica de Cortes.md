@@ -622,3 +622,116 @@ Qualquer erro de leitura, tipo incorreto ou status desconhecido é normalizado p
 2. **Regra de Git**: `git commit` normalmente durante o desenvolvimento, mas **`git push` SOMENTE quando o usuário solicitar explicitamente.**
 3. **Ambiente**: Python em Windows com venv em `d:\Repository\shorcut-factory\venv`. Executar comandos com caminhos absolutos para o python/pip do venv.
 4. **Regra de Ingestão Dinâmica & Processamento Cirúrgico Sob Demanda**: Ao receber um link web ou carregar um arquivo local, a esteira realiza apenas a ingestão leve e direta do vídeo completo (`video_full.mp4` + thumbnail e metadados básicos), NUNCA extraindo áudio nem executando transcrição pesada Whisper sobre o vídeo integral previamente. A extração de áudio e a transcrição ocorrem exclusivamente de forma cirúrgica sobre os cortes selecionados (ex: 30s-90s via `ensure_cut_transcript`), garantindo máxima velocidade na ingestão. Caso o usuário deseje utilizar os recursos globais de Mineração Automática por IA (Seção 2 - Llama 3 / Ollama), um card de controle e aviso (Gatekeeper) bloqueia o restante da aba e fornece um botão explícito no topo para disparar a transcrição completa do vídeo via Whisper GPU sob demanda.
+
+---
+
+## 📊 Fase 2: Campanhas & Métricas
+
+> **Branch:** `feature/campanhas-metricas` — implementado a partir da Fase 1 (Fonte e Licença).
+
+### Objetivo
+
+Painel completo de gestão de campanhas de monetização de cortes: cadastro de campanhas com CPM, teto por clipe, comissão, prazo e plataformas aceitas; vínculo de cada publicação a um corte e campanha; lançamento manual de views e ganhos acumulados; métricas analíticas com RPM real e alertas de expiração.
+
+---
+
+### Arquitetura do Módulo
+
+| Arquivo | Responsabilidade |
+|---|---|
+| `core/campaigns/__init__.py` | Pacote — re-exporta todos os símbolos públicos |
+| `core/campaigns/db.py` | SQLite: `get_connection()`, `transaction()`, `init_db()`, migrações via `PRAGMA user_version` |
+| `core/campaigns/money.py` | Regras de negócio puras: parse/format monetário, cálculo bruto/comissão/líquido/RPM, validações |
+| `core/campaigns/repo.py` | `CampaignRepo`: CRUD de campanhas, posts e snapshots; queries analíticas |
+| `core/campaigns/licensing_bridge.py` | Ponte explícita com Fonte/Licença (Decisão 11 / V3): declaração autorizada via briefing |
+| `core/campaigns/export.py` | Exportação em CSV (Decisão 13 / V4): UTF-8 com BOM, delimitador `;`, decimal brasileiro |
+| `core/campaigns/ui_tab.py` | `render_campaigns_tab()`: 4 sub-tabs Streamlit (Campanhas, Publicações, Lançamentos, Resumo) |
+
+---
+
+### Schema SQLite (v1 — `data/campaigns.db`)
+
+> **Nota:** `data/` está no `.gitignore` — o banco de produção não é commitado.
+
+`sql
+campaigns(id, name UNIQUE COLLATE NOCASE, source_name, briefing_url,
+          currency CHECK(BRL|USD), rate_per_1000_cents INTEGER,
+          cap_per_clip_cents INTEGER nullable, fee_bp INTEGER,
+          hold_days INTEGER, starts_on TEXT, ends_on TEXT,
+          status CHECK(ativa|pausada|encerrada), notes, created_at, updated_at)
+
+campaign_platforms(campaign_id FK->campaigns CASCADE, platform,
+                   PK(campaign_id, platform))
+
+posts(id, campaign_id FK->campaigns RESTRICT, video_id, cut_key, cut_title,
+      platform, account_label, post_url UNIQUE nullable, posted_on,
+      currency CHECK(BRL|USD), notes, created_at, updated_at)
+
+view_snapshots(id, post_id FK->posts CASCADE, snapshot_on, views,
+               earnings_cents nullable, note, created_at,
+               UNIQUE(post_id, snapshot_on))
+`
+
+---
+
+### Decisões de Arquitetura
+
+| # | Decisão | Regra |
+|---|---|---|
+| D1 | Centavos INTEGER | Valores monetários sempre em centavos inteiros (nunca REAL/float) |
+| D2 | Sem conversão cambial | BRL e USD sempre separados; `get_totals_by_currency()` nunca converte |
+| D3 | WAL mode | `PRAGMA journal_mode = WAL` para suportar Streamlit multi-thread |
+| D4 | Upsert por data | `record_snapshot()` usa `ON CONFLICT(post_id, snapshot_on) DO UPDATE` |
+| D5 | Currency herdada | Post vinculado a campanha herda a moeda da campanha no `create_post()` |
+| D6 | Campanha com posts | Não pode ser excluída (`delete_campaign()` lança `ValueError`) |
+| D7 | Fail-closed on init | `render_campaigns_tab()` captura exceção do `init_db()` e exibe erro |
+| D8 | Sem FK a JSON | `video_id` e `cut_key` no post são TEXT — não FK para o catálogo JSON |
+
+---
+
+### Fórmulas de Cálculo (`money.calculate_cut_earnings`)
+
+`
+bruto = (views * rate_per_1000_cents + 500) // 1000
+bruto = min(bruto, cap_per_clip_cents)  # se cap definido
+comissao = (bruto * fee_bp + 5000) // 10000
+liquido = bruto - comissao
+considerado = earnings_reported_cents se informado, senão liquido
+rpm_real_cents = considerado * 1000 / views  (None se views=0)
+`
+
+---
+
+### Integração no App
+
+- **`core/ui_theme.py`** — `WORKFLOW_STEPS` agora tem 8 itens (incluindo `"6. 📊 Campanhas & Métricas"`)
+- **`app.py`** — `show_sec6 = workflow_step.startswith('6.') or workflow_step.startswith('🌐')`; renderização logo após Seção 5
+
+---
+
+### Testes (`tests/test_campaigns.py`)
+
+> Padrão: `setUp` com `tempfile.TemporaryDirectory` + `init_db(db_path=...)`, isolamento total por teste.
+
+| Classe | Cobertura |
+|---|---|
+| `TestInitDb` | Criação, idempotência, tabelas, foreign_keys |
+| `TestParseMoneyCents` | Formatos BR, US, símbolos, negativos, None |
+| `TestFormatMoneyCents` | BRL, USD, zero, None, centavo unitário |
+| `TestCalculateCutEarnings` | Bruto, teto, comissão, considerado, RPM, liberação |
+| `TestDates` | parse, format BR, is_expired, days_until |
+| `TestValidateCampaignData` | Nome, moeda, rate, plataformas, datas, URL, fee, status |
+| `TestValidatePostData` | Plataforma, data, URL |
+| `TestValidateSnapshotData` | Views, data futura, earnings negativo |
+| `TestCampaignCRUD` | CRUD completo, nome duplicado, USD, deleção com posts |
+| `TestPostCRUD` | CRUD, herança de moeda, URL duplicada, cascade delete |
+| `TestViewSnapshots` | Upsert, decréscimo (warning), earning, delete cascade |
+| `TestMetrics` | get_post_with_metrics, list, totals by currency, by campaign, by platform |
+| `TestAlerts` | Expiring soon, encerradas ignoradas, stale posts, recente ok |
+| `TestLicensingBridge` | Exigência de briefing, validação, gravação em corte/vídeo, confirmação de substituição |
+| `TestExportCSV` | UTF-8 com BOM, delimitador `;`, decimal com vírgula, datas DD/MM/AAAA |
+| `TestCutRemoved` | Corte removido ou renomeado no app não quebra telas nem consultas |
+| `TestNumericalExampleDecision8` | Exemplo numérico exato da Decisão 8 (12345 views, teto 1500, fee 10%) |
+| `TestConcurrencyWAL` | Duas conexões concorrentes gravando em sequência com journal_mode=WAL |
+
+**Total de testes da suite após Fase 2: 570 passed, 2 skipped (126 testes dedicados a Campanhas & Métricas)**
