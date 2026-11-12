@@ -391,6 +391,35 @@ class TestPublishGuard(unittest.TestCase):
             self.assertIn("Bloqueado", res["error"])
             mock_post.assert_not_called()
 
+    @patch("requests.post")
+    def test_send_to_webhook_test_ping_without_media_bypasses_guard(self, mock_post):
+        """Ajuste 6: ping sem mídia (sem video_path, folder_path nem video_id) faz bypass do guard."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = '{"ok": true}'
+        mock_post.return_value = mock_response
+
+        with patch("core.integrations.check_publishable") as mock_chk:
+            res = send_to_webhook(
+                webhook_url="https://example.com/wh",
+                payload={"event": "test_ping", "msg": "hello"}
+            )
+            self.assertTrue(res["success"])
+            mock_chk.assert_not_called()
+            mock_post.assert_called_once()
+
+    @patch("requests.post")
+    def test_send_to_webhook_test_ping_with_unverified_media_is_blocked(self, mock_post):
+        """Ajuste 6: ping com video_path de corte nao_verificado é bloqueado pelo guard."""
+        with patch("core.integrations.check_publishable", return_value={"ok": False, "motivo": "Bloqueado: sem licenca"}):
+            res = send_to_webhook(
+                webhook_url="https://example.com/wh",
+                payload={"event": "test_ping", "video_path": "corte.mp4"}
+            )
+            self.assertFalse(res["success"])
+            self.assertIn("Bloqueado", res["error"])
+            mock_post.assert_not_called()
+
     def test_upload_to_youtube_shorts_blocks_unverified(self):
         with patch("core.integrations.check_publishable", return_value={"ok": False, "motivo": "Bloqueado: sem licenca"}):
             res = upload_to_youtube_shorts(

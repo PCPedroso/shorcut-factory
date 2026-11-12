@@ -138,7 +138,10 @@ def send_to_webhook(
         return {"success": False, "error": "URL de Webhook inválida."}
 
     # Guard de Fonte e Licença (aplica para payloads de cortes/vídeos)
-    if isinstance(payload, dict) and payload.get("event") != "test_ping":
+    # Ajuste 6: bypass para 'test_ping' só vale quando NÃO traz video_path, folder_path nem video_id
+    has_media = bool(isinstance(payload, dict) and (payload.get("video_path") or payload.get("folder_path") or payload.get("video_id")))
+    is_pure_ping = isinstance(payload, dict) and payload.get("event") == "test_ping" and not has_media
+    if isinstance(payload, dict) and not is_pure_ping:
         v_target = payload.get("video_path") or payload.get("folder_path")
         v_id = payload.get("video_id")
         guard_res = check_publishable(video_id=v_id, video_path=v_target)
